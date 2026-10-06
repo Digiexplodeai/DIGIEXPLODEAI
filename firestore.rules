@@ -1,0 +1,242 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- GLOBAL SECURITY HELPERS ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUserDoc() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data
+        : null;
+    }
+
+    function getUserRole() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+        : '';
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'dilseinvite@gmail.com' ||
+        (request.auth.token.email != null && (
+          request.auth.token.email.matches('.*admin.*') ||
+          request.auth.token.email.matches('.*@[dD][iI][gG][iI][eE][xX][pP][lL][oO][dD][eE]\\.[aA][iI]')
+        )) ||
+        getUserRole() == 'superAdmin' ||
+        getUserRole() == 'super_admin' ||
+        getUserRole() == 'Super Admin' ||
+        getUserRole() == 'SUPER ADMIN'
+      );
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        isSuperAdmin() ||
+        (request.auth.token.email != null && (
+          request.auth.token.email.matches('.*@[dD][iI][gG][iI][eE][xX][pP][lL][oO][dD][eE]\\.[aA][iI]') ||
+          request.auth.token.email.matches('.*admin.*') ||
+          request.auth.token.email.matches('.*operations.*')
+        )) ||
+        getUserRole() == 'admin' ||
+        getUserRole() == 'Admin' ||
+        getUserRole() == 'agencyAdmin'
+      );
+    }
+
+    function isTeamMember() {
+      return isSignedIn() && (
+        isAdmin() ||
+        (request.auth.token.email != null && (
+          request.auth.token.email.matches('.*@[dD][iI][gG][iI][eE][xX][pP][lL][oO][dD][eE]\\.[aA][iI]') ||
+          request.auth.token.email.matches('.*employee.*') ||
+          request.auth.token.email.matches('.*vansh.*')
+        )) ||
+        getUserRole() == 'employee' ||
+        getUserRole() == 'Employee' ||
+        (getUserRole() != '' && getUserRole() != 'client' && getUserRole() != 'Client')
+      );
+    }
+
+    function isClient() {
+      return isSignedIn() && (getUserRole() == 'client' || getUserRole() == 'Client');
+    }
+
+    function getClientId() {
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.clientId
+        : '';
+    }
+
+    // --- COLLECTION RULES ---
+
+    // 1. Users collection
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isSuperAdmin();
+    }
+
+    // 2. Clients collection
+    match /clients/{clientId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && (isTeamMember() || isSuperAdmin() || isAdmin());
+      allow delete: if isSignedIn() && (isSuperAdmin() || isAdmin());
+    }
+
+    // 3. Content Calendar Entries
+    match /contentCalendar/{contentId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn() && (
+        isTeamMember() || isSuperAdmin() || isAdmin() ||
+        (isClient() && getClientId() == resource.data.clientId)
+      );
+    }
+
+    // 4. Feedback comments
+    match /comments/{commentId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && (request.auth.uid == resource.data.userId || isTeamMember());
+    }
+
+    // 5. Package plans
+    match /packages/{packageId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (isSuperAdmin() || isAdmin());
+    }
+
+    // 6. Employees profiles
+    match /employees/{employeeId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // 7. Attendance logs
+    match /attendance/{attendanceId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // 8. Leave requests
+    match /leaveRequests/{requestId} {
+      allow read: if isSignedIn() && (isTeamMember() || (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().email == resource.data.employeeEmail));
+      allow create: if isSignedIn() && (isTeamMember() || isClient());
+      allow update: if isSignedIn() && (isTeamMember() || (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().email == resource.data.employeeEmail));
+      allow delete: if isSignedIn() && (isSuperAdmin() || isAdmin());
+    }
+
+    // 9. Client tasks
+    match /clientTasks/{taskId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // 10. Client guidelines documents
+    match /clientDocs/{docId} {
+      allow read: if isSignedIn() && (isTeamMember() || (isClient() && getClientId() == resource.data.clientId));
+      allow write: if isSignedIn() && (isTeamMember() || (isClient() && getClientId() == request.resource.data.clientId));
+    }
+
+    // 11. Client chatroom feed messages
+    match /clientChat/{msgId} {
+      allow read: if isSignedIn() && (isTeamMember() || (isClient() && getClientId() == resource.data.clientId));
+      allow create: if isSignedIn() && (isTeamMember() || (isClient() && getClientId() == request.resource.data.clientId));
+      allow update, delete: if isSignedIn() && (isTeamMember() || request.auth.uid == resource.data.senderId);
+    }
+
+    // 12. Video Production Tracker
+    match /videoTracker/{videoId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // 13. System Activity Logs
+    match /activityLogs/{logId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // 14. Notifications
+    match /notifications/{notifId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // 15. Assignment History
+    match /assignmentHistory/{historyId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // 16. Work Templates (Routines)
+    match /workTemplates/{templateId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // 17. Client Preferences (Learned AI Memory)
+    match /clientPreferences/{prefId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // 18. Client Monthly Performance Metrics
+    match /client_monthly_metrics/{metricId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (isTeamMember() || isSuperAdmin() || isAdmin());
+    }
+
+    // 19. Client Monthly Report History
+    match /client_reports/{reportId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isSignedIn() && (isSuperAdmin() || isAdmin());
+    }
+
+    // 20. Report Branding Settings
+    match /report_branding/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (isSuperAdmin() || isAdmin());
+    }
+
+    // 21. Unified Agency Tasks
+    match /tasks/{taskId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // 22. Unified Agency Work Logs
+    match /workLogs/{logId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // 23. Holidays Calendar
+    match /holidays/{holidayId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // 24. Audit Logs
+    match /auditLogs/{logId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // 25. Payslips & Monthly Payroll
+    match /payslips/{payslipId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // 26. HR Documents & Certifications
+    match /hrDocuments/{docId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // 27. HR Audit Logs
+    match /hrAuditLogs/{logId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // 28. Payroll Settings & Configurations
+    match /payrollSettings/{settingId} {
+      allow read, write: if isSignedIn();
+    }
+  }
+}

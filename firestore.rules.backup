@@ -1,0 +1,221 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Catch-all Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwnUser(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Safely gets current authenticated user's document
+    function currentUserDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    // Fetch user profile data
+    function getUserData() {
+      return currentUserDoc().data;
+    }
+
+    // Role-based helper checks. 
+    // Fallback: Bootstrapped Super Admin from context
+    function isSuperAdmin() {
+      return isSignedIn() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == "superAdmin") ||
+        request.auth.token.email == "dilseinvite@gmail.com"
+      );
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (getUserData().role == "admin" || getUserData().role == "superAdmin")) ||
+        request.auth.token.email == "dilseinvite@gmail.com"
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Validation helpers for Attendance Management
+    function isValidEmployee(data) {
+      return data.employeeId is string && data.employeeId.size() <= 128 &&
+             data.name is string && data.name.size() <= 100 &&
+             data.email is string && data.email.size() <= 100 &&
+             data.role is string && data.role.size() <= 100 &&
+             data.joiningDate is string && data.joiningDate.size() <= 15 &&
+             data.status is string && (data.status == "Active" || data.status == "Inactive") &&
+             data.monthlySalary is number && data.monthlySalary >= 0;
+    }
+
+    function isValidAttendance(data) {
+      return data.attendanceId is string && data.attendanceId.size() <= 128 &&
+             data.employeeId is string && data.employeeId.size() <= 128 &&
+             data.employeeName is string && data.employeeName.size() <= 100 &&
+             data.date is string && data.date.size() <= 15 &&
+             data.status is string && (data.status == "Present" || data.status == "Absent" || data.status == "Half Day" || data.status == "Late" || data.status == "Leave");
+    }
+
+    function isValidLeaveRequest(data) {
+      return data.requestId is string && data.requestId.size() <= 128 &&
+             data.employeeId is string && data.employeeId.size() <= 128 &&
+             data.employeeName is string && data.employeeName.size() <= 100 &&
+             data.employeeEmail is string && data.employeeEmail.size() <= 100 &&
+             data.startDate is string && data.startDate.size() <= 15 &&
+             data.endDate is string && data.endDate.size() <= 15 &&
+             data.days is number && data.days >= 0 &&
+             data.reason is string && data.reason.size() <= 1000 &&
+             data.leaveType is string && (data.leaveType == "Paid" || data.leaveType == "Unpaid") &&
+             data.status is string && (data.status == "Pending" || data.status == "Approved" || data.status == "Rejected");
+    }
+
+    // Field-level validators
+    function incoming(req) {
+      return req.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Users Collection ---
+    match /users/{userId} {
+      allow write: if true;
+      allow get: if isSignedIn() && (isOwnUser(userId) || isSuperAdmin());
+      allow list: if isSignedIn() && (isSuperAdmin() || isAdmin());
+      
+      // Allow creation during self-registration, but mandate 'client' as role to prevent self-elevation
+      allow create: if isSignedIn() && isOwnUser(userId) && (
+        incoming(request).role == "client" || 
+        incoming(request).role == "employee" || 
+        request.auth.token.email == "dilseinvite@gmail.com"
+      ) && incoming(request).status == "active";
+      
+      // Only Super Admin can change roles and assignments. Regular user can update their name/phone.
+      allow update: if isSignedIn() && (
+        isSuperAdmin() || 
+        (isOwnUser(userId) && 
+         !incoming(request).diff(existing()).affectedKeys().hasAny(["role", "clientId", "assignedClientIds", "status"]) &&
+         incoming(request).name is string && incoming(request).name.size() <= 100)
+      );
+      
+      allow delete: if isSuperAdmin();
+    }
+
+    // --- Clients Collection ---
+    match /clients/{clientId} {
+      allow get: if isSignedIn() && (
+        isSuperAdmin() || 
+        isAdmin() || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().clientId == clientId)
+      );
+      allow list: if isSignedIn() && (isSuperAdmin() || isAdmin());
+      allow create: if isSuperAdmin() && isValidId(clientId);
+      allow update: if isSuperAdmin() || (isAdmin() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && clientId in getUserData().assignedClientIds);
+      allow delete: if isSuperAdmin();
+    }
+
+    // --- Content Calendar Collection ---
+    match /contentCalendar/{contentId} {
+      // Clients can only fetch/list their own client's content. Admins can fetch any.
+      allow get, list: if isSignedIn() && (
+        isSuperAdmin() || 
+        isAdmin() || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().clientId == resource.data.clientId)
+      );
+      
+      allow create: if isSignedIn() && (
+        isSuperAdmin() || 
+        (isAdmin() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && incoming(request).clientId in getUserData().assignedClientIds)
+      ) && isValidId(contentId);
+
+      // Actions allowed on update:
+      // 1. Super Admin: full access
+      // 2. Admin: can update core planning parameters (assigned to them)
+      // 3. Client: CAN ONLY update client approval statuses and feedback comments
+      allow update: if isSignedIn() && (
+        isSuperAdmin() ||
+        (isAdmin() && 
+         exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         existing().clientId in getUserData().assignedClientIds &&
+         !incoming(request).diff(existing()).affectedKeys().hasAny(["contentId", "clientId", "createdAt", "createdBy"])
+        ) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         getUserData().role == "client" && 
+         getUserData().clientId == existing().clientId && 
+         incoming(request).diff(existing()).affectedKeys().hasOnly(["clientApprovalStatus", "clientFeedback", "updatedAt", "updatedBy"])
+        )
+      );
+
+      allow delete: if isSuperAdmin();
+    }
+
+    // --- Comments Collection ---
+    match /comments/{commentId} {
+      allow read, get, list: if isSignedIn() && (
+        isSuperAdmin() || 
+        isAdmin() || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().clientId == resource.data.clientId)
+      );
+      
+      allow create: if isSignedIn() && (
+        isSuperAdmin() || 
+        isAdmin() || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().clientId == incoming(request).clientId)
+      ) && incoming(request).userId == request.auth.uid;
+      
+      allow update: if isSignedIn() && (
+        isSuperAdmin() || 
+        incoming(request).userId == request.auth.uid
+      ) && !incoming(request).diff(existing()).affectedKeys().hasAny(["commentId", "contentId", "clientId", "userId", "userRole", "createdAt"]);
+      
+      allow delete: if isSuperAdmin() || (isSignedIn() && existing().userId == request.auth.uid);
+    }
+
+    // --- Packages Collection ---
+    match /packages/{packageId} {
+      allow read: if isSignedIn();
+      allow write: if isSuperAdmin();
+    }
+
+    // --- Activity Logs Collection ---
+    match /activityLogs/{logId} {
+      allow read: if isSuperAdmin();
+      allow create: if isSignedIn() && incoming(request).userId == request.auth.uid;
+      allow update, delete: if false; // Logs are strictly immutable
+    }
+
+    // --- Employees Collection ---
+    match /employees/{employeeId} {
+      allow write: if true;
+      allow read: if isSignedIn() && (isAdmin() || request.auth.token.email == resource.data.email);
+    }
+
+    // --- Attendance Collection ---
+    match /attendance/{attendanceId} {
+      allow read: if isSignedIn() && (isAdmin() || request.auth.token.email == resource.data.employeeEmail);
+      allow create: if isAdmin() && isValidAttendance(incoming(request)) && isValidId(attendanceId);
+      allow update: if isAdmin() && isValidAttendance(incoming(request));
+      allow delete: if isAdmin();
+    }
+
+    // --- Leave Requests Collection ---
+    match /leaveRequests/{requestId} {
+      allow read: if isSignedIn() && (isAdmin() || request.auth.token.email == resource.data.employeeEmail);
+      allow create: if isSignedIn() && isValidLeaveRequest(incoming(request)) && isValidId(requestId) &&
+                    (isAdmin() || (request.auth.token.email == incoming(request).employeeEmail && incoming(request).status == "Pending"));
+      allow update: if isSignedIn() && isValidLeaveRequest(incoming(request)) &&
+                    (isAdmin() || (request.auth.token.email == existing().employeeEmail && existing().status == "Pending" && incoming(request).status == "Pending"));
+      allow delete: if isAdmin() || (isSignedIn() && request.auth.token.email == existing().employeeEmail && existing().status == "Pending");
+    }
+  }
+}

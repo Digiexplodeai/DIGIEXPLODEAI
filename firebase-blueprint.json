@@ -1,0 +1,322 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User account information with role controls.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Auth user ID" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "role": { "type": "string", "enum": ["superAdmin", "admin", "client", "employee"] },
+        "clientId": { "type": "string" },
+        "assignedClientIds": { "type": "array" },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "email", "role", "status", "createdAt"]
+    },
+    "Employee": {
+      "title": "Employee Profile",
+      "description": "Information for registered company staff.",
+      "type": "object",
+      "properties": {
+        "employeeId": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "role": { "type": "string", "description": "Job role, e.g., Designer, Developer" },
+        "joiningDate": { "type": "string" },
+        "status": { "type": "string", "enum": ["Active", "Inactive"] },
+        "monthlySalary": { "type": "number" },
+        "userId": { "type": "string", "description": "Linked Firebase Auth UID if registered" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["employeeId", "name", "email", "role", "joiningDate", "status", "monthlySalary", "createdAt"]
+    },
+    "Attendance": {
+      "title": "Daily Attendance",
+      "description": "Daily clock-in and status record for staff.",
+      "type": "object",
+      "properties": {
+        "attendanceId": { "type": "string" },
+        "employeeId": { "type": "string" },
+        "employeeName": { "type": "string" },
+        "date": { "type": "string", "description": "Format YYYY-MM-DD" },
+        "status": { "type": "string", "enum": ["Present", "Absent", "Half Day", "Late", "Leave"] },
+        "checkIn": { "type": "string", "description": "Clock in time HH:MM" },
+        "checkOut": { "type": "string", "description": "Clock out time HH:MM" },
+        "isLate": { "type": "boolean" },
+        "markedAt": { "type": "string", "format": "date-time" },
+        "markedBy": { "type": "string" }
+      },
+      "required": ["attendanceId", "employeeId", "employeeName", "date", "status", "markedAt"]
+    },
+    "LeaveRequest": {
+      "title": "Leave Request",
+      "description": "Leave application requested by staff.",
+      "type": "object",
+      "properties": {
+        "requestId": { "type": "string" },
+        "employeeId": { "type": "string" },
+        "employeeName": { "type": "string" },
+        "employeeEmail": { "type": "string" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "days": { "type": "number" },
+        "reason": { "type": "string" },
+        "leaveType": { "type": "string", "enum": ["Paid", "Unpaid"] },
+        "status": { "type": "string", "enum": ["Pending", "Approved", "Rejected"] },
+        "approvedBy": { "type": "string" },
+        "reviewedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["requestId", "employeeId", "employeeName", "employeeEmail", "startDate", "endDate", "days", "reason", "leaveType", "status", "createdAt"]
+    },
+    "Client": {
+      "title": "Client Management",
+      "description": "Represents a brand/business managed by DigiexplodeAI.",
+      "type": "object",
+      "properties": {
+        "clientId": { "type": "string", "description": "Unique Client document identifier" },
+        "clientName": { "type": "string" },
+        "businessName": { "type": "string" },
+        "category": { "type": "string" },
+        "contactPerson": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "package": { "type": "string" },
+        "startDate": { "type": "string" },
+        "status": { "type": "string", "enum": ["Active", "Paused", "Completed"] },
+        "assignedAdminId": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["clientId", "clientName", "businessName", "contactPerson", "email", "package", "status", "createdAt"]
+    },
+    "ContentEntry": {
+      "title": "Content Calendar Entry",
+      "description": "Represents a planned, designed or posted piece of social media media/post.",
+      "type": "object",
+      "properties": {
+        "contentId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "date": { "type": "string" },
+        "time": { "type": "string" },
+        "month": { "type": "string" },
+        "year": { "type": "number" },
+        "platform": { "type": "string" },
+        "contentType": { "type": "string" },
+        "topic": { "type": "string" },
+        "caption": { "type": "string" },
+        "hashtags": { "type": "string" },
+        "designBrief": { "type": "string" },
+        "creativeLink": { "type": "string" },
+        "videoLink": { "type": "string" },
+        "canvaLink": { "type": "string" },
+        "driveLink": { "type": "string" },
+        "status": { "type": "string" },
+        "postedStatus": { "type": "string" },
+        "postedDate": { "type": "string" },
+        "postedBy": { "type": "string" },
+        "clientApprovalStatus": { "type": "string" },
+        "clientFeedback": { "type": "string" },
+        "internalNotes": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "updatedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["contentId", "clientId", "clientName", "date", "platform", "contentType", "topic", "status", "postedStatus", "clientApprovalStatus", "createdBy", "createdAt"]
+    },
+    "Comment": {
+      "title": "Feedback Comment",
+      "description": "Feedback or queries posted on specific calendar content entries.",
+      "type": "object",
+      "properties": {
+        "commentId": { "type": "string" },
+        "contentId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userRole": { "type": "string" },
+        "comment": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["commentId", "contentId", "clientId", "userId", "userRole", "comment", "createdAt"]
+    },
+    "Package": {
+      "title": "Agency Package Plan",
+      "description": "Preset packages representing Starter, Growth and Premium parameters.",
+      "type": "object",
+      "properties": {
+        "packageId": { "type": "string" },
+        "packageName": { "type": "string" },
+        "monthlyPosts": { "type": "number" },
+        "monthlyVideos": { "type": "number" },
+        "monthlyReels": { "type": "number" },
+        "monthlyStories": { "type": "number" },
+        "platforms": { "type": "array" },
+        "notes": { "type": "string" }
+      },
+      "required": ["packageId", "packageName", "monthlyPosts", "platforms"]
+    },
+    "ActivityLog": {
+      "title": "System Activity Log",
+      "description": "Historical track log for audit trail purposes.",
+      "type": "object",
+      "properties": {
+        "logId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userRole": { "type": "string" },
+        "action": { "type": "string" },
+        "details": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["logId", "userId", "userName", "userRole", "action", "details", "createdAt"]
+    },
+    "ClientTask": {
+      "title": "ClickUp Client Task",
+      "description": "A task card within a client's ClickUp-style space.",
+      "type": "object",
+      "properties": {
+        "taskId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["To Do", "In Progress", "In Review", "Done"] },
+        "priority": { "type": "string", "enum": ["Low", "Medium", "High", "Urgent"] },
+        "assigneeId": { "type": "string" },
+        "assigneeName": { "type": "string" },
+        "dueDate": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["taskId", "clientId", "title", "status", "priority", "createdAt"]
+    },
+    "ClientDoc": {
+      "title": "Client Brand Doc Wiki",
+      "description": "Brand tone guidelines and official links.",
+      "type": "object",
+      "properties": {
+        "docId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "brandVoice": { "type": "string" },
+        "hexColors": { "type": "array" },
+        "driveLinks": { "type": "string" },
+        "generalGuidelines": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["docId", "clientId", "updatedAt"]
+    },
+    "ClientChat": {
+      "title": "Client Workspace Chat Msg",
+      "description": "A collaborative message in the client workspace chat feed.",
+      "type": "object",
+      "properties": {
+        "msgId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderRole": { "type": "string" },
+        "message": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["msgId", "clientId", "senderId", "senderName", "senderRole", "message", "createdAt"]
+    },
+    "VideoTrackerEntry": {
+      "title": "Video Production Tracker Entry",
+      "description": "Information about a scheduled and produced client video asset.",
+      "type": "object",
+      "properties": {
+        "videoId": { "type": "string" },
+        "videoNo": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "videoType": { "type": "string", "enum": ["Reel", "Testimonial", "Educational", "Motion Graphics", "Promo Video"] },
+        "topic": { "type": "string" },
+        "recordingDate": { "type": "string" },
+        "recordingTimeSlot": { "type": "string" },
+        "videoLength": { "type": "string" },
+        "recordedBy": { "type": "string" },
+        "shotTakenBy": { "type": "string" },
+        "editedBy": { "type": "string" },
+        "editorAssigned": { "type": "string" },
+        "uploadedBy": { "type": "string" },
+        "recordingTime": { "type": "string" },
+        "editingTime": { "type": "string" },
+        "uploadingTime": { "type": "string" },
+        "totalTurnaroundTime": { "type": "string" },
+        "editingStyle": { "type": "string", "enum": ["Simple Cut", "Motion Graphics", "Voiceover + B-roll", "Cinematic Edit", "Subtitle Edit"] },
+        "deliveryDate": { "type": "string" },
+        "uploadDate": { "type": "string" },
+        "platform": { "type": "string" },
+        "finalVideoLink": { "type": "string" },
+        "rawFootageLink": { "type": "string" },
+        "status": { "type": "string", "enum": ["Pending", "Recorded", "In Editing", "Edited", "Ready for Review", "Delivered", "Uploaded"] },
+        "notes": { "type": "string" },
+        "referenceFileUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["videoId", "videoNo", "clientId", "clientName", "videoType", "topic", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Contains system users indexed by Firebase UID."
+    },
+    "/clients/{clientId}": {
+      "schema": "Client",
+      "description": "Brand profiles managed by DigiexplodeAI."
+    },
+    "/contentCalendar/{contentId}": {
+      "schema": "ContentEntry",
+      "description": "Content planning calendar documents."
+    },
+    "/comments/{commentId}": {
+      "schema": "Comment",
+      "description": "Ad-hoc comments or approvals on calendar events."
+    },
+    "/packages/{packageId}": {
+      "schema": "Package",
+      "description": "Standard service subscription plan thresholds."
+    },
+    "/activityLogs/{logId}": {
+      "schema": "ActivityLog",
+      "description": "Chronological system event logs."
+    },
+    "/employees/{employeeId}": {
+      "schema": "Employee",
+      "description": "Information and salary details for company employees."
+    },
+    "/attendance/{attendanceId}": {
+      "schema": "Attendance",
+      "description": "Daily attendance marking, clock-in, and clock-out logs."
+    },
+    "/leaveRequests/{requestId}": {
+      "schema": "LeaveRequest",
+      "description": "Employee leave application and approval history."
+    },
+    "/clientTasks/{taskId}": {
+      "schema": "ClientTask",
+      "description": "ClickUp tasks mapped per client space."
+    },
+    "/clientDocs/{docId}": {
+      "schema": "ClientDoc",
+      "description": "Brand guidelines documents mapped per client space."
+    },
+    "/clientChat/{msgId}": {
+      "schema": "ClientChat",
+      "description": "Direct workspace chat logs."
+    },
+    "/videoTracker/{videoId}": {
+      "schema": "VideoTrackerEntry",
+      "description": "Video production tracking items."
+    }
+  }
+}

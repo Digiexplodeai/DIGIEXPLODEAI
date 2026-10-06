@@ -1,0 +1,978 @@
+{
+  "auditLogs": [
+    {
+      "audit_id": "audit_1791298054150_r1rfa",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1791298054150_20a6qj",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "action": "Updated",
+      "module": "Roles & Permissions",
+      "entity_type": "permissions",
+      "entity_id": "canonical_role_matrix",
+      "description": "Updated platform role permissions matrix across 15 modules",
+      "metadata": {
+        "updatedAt": "2026-10-06T14:47:34.150Z",
+        "activeModule": "Clients"
+      },
+      "created_at": "2026-10-06T14:47:34.150Z"
+    },
+    {
+      "audit_id": "audit_1791298049441_9ondy",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1791298049441_47ilo4",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "action": "Updated",
+      "module": "Roles & Permissions",
+      "entity_type": "permissions",
+      "entity_id": "canonical_role_matrix",
+      "description": "Updated platform role permissions matrix across 15 modules",
+      "metadata": {
+        "updatedAt": "2026-10-06T14:47:29.440Z",
+        "activeModule": "Clients"
+      },
+      "created_at": "2026-10-06T14:47:29.441Z"
+    },
+    {
+      "audit_id": "audit_test_01",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_test_01",
+      "actor_id": "emp_superadmin",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "action": "Created task",
+      "module": "Tasks & Work",
+      "entity_type": "task",
+      "entity_id": "task_qa_999",
+      "description": "Digiexplode Super Admin (superAdmin) created QA Task #999 for Nexus Coaching",
+      "created_at": "2026-10-06T14:44:22.798Z"
+    }
+  ],
+  "notifications": [
+    {
+      "notification_id": "notif_qa_01",
+      "recipient_member_id": "emp_2",
+      "event_id": "evt_qa_01",
+      "type": "task",
+      "title": "New Task Assigned: Robotic Spine Reel Edits",
+      "message": "Client: Dr. Anupam Jindal · Due: 2026-10-10",
+      "source_type": "task",
+      "source_id": "task_spine_01",
+      "read_at": null,
+      "created_at": "2026-10-06T14:45:39.391Z",
+      "action_tab": "tasks"
+    }
+  ],
+  "permissions": {
+    "Clients": {
+      "superAdmin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": true,
+        "approve": true,
+        "export": true
+      },
+      "admin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": false,
+        "approve": true,
+        "export": true
+      },
+      "teamLeader": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "employee": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "hr": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "accounts": {
+        "view": true,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "client": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      }
+    },
+    "Tasks & Work": {
+      "superAdmin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": true,
+        "approve": true,
+        "export": true
+      },
+      "admin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": true,
+        "approve": true,
+        "export": true
+      },
+      "teamLeader": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": false,
+        "approve": false,
+        "export": true
+      },
+      "employee": {
+        "view": true,
+        "create": false,
+        "edit": true,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "hr": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "accounts": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "client": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      }
+    },
+    "Work Log": {
+      "superAdmin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": true,
+        "approve": true,
+        "export": true
+      },
+      "admin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": true,
+        "approve": true,
+        "export": true
+      },
+      "teamLeader": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": false,
+        "approve": false,
+        "export": true
+      },
+      "employee": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "hr": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "accounts": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "client": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      }
+    },
+    "Content Calendar": {
+      "superAdmin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": true,
+        "approve": true,
+        "export": true
+      },
+      "admin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": true,
+        "approve": true,
+        "export": true
+      },
+      "teamLeader": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": false,
+        "approve": true,
+        "export": false
+      },
+      "employee": {
+        "view": true,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "hr": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "accounts": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "client": {
+        "view": true,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": true,
+        "export": false
+      }
+    },
+    "Video Production": {
+      "superAdmin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": true,
+        "approve": true,
+        "export": true
+      },
+      "admin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": true,
+        "approve": true,
+        "export": true
+      },
+      "teamLeader": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": false,
+        "approve": true,
+        "export": false
+      },
+      "employee": {
+        "view": true,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "hr": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "accounts": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "client": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      }
+    },
+    "Approvals": {
+      "superAdmin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": true,
+        "approve": true,
+        "export": true
+      },
+      "admin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": false,
+        "approve": true,
+        "export": true
+      },
+      "teamLeader": {
+        "view": true,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": true,
+        "export": false
+      },
+      "employee": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "hr": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "accounts": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "client": {
+        "view": true,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": true,
+        "export": false
+      }
+    },
+    "Employees": {
+      "superAdmin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": true,
+        "approve": true,
+        "export": true
+      },
+      "admin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": false,
+        "approve": true,
+        "export": true
+      },
+      "teamLeader": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "employee": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "hr": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": false,
+        "approve": false,
+        "export": true
+      },
+      "accounts": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "client": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      }
+    },
+    "Attendance & Leaves": {
+      "superAdmin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": true,
+        "approve": true,
+        "export": true
+      },
+      "admin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": false,
+        "approve": true,
+        "export": true
+      },
+      "teamLeader": {
+        "view": true,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "employee": {
+        "view": true,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "hr": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": false,
+        "approve": true,
+        "export": true
+      },
+      "accounts": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "client": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      }
+    },
+    "Performance": {
+      "superAdmin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": true,
+        "approve": true,
+        "export": true
+      },
+      "admin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": false,
+        "approve": true,
+        "export": true
+      },
+      "teamLeader": {
+        "view": true,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "employee": {
+        "view": true,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "hr": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "accounts": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "client": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      }
+    },
+    "Reports": {
+      "superAdmin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": true,
+        "approve": true,
+        "export": true
+      },
+      "admin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": false,
+        "approve": true,
+        "export": true
+      },
+      "teamLeader": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": true
+      },
+      "employee": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "hr": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "accounts": {
+        "view": true,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": true
+      },
+      "client": {
+        "view": true,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": true
+      }
+    },
+    "HR Documents": {
+      "superAdmin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": true,
+        "approve": true,
+        "export": true
+      },
+      "admin": {
+        "view": true,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": true,
+        "export": true
+      },
+      "teamLeader": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "employee": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "hr": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": false,
+        "approve": false,
+        "export": true
+      },
+      "accounts": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "client": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      }
+    },
+    "Payroll": {
+      "superAdmin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": true,
+        "approve": true,
+        "export": true
+      },
+      "admin": {
+        "view": true,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": true,
+        "export": true
+      },
+      "teamLeader": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "employee": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "hr": {
+        "view": true,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "accounts": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": false,
+        "approve": true,
+        "export": true
+      },
+      "client": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      }
+    },
+    "SEO Studio": {
+      "superAdmin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": true,
+        "approve": true,
+        "export": true
+      },
+      "admin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": false,
+        "approve": true,
+        "export": true
+      },
+      "teamLeader": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "employee": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "hr": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "accounts": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "client": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      }
+    },
+    "Files & Assets": {
+      "superAdmin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": true,
+        "approve": true,
+        "export": true
+      },
+      "admin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": false,
+        "approve": true,
+        "export": true
+      },
+      "teamLeader": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "employee": {
+        "view": true,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "hr": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "accounts": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "client": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      }
+    },
+    "Settings": {
+      "superAdmin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": true,
+        "approve": true,
+        "export": true
+      },
+      "admin": {
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": false,
+        "approve": true,
+        "export": true
+      },
+      "teamLeader": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "employee": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "hr": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "accounts": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      },
+      "client": {
+        "view": false,
+        "create": false,
+        "edit": false,
+        "delete": false,
+        "approve": false,
+        "export": false
+      }
+    }
+  },
+  "settings": {},
+  "events": [
+    {
+      "event_id": "evt_1791298054150_20a6qj",
+      "event_type": "permissions.updated",
+      "workspace_id": "default_workspace",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "entity_type": "permissions",
+      "entity_id": "canonical_role_matrix",
+      "target_member_ids": [],
+      "timestamp": "2026-10-06T14:47:34.150Z",
+      "metadata": {
+        "updatedAt": "2026-10-06T14:47:34.150Z",
+        "activeModule": "Clients"
+      },
+      "idempotency_key": "permissions.updated_canonical_role_matrix_1791298054150"
+    },
+    {
+      "event_id": "evt_1791298049441_47ilo4",
+      "event_type": "permissions.updated",
+      "workspace_id": "default_workspace",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "entity_type": "permissions",
+      "entity_id": "canonical_role_matrix",
+      "target_member_ids": [],
+      "timestamp": "2026-10-06T14:47:29.441Z",
+      "metadata": {
+        "updatedAt": "2026-10-06T14:47:29.440Z",
+        "activeModule": "Clients"
+      },
+      "idempotency_key": "permissions.updated_canonical_role_matrix_1791298049441"
+    }
+  ]
+}

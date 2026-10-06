@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+    <!-- Primary SEO Meta Tags -->
+    <title>DigiexplodeAI — Premium Web & Mobile Agency | Digital Dreams, Explosive Results</title>
+    <meta name="title" content="DigiexplodeAI — Premium Web & Mobile Agency | Digital Dreams, Explosive Results" />
+    <meta name="description" content="DigiexplodeAI is a premier digital agency building high-performance web applications, mobile apps, AI automation solutions, and explosive social media campaigns." />
+    <meta name="keywords" content="DigiexplodeAI, Web Development Agency, AI Solutions, Custom Web Apps, React Vite Agency, Mobile App Development, UI UX Design, Digital Marketing" />
+    <meta name="author" content="DigiexplodeAI Team" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <link rel="canonical" href="https://digiexplode.ai" />
+
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://digiexplode.ai/" />
+    <meta property="og:title" content="DigiexplodeAI — Digital Dreams, Explosive Results" />
+    <meta property="og:description" content="Transforming visions into high-impact digital experiences with React, AI integrations, custom web apps, and next-gen mobile platforms." />
+    <meta property="og:image" content="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80" />
+
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:url" content="https://digiexplode.ai/" />
+    <meta property="twitter:title" content="DigiexplodeAI — Digital Dreams, Explosive Results" />
+    <meta property="twitter:description" content="Transforming visions into high-impact digital experiences with React, AI integrations, custom web apps, and next-gen mobile platforms." />
+    <meta property="twitter:image" content="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80" />
+
+    <!-- Theme: Persistent Light / Dark Mode support (Default: Dark) -->
+    <script>
+      (function() {
+        try {
+          const v2 = localStorage.getItem('digi_agency_theme_v2');
+          let effectiveTheme = v2;
+          if (!effectiveTheme) {
+            // First time or migrating from old default: default to dark
+            effectiveTheme = 'dark';
+            localStorage.setItem('digi_agency_theme_v2', 'dark');
+            localStorage.setItem('digi_agency_theme', 'dark');
+            localStorage.setItem('theme', 'dark');
+          }
+
+          if (effectiveTheme === 'light') {
+            document.documentElement.classList.remove('dark');
+            document.documentElement.setAttribute('data-theme', 'light');
+          } else if (effectiveTheme === 'system') {
+            if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+              document.documentElement.classList.add('dark');
+              document.documentElement.setAttribute('data-theme', 'dark');
+            } else {
+              document.documentElement.classList.remove('dark');
+              document.documentElement.setAttribute('data-theme', 'light');
+            }
+          } else {
+            // dark by default
+            document.documentElement.classList.add('dark');
+            document.documentElement.setAttribute('data-theme', 'dark');
+          }
+        } catch (e) {
+          document.documentElement.classList.add('dark');
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
+
+    <!-- Tailwind CDN Config with Custom Colors & Typography -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Manrope', '"Plus Jakarta Sans"', 'Inter', 'sans-serif'],
+              display: ['Manrope', '"Space Grotesk"', 'sans-serif'],
+            },
+            colors: {
+              midnight: '#080A12',
+              violet: {
+                DEFAULT: '#6C4CFF',
+                light: '#8A5CFF',
+                dark: '#5835F5',
+              },
+              cobalt: {
+                DEFAULT: '#2563FF',
+                light: '#3B82FF',
+                dark: '#124FE6',
+              },
+              coral: {
+                DEFAULT: '#FF5A5F',
+                light: '#FF7A45',
+                dark: '#E8484D',
+              },
+              lime: {
+                DEFAULT: '#B8F36B',
+                light: '#C7FF63',
+                dark: '#A5E852',
+              },
+              aqua: {
+                DEFAULT: '#39D9C6',
+                light: '#4BE2D0',
+                dark: '#2CB8A8',
+              },
+              lavender: {
+                DEFAULT: '#F3F1FF',
+                light: '#FAF9FF',
+                dark: '#E2DCFF',
+              },
+              ivory: '#FAF9F6',
+              ink: '#11131D',
+              muted: '#9093A0',
+              darkcard: '#15192B',
+              darkborder: 'rgba(255, 255, 255, 0.09)',
+            },
+            boxShadow: {
+              'glow-violet': '0 8px 32px rgba(108, 76, 255, 0.28)',
+              'glow-cobalt': '0 8px 32px rgba(37, 99, 255, 0.25)',
+              'glow-coral': '0 8px 32px rgba(255, 90, 95, 0.25)',
+              'glow-lime': '0 8px 32px rgba(184, 241, 90, 0.22)',
+              'card-lift': '0 16px 48px rgba(17, 19, 29, 0.08), 0 4px 16px rgba(17, 19, 29, 0.04)',
+            }
+          },
+        },
+      }
+    </script>
+
+    <!-- Google Fonts: Manrope (display) + Space Grotesk + Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="/index.css">
+
+    <!-- Global JSON-LD Schema.org Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "DigiexplodeAI",
+      "url": "https://digiexplode.ai",
+      "logo": "https://digiexplode.ai/logo.png",
+      "description": "Premium Website & Mobile App Development Agency specializing in high-performance digital apps, AI integrations, and explosive digital marketing.",
+      "sameAs": [
+        "https://twitter.com/digiexplodeai",
+        "https://linkedin.com/company/digiexplodeai",
+        "https://instagram.com/digiexplodeai"
+      ],
+      "contactPoint": {
+        "@type": "ContactPoint",
+        "telephone": "+91-9876543210",
+        "contactType": "customer service",
+        "availableLanguage": ["English", "Hindi"]
+      }
+    }
+    </script>
+  </head>
+  <body class="antialiased selection:bg-blue-200 selection:text-blue-900 overflow-x-hidden">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>

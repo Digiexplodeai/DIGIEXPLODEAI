@@ -120,11 +120,12 @@ export const Topbar: React.FC<TopbarProps> = ({
           <button
             type="button"
             onClick={onOpenCommandPalette}
-            className="flex items-center justify-between gap-2 w-full max-w-md px-3.5 py-2 bg-[#F7F8FC] dark:bg-[#111728] hover:bg-[#EEF1F6] dark:hover:bg-[#171E31] text-[#7A8496] dark:text-[#828BA1] border border-[#D7DEE9] dark:border-[#293248] rounded-xl text-xs font-semibold shadow-2xs transition-all text-left group cursor-pointer"
+            className="flex items-center justify-between gap-2 w-full max-w-md px-3 py-2 bg-[#F7F8FC] dark:bg-[#111728] hover:bg-[#EEF1F6] dark:hover:bg-[#171E31] text-[#7A8496] dark:text-[#828BA1] border border-[#D7DEE9] dark:border-[#293248] rounded-xl text-xs font-semibold shadow-2xs transition-all text-left group cursor-pointer"
           >
-            <div className="flex items-center gap-2">
-              <Search className="w-4 h-4 text-[#5B4BFF] dark:text-[#806CFF] group-hover:scale-105 transition-transform" />
-              <span className="truncate">Search clients, tasks, employees (Ctrl+K)...</span>
+            <div className="flex items-center gap-2 min-w-0">
+              <Search className="w-4 h-4 shrink-0 text-[#5B4BFF] dark:text-[#806CFF] group-hover:scale-105 transition-transform" />
+              <span className="truncate hidden sm:inline">Search clients, tasks, employees (Ctrl+K)...</span>
+              <span className="truncate sm:hidden">Search...</span>
             </div>
             <kbd className="hidden sm:inline-flex items-center gap-0.5 px-2 py-0.5 text-[10px] font-mono font-bold text-[#7A8496] bg-white dark:bg-[#171E31] border border-[#D7DEE9] dark:border-[#293248] rounded-md shadow-2xs">
               Ctrl K

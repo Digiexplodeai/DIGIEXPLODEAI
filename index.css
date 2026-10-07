@@ -688,6 +688,66 @@ a:hover .arrow-right-hover {
 }
 
 /* ═══════════════════════════════════════════════════════════
+   MOBILE & TOUCH-DEVICE OPTIMIZATIONS
+   ═══════════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+  :root {
+    --section-y: clamp(40px, 6vw, 64px);
+  }
+
+  /* Prevent text size adjustment bug on iOS */
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  /* Smooth momentum scrolling on iOS */
+  .overflow-y-auto, .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Editorial container mobile padding */
+  .editorial-container {
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+
+  /* Better tap targets on mobile */
+  button, a, input, select, textarea {
+    touch-action: manipulation;
+  }
+
+  /* Compact typography on small screens */
+  .display-hero {
+    font-size: clamp(2rem, 8.5vw, 3.25rem) !important;
+    line-height: 1.08 !important;
+    letter-spacing: -0.03em !important;
+  }
+
+  .display-section {
+    font-size: clamp(1.75rem, 6.5vw, 2.5rem) !important;
+    line-height: 1.15 !important;
+  }
+
+  /* Mobile tables horizontal scroll hint */
+  .table-responsive-wrapper {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+}
+
+/* Safe area insets for modern mobile devices (iPhones with notches / home bars) */
+.safe-top {
+  padding-top: max(16px, env(safe-area-inset-top));
+}
+
+.safe-bottom {
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+}
+
+/* ═══════════════════════════════════════════════════════════
    PREFERS-REDUCED-MOTION
    ═══════════════════════════════════════════════════════════ */
 @media (prefers-reduced-motion: reduce) {
@@ -698,3 +758,4 @@ a:hover .arrow-right-hover {
     scroll-behavior: auto !important;
   }
 }
+

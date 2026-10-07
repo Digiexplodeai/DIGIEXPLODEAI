@@ -109,18 +109,18 @@ export const LoginView: React.FC = () => {
     const pass = saPass.trim();
 
     if (!id || !pass) {
-      setSaError("Both Admin ID and Password are required.");
+      setSaError("Please enter both ID (admin) and Password.");
       return;
     }
 
-    const validIds = ["admin", "superadmin", "admin@digiexplode.ai", "superadmin@digiexplode.ai"];
+    const validIds = ["admin", "superadmin", "admin@digiexplode.ai", "superadmin@digiexplode.ai", "dilseinvite@gmail.com"];
     if (!validIds.includes(id)) {
-      setSaError("Invalid Admin ID. Use: admin");
+      setSaError("Invalid ID. Admin ID is: admin");
       return;
     }
 
     if (pass !== "admin123") {
-      setSaError("Wrong password. Access denied.");
+      setSaError("Incorrect password. Password must be: admin123");
       return;
     }
 
@@ -414,10 +414,13 @@ export const LoginView: React.FC = () => {
             {/* Super Admin Credential Prompt */}
             {showSuperAdminPrompt ? (
               <div className="bg-slate-900 border border-[#3557FF]/40 rounded-xl p-4 space-y-3">
-                <p className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-2">
-                  <KeyRound className="w-3.5 h-3.5 text-[#3557FF]" />
-                  Super Admin Authentication
-                </p>
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-2">
+                    <KeyRound className="w-3.5 h-3.5 text-[#3557FF]" />
+                    Super Admin Authentication
+                  </p>
+                  <span className="text-[10px] text-slate-400 font-semibold">ID: admin</span>
+                </div>
                 {saError && (
                   <div className="p-2 bg-red-950/40 border border-red-800/40 text-red-400 text-[10px] font-bold rounded-lg flex items-center gap-1.5">
                     <AlertTriangle className="w-3 h-3 shrink-0" />
@@ -425,35 +428,45 @@ export const LoginView: React.FC = () => {
                   </div>
                 )}
                 <div className="space-y-2">
-                  <div className="relative flex items-center">
-                    <User className="absolute left-3 w-3.5 h-3.5 text-slate-400" />
-                    <input
-                      type="text"
-                      value={saId}
-                      onChange={(e) => setSaId(e.target.value)}
-                      placeholder="Admin ID"
-                      autoFocus
-                      className="w-full text-xs font-medium bg-slate-800 border border-slate-700 p-2.5 pl-9 rounded-lg outline-none text-white placeholder:text-slate-500 focus:border-[#3557FF]"
-                    />
+                  <div>
+                    <label className="block uppercase tracking-wider text-[9px] text-slate-400 mb-1 font-bold">
+                      Admin ID
+                    </label>
+                    <div className="relative flex items-center">
+                      <User className="absolute left-3 w-3.5 h-3.5 text-slate-400" />
+                      <input
+                        type="text"
+                        value={saId}
+                        onChange={(e) => setSaId(e.target.value)}
+                        placeholder="admin"
+                        className="w-full text-xs font-medium bg-slate-800 border border-slate-700 p-2.5 pl-9 rounded-lg outline-none text-white placeholder:text-slate-500 focus:border-[#3557FF]"
+                      />
+                    </div>
                   </div>
-                  <div className="relative flex items-center">
-                    <Lock className="absolute left-3 w-3.5 h-3.5 text-slate-400" />
-                    <input
-                      type="password"
-                      value={saPass}
-                      onChange={(e) => setSaPass(e.target.value)}
-                      placeholder="Password"
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          handleSuperAdminLogin();
-                        }
-                      }}
-                      className="w-full text-xs font-medium bg-slate-800 border border-slate-700 p-2.5 pl-9 rounded-lg outline-none text-white placeholder:text-slate-500 focus:border-[#3557FF]"
-                    />
+                  <div>
+                    <label className="block uppercase tracking-wider text-[9px] text-slate-400 mb-1 font-bold">
+                      Password (admin123)
+                    </label>
+                    <div className="relative flex items-center">
+                      <Lock className="absolute left-3 w-3.5 h-3.5 text-slate-400" />
+                      <input
+                        type="password"
+                        value={saPass}
+                        onChange={(e) => setSaPass(e.target.value)}
+                        placeholder="Enter password..."
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleSuperAdminLogin();
+                          }
+                        }}
+                        className="w-full text-xs font-medium bg-slate-800 border border-slate-700 p-2.5 pl-9 rounded-lg outline-none text-white placeholder:text-slate-500 focus:border-[#3557FF]"
+                      />
+                    </div>
                   </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 pt-1">
                   <button
                     type="button"
                     onClick={() => { setShowSuperAdminPrompt(false); setSaId(''); setSaPass(''); setSaError(null); }}
@@ -468,35 +481,33 @@ export const LoginView: React.FC = () => {
                     disabled={saLoading}
                     className="flex-1 py-2 text-[10px] font-extrabold text-white bg-[#3557FF] hover:bg-[#2544e0] rounded-lg transition-all flex items-center justify-center gap-1.5 uppercase tracking-wide"
                   >
-                    {saLoading ? 'Verifying...' : <><Sparkles className="w-3 h-3" /> Authenticate</>}
+                    {saLoading ? 'Verifying...' : <><Sparkles className="w-3 h-3" /> Login</>}
                   </button>
                 </div>
               </div>
             ) : (
               <button
                 type="button"
-                onClick={() => setShowSuperAdminPrompt(true)}
+                onClick={() => {
+                  setSaId('admin');
+                  setSaPass('');
+                  setSaError(null);
+                  setShowSuperAdminPrompt(true);
+                }}
                 className="w-full py-3 px-4 text-xs font-extrabold text-white bg-[#3557FF] hover:bg-[#2544e0] rounded-xl transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 tracking-wide cursor-pointer"
               >
                 <Sparkles className="w-4 h-4" />
-                Login as Super Admin
+                Login as Super Admin (Password Required)
               </button>
             )}
 
-            <div className="grid grid-cols-3 gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => loginAsDemoRole("admin")}
-                className="py-2 px-2 text-[10px] font-bold text-sky-700 bg-sky-50 dark:bg-sky-950/40 dark:text-sky-300 rounded-lg hover:bg-sky-100 transition-colors text-center"
-              >
-                Agency Admin
-              </button>
+            <div className="grid grid-cols-2 gap-2 pt-1">
               <button
                 type="button"
                 onClick={() => loginAsDemoRole("employee")}
                 className="py-2 px-2 text-[10px] font-bold text-teal-700 bg-teal-50 dark:bg-teal-950/40 dark:text-teal-300 rounded-lg hover:bg-teal-100 transition-colors text-center"
               >
-                Team Member
+                Team Member View
               </button>
               <button
                 type="button"

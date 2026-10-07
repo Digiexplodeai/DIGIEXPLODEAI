@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { Menu, X, ArrowRight, Sparkles } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Menu, X, ArrowRight, Sparkles, Phone, MessageSquare, Briefcase, Layers, Users, Mail, ExternalLink } from 'lucide-react';
 import { siteConfig } from '../../config/site';
 import ThemeToggle from '../UI/ThemeToggle';
 
@@ -9,6 +9,7 @@ const Header: React.FC = () => {
   const [scrolled, setScrolled] = useState(false);
   const [activeSection, setActiveSection] = useState<string>('');
   const location = useLocation();
+  const navigate = useNavigate();
   const [btnOffset, setBtnOffset] = useState({ x: 0, y: 0 });
   const btnRef = useRef<HTMLAnchorElement>(null);
 
@@ -58,7 +59,7 @@ const Header: React.FC = () => {
     };
   }, [isOpen]);
 
-  // Subtle magnetic hover for desktop CTA button
+  // Magnetic hover for desktop CTA button
   const handleMouseMove = (e: React.MouseEvent<HTMLAnchorElement>) => {
     if (!btnRef.current || window.innerWidth < 1024) return;
     const rect = btnRef.current.getBoundingClientRect();
@@ -71,39 +72,55 @@ const Header: React.FC = () => {
     setBtnOffset({ x: 0, y: 0 });
   };
 
+  const handleNavClick = (path: string, isAnchor?: boolean, sectionId?: string) => {
+    setIsOpen(false);
+    if (isAnchor && sectionId) {
+      if (location.pathname === '/') {
+        const el = document.getElementById(sectionId);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth' });
+          return;
+        }
+      } else {
+        navigate(`/#${sectionId}`);
+      }
+    }
+  };
+
   const navLinks = [
-    { label: 'Work',      path: '/projects', isAnchor: false },
-    { label: 'Services',  path: '/#services', isAnchor: true, sectionId: 'services' },
-    { label: 'About',     path: '/about',    isAnchor: false },
-    { label: 'Contact',   path: '/contact',  isAnchor: false },
+    { label: 'Work',      path: '/projects', isAnchor: false, icon: Briefcase, desc: 'Portfolio & Case Studies' },
+    { label: 'Services',  path: '/#services', isAnchor: true, sectionId: 'services', icon: Layers, desc: 'Engineering & Marketing' },
+    { label: 'About',     path: '/about',    isAnchor: false, icon: Users, desc: 'Agency Story & Team' },
+    { label: 'Contact',   path: '/contact',  isAnchor: false, icon: Mail, desc: 'Get in Touch' },
   ];
 
   return (
     <header
-      className="fixed top-0 left-0 w-full z-50 transition-all duration-300"
+      className={`fixed top-0 left-0 w-full z-50 transition-all duration-200 ${
+        isOpen ? 'h-[100dvh] flex flex-col' : ''
+      }`}
       style={{
-        background: scrolled 
-          ? 'var(--bg-page)' 
-          : 'transparent',
-        backdropFilter: 'blur(18px)',
-        WebkitBackdropFilter: 'blur(18px)',
-        borderBottom: scrolled ? '1px solid var(--border-subtle)' : '1px solid transparent',
-        boxShadow: scrolled ? '0 4px 24px rgba(17, 19, 29, 0.05)' : 'none',
+        background: isOpen || scrolled ? 'var(--bg-page)' : 'transparent',
+        backdropFilter: isOpen ? 'none' : (scrolled ? 'blur(18px)' : 'none'),
+        WebkitBackdropFilter: isOpen ? 'none' : (scrolled ? 'blur(18px)' : 'none'),
+        borderBottom: (scrolled || isOpen) ? '1px solid var(--border-subtle)' : '1px solid transparent',
+        boxShadow: scrolled && !isOpen ? '0 4px 24px rgba(17, 19, 29, 0.05)' : 'none',
       }}
     >
       <div
-        className="editorial-container flex items-center justify-between transition-all duration-300"
+        className="editorial-container flex items-center justify-between transition-all duration-200 w-full flex-shrink-0"
         style={{
-          height: scrolled ? '74px' : '78px',
+          height: scrolled ? '72px' : '78px',
         }}
       >
         {/* ── Brand Logo & Wordmark ── */}
         <Link
           to="/"
+          onClick={() => setIsOpen(false)}
           className="flex items-center gap-3 text-decoration-none group flex-shrink-0"
           aria-label="Digiexplode AI Homepage"
         >
-          {/* Prominent brand icon badge */}
+          {/* Brand icon badge */}
           <div
             className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform duration-200 group-hover:scale-105 shadow-md"
             style={{
@@ -116,7 +133,7 @@ const Header: React.FC = () => {
             </svg>
           </div>
 
-          {/* Prominent brand wordmark */}
+          {/* Wordmark */}
           <span 
             className="font-extrabold text-xl sm:text-[22px] tracking-tight transition-colors duration-200 leading-none select-none"
             style={{ 
@@ -128,7 +145,7 @@ const Header: React.FC = () => {
           </span>
         </Link>
 
-        {/* ── Desktop Primary Navigation (Centered & Balanced) ── */}
+        {/* ── Desktop Primary Navigation ── */}
         <nav className="hidden lg:flex items-center gap-1.5 p-1 rounded-2xl bg-black/[0.03] dark:bg-white/[0.04] border border-black/5 dark:border-white/10 backdrop-blur-md">
           {navLinks.map(link => {
             const isRouteActive = !link.isAnchor && location.pathname === link.path;
@@ -150,7 +167,7 @@ const Header: React.FC = () => {
             );
           })}
           
-          {/* Portal Capsule Item (Visually Secondary) */}
+          {/* Portal Capsule */}
           <div className="h-5 w-[1px] bg-black/10 dark:bg-white/10 mx-1" />
           
           <Link
@@ -165,7 +182,7 @@ const Header: React.FC = () => {
           </Link>
         </nav>
 
-        {/* ── Right Utility Actions: Theme Toggle + Primary CTA ── */}
+        {/* ── Desktop CTA ── */}
         <div className="hidden lg:flex items-center gap-3">
           <ThemeToggle className="h-11 w-11" />
           
@@ -184,21 +201,21 @@ const Header: React.FC = () => {
           </Link>
         </div>
 
-        {/* ── Mobile Trigger & Theme Control ── */}
+        {/* ── Mobile Controls (Theme Toggle & Menu Button) ── */}
         <div className="lg:hidden flex items-center gap-2">
           <ThemeToggle className="h-10 w-10" />
           
           <button
             onClick={() => setIsOpen(!isOpen)}
-            className="h-10 w-10 rounded-xl border flex items-center justify-center transition-colors cursor-pointer"
+            className="h-10 w-10 rounded-xl border flex items-center justify-center transition-all cursor-pointer shadow-sm active:scale-95"
             style={{
-              borderColor: 'var(--border-strong)',
-              color: 'var(--text-primary)',
+              borderColor: isOpen ? 'var(--brand-primary)' : 'var(--border-strong)',
+              color: isOpen ? '#6C4CFF' : 'var(--text-primary)',
               background: 'var(--bg-surface)'
             }}
             aria-label={isOpen ? 'Close navigation menu' : 'Open navigation menu'}
           >
-            {isOpen ? <X size={20} /> : <Menu size={20} />}
+            {isOpen ? <X size={22} className="animate-in fade-in" /> : <Menu size={22} />}
           </button>
         </div>
       </div>
@@ -206,58 +223,115 @@ const Header: React.FC = () => {
       {/* ── Mobile Navigation Drawer ── */}
       {isOpen && (
         <div 
-          className="lg:hidden fixed inset-x-0 top-[74px] bottom-0 z-50 flex flex-col justify-between animate-fade-up overflow-y-auto"
+          className="lg:hidden flex-1 flex flex-col justify-between overflow-y-auto w-full px-5 py-5 animate-fade-up"
           style={{
             background: 'var(--bg-page)',
-            borderTop: '1px solid var(--border-subtle)',
-            padding: '24px 20px 40px 20px',
-            boxShadow: '0 24px 48px rgba(17, 19, 29, 0.2)',
           }}
         >
-          <div className="flex flex-col gap-2">
-            {[
-              { label: 'Work', path: '/projects' },
-              { label: 'Services', path: '/#services' },
-              { label: 'About', path: '/about' },
-              { label: 'Contact', path: '/contact' },
-              { label: 'Client Portal', path: '/portal' },
-            ].map(link => {
-              const isActive = location.pathname === link.path;
+          {/* Navigation Links List */}
+          <div className="flex flex-col gap-2.5">
+            <div className="px-1 text-[11px] font-bold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+              Navigation
+            </div>
+
+            {navLinks.map(link => {
+              const Icon = link.icon;
+              const isRouteActive = !link.isAnchor && location.pathname === link.path;
+              const isSectionActive = link.isAnchor && location.pathname === '/' && activeSection === link.sectionId;
+              const isActive = isRouteActive || isSectionActive;
+
               return (
                 <Link
                   key={link.path}
                   to={link.path}
-                  onClick={() => setIsOpen(false)}
-                  className={`px-5 py-3.5 rounded-xl text-lg font-extrabold transition-all flex items-center justify-between ${
+                  onClick={() => handleNavClick(link.path, link.isAnchor, link.sectionId)}
+                  className={`px-4 py-3.5 rounded-2xl transition-all flex items-center justify-between border ${
                     isActive 
-                      ? 'bg-[#6C4CFF] text-white shadow-md' 
-                      : 'text-neutral-800 dark:text-neutral-100 hover:bg-black/5 dark:hover:bg-white/10'
+                      ? 'bg-[#6C4CFF] text-white border-[#6C4CFF] shadow-lg shadow-[#6C4CFF]/20' 
+                      : 'bg-white dark:bg-[#111728] border-black/5 dark:border-white/10 text-neutral-800 dark:text-neutral-100 hover:border-[#6C4CFF]/40'
                   }`}
                 >
-                  <span>{link.label}</span>
+                  <div className="flex items-center gap-3.5">
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                      isActive ? 'bg-white/20 text-white' : 'bg-[#6C4CFF]/10 text-[#6C4CFF]'
+                    }`}>
+                      <Icon size={18} />
+                    </div>
+                    <div>
+                      <div className="text-[15px] font-extrabold leading-snug">{link.label}</div>
+                      <div className={`text-[12px] font-medium ${isActive ? 'text-white/80' : 'text-neutral-400 dark:text-neutral-400'}`}>
+                        {link.desc}
+                      </div>
+                    </div>
+                  </div>
                   <ArrowRight size={18} className={isActive ? 'text-white' : 'text-neutral-400'} />
                 </Link>
               );
             })}
+
+            {/* Portal Link in Drawer */}
+            <Link
+              to="/portal"
+              onClick={() => setIsOpen(false)}
+              className={`px-4 py-3.5 rounded-2xl transition-all flex items-center justify-between border ${
+                location.pathname.startsWith('/portal')
+                  ? 'bg-[#6C4CFF] text-white border-[#6C4CFF] shadow-lg shadow-[#6C4CFF]/20'
+                  : 'bg-gradient-to-r from-violet-500/5 to-blue-500/5 dark:from-violet-500/10 dark:to-blue-500/10 border-[#6C4CFF]/30 text-neutral-800 dark:text-neutral-100'
+              }`}
+            >
+              <div className="flex items-center gap-3.5">
+                <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-[#6C4CFF] text-white shadow-sm">
+                  <Sparkles size={18} />
+                </div>
+                <div>
+                  <div className="text-[15px] font-extrabold flex items-center gap-2">
+                    Client & Team Portal
+                    <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-[#B8F36B] text-[#101828]">
+                      Desk
+                    </span>
+                  </div>
+                  <div className="text-[12px] font-medium text-neutral-400 dark:text-neutral-400">
+                    Tasks, Content & Approvals
+                  </div>
+                </div>
+              </div>
+              <ArrowRight size={18} className="text-[#6C4CFF] dark:text-[#B8F36B]" />
+            </Link>
           </div>
           
-          <div className="mt-8 pt-6 border-t flex flex-col gap-3" style={{ borderColor: 'var(--border-subtle)' }}>
+          {/* Action CTAs & Quick Info Footer */}
+          <div className="mt-6 pt-5 border-t flex flex-col gap-3" style={{ borderColor: 'var(--border-subtle)' }}>
             <Link
               to="/start-project"
               onClick={() => setIsOpen(false)}
-              className="btn-primary w-full justify-center text-center py-4 text-base font-extrabold shadow-lg"
+              className="btn-primary w-full justify-center text-center py-3.5 text-[15px] font-extrabold shadow-lg flex items-center gap-2"
             >
-              Start a Project <ArrowRight size={16} />
+              <Sparkles size={18} />
+              Start a Project
+              <ArrowRight size={16} />
             </Link>
 
             <a
               href={siteConfig.whatsappLink}
               target="_blank"
               rel="noopener noreferrer"
-              className="btn-coral w-full justify-center text-center py-3.5 text-sm font-bold"
+              onClick={() => setIsOpen(false)}
+              className="btn-coral w-full justify-center text-center py-3 text-[14px] font-bold flex items-center gap-2"
             >
+              <MessageSquare size={16} />
               WhatsApp Free Consultation
             </a>
+
+            {/* Direct Contact Pill */}
+            <div className="mt-2 p-3 rounded-xl bg-black/[0.02] dark:bg-white/[0.03] border border-black/5 dark:border-white/5 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
+              <span className="flex items-center gap-1.5 font-semibold">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" />
+                Available for New Projects
+              </span>
+              <a href={`tel:${siteConfig.phone.replace(/\s+/g, '')}`} className="font-bold text-[#6C4CFF] dark:text-[#B8F36B] flex items-center gap-1">
+                <Phone size={12} /> Call
+              </a>
+            </div>
           </div>
         </div>
       )}

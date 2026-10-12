@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   ChevronLeft, ChevronRight, Calendar as CalendarIcon, 
   RotateCcw, Sparkles, CheckSquare, X
@@ -27,6 +27,17 @@ export const MiniCalendarWidget: React.FC<MiniCalendarWidgetProps> = ({
     }
     return new Date();
   });
+
+  // Automatically synchronize calendar month when selectedDate changes
+  useEffect(() => {
+    if (selectedDate && /^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) {
+      const [y, m, d] = selectedDate.split('-').map(Number);
+      setCurrentMonth(prev => {
+        if (prev.getFullYear() === y && prev.getMonth() === m - 1) return prev;
+        return new Date(y, m - 1, d);
+      });
+    }
+  }, [selectedDate]);
 
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
 

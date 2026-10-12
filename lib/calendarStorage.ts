@@ -45,77 +45,7 @@ export interface CalendarEntry {
 
 export const LOCAL_STORAGE_CALENDAR_KEY = 'digi_social_calendar_cache_v2';
 
-export const DEFAULT_CALENDAR_SEEDS: CalendarEntry[] = [
-  {
-    contentId: 'cal_seed_1',
-    clientId: 'client_dr_anupam_jindal',
-    clientName: 'Dr. Anupam Jindal',
-    date: new Date().toISOString().split('T')[0],
-    time: '18:00',
-    month: new Date().toISOString().substring(0, 7),
-    year: new Date().getFullYear(),
-    platform: 'Instagram',
-    contentType: 'Reel',
-    topic: 'Minimally Invasive Spine Surgery Benefits & Recovery',
-    caption: 'Discover how modern robotic neurosurgery reduces recovery time from weeks to days.',
-    hashtags: '#neurosurgery #spinehealth #dranupamjindal #healthcare',
-    status: 'Planned',
-    postedStatus: 'Not Posted',
-    clientApprovalStatus: 'Pending',
-    assigneeId: 'emp_2',
-    assigneeName: 'Neha Gupta',
-    createdBy: 'System Admin',
-    updatedBy: 'System Admin',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  },
-  {
-    contentId: 'cal_seed_2',
-    clientId: 'client_dr_manishi_bansal',
-    clientName: 'Dr. Manishi Bansal',
-    date: new Date(Date.now() + 86400000).toISOString().split('T')[0],
-    time: '11:00',
-    month: new Date(Date.now() + 86400000).toISOString().substring(0, 7),
-    year: new Date().getFullYear(),
-    platform: 'Instagram',
-    contentType: 'Carousel',
-    topic: '5 Essential Nutrition Tips During Second Trimester',
-    caption: 'Swipe through to learn vital dietary habits for a healthy pregnancy journey.',
-    hashtags: '#womenshealth #pregnancycare #drmanishibansal #gynecology',
-    status: 'In Design',
-    postedStatus: 'Not Posted',
-    clientApprovalStatus: 'Pending',
-    assigneeId: 'emp_4',
-    assigneeName: 'Priya Singh',
-    createdBy: 'System Admin',
-    updatedBy: 'System Admin',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  },
-  {
-    contentId: 'cal_seed_3',
-    clientId: 'client_gangotri_ice',
-    clientName: 'Gangotri Ice Cubes',
-    date: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0],
-    time: '14:00',
-    month: new Date(Date.now() + 86400000 * 2).toISOString().substring(0, 7),
-    year: new Date().getFullYear(),
-    platform: 'Facebook',
-    contentType: 'Static Post',
-    topic: 'Triple-Filtered Pure Crystal Ice For Premium Cafes',
-    caption: 'Purity you can taste in every single cube. Ultra-hygienic and crystal clear.',
-    hashtags: '#gangotriice #crystalpure #hospitalitysupplies',
-    status: 'Approved',
-    postedStatus: 'Not Posted',
-    clientApprovalStatus: 'Approved',
-    assigneeId: 'emp_1',
-    assigneeName: 'Aman Sharma',
-    createdBy: 'System Admin',
-    updatedBy: 'System Admin',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  }
-];
+export const DEFAULT_CALENDAR_SEEDS: CalendarEntry[] = [];
 
 export const getCachedCalendarEntries = (): CalendarEntry[] => {
   if (typeof window === 'undefined') return DEFAULT_CALENDAR_SEEDS;

@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import {
-  Plus, Filter, Search, List, Kanban, ChevronDown, ChevronRight,
+  Plus, Filter, Search, List, Kanban, ChevronDown, ChevronRight, ChevronUp,
   CheckSquare, Clock, AlertTriangle, User, Calendar, Tag, X,
   Loader2, Check, Edit2, Trash2, MoreVertical, ArrowUpRight, Flag,
   Sparkles, CheckCircle2, Layers, ExternalLink, Zap, Eye, MoveRight,
   Shield, Users, CalendarDays, RotateCcw, Film, ArrowLeft, ArrowRight,
-  Settings, CheckCheck, AlertCircle, Calendar as CalendarIcon, SlidersHorizontal
+  Settings, CheckCheck, AlertCircle, Calendar as CalendarIcon, SlidersHorizontal,
+  Copy
 } from 'lucide-react';
 import { db } from '../../lib/firebase';
 import {
@@ -19,6 +20,7 @@ import { isTaskAssignedToEmployee } from '../../lib/employeeMaster';
 import { AssignmentBoard } from './AssignmentBoard';
 import { TaskScheduleCalendar } from './TaskScheduleCalendar';
 import { MiniCalendarWidget } from './MiniCalendarWidget';
+import { SuggestiveCombobox, type SuggestiveOption } from './SuggestiveCombobox';
 import {
   type Task,
   type RolloverSettings,
@@ -30,6 +32,7 @@ import {
   persistNewTask,
   persistUpdateTask,
   persistDeleteTask,
+  duplicateTask,
   subscribeToCanonicalTasks,
   getTaskAgeingInfo,
   getNextWorkflowStatus,
@@ -40,6 +43,9 @@ import {
   setRolloverSettings,
   getNextWorkingDate,
   differenceInCalendarDays,
+  getTodayDateStr,
+  addDaysToDateStr,
+  formatOperationalDate,
 } from '../../lib/taskStorage';
 
 // ─── Types & Constants ────────────────────────────────────────────────
@@ -94,11 +100,29 @@ export const TasksView: React.FC = () => {
   const [filterPriority, setFilterPriority] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [filterClient, setFilterClient] = useState('');
-  const [dateFilter, setDateFilter] = useState<'all' | 'today' | 'tomorrow' | 'week' | 'overdue' | 'carried_forward'>('all');
 
-  // Mini Calendar Selection & Toggle State (Enabled by default on desktop)
-  const [selectedMiniDate, setSelectedMiniDate] = useState<string | null>(null);
+  // Primary Canonical Operational Date State (Synced across header, Mini Calendar, and views)
+  const todayStr = useMemo(() => getTodayDateStr(), []);
+  const [selectedOperationalDate, setSelectedOperationalDate] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const qDate = params.get('date');
+        if (qDate && /^\d{4}-\d{2}-\d{2}$/.test(qDate)) return qDate;
+      } catch (e) {}
+    }
+    return getTodayDateStr();
+  });
+  const [dateFilterMode, setDateFilterMode] = useState<'day' | 'all' | 'tomorrow' | 'week' | 'overdue' | 'carried_forward'>('day');
   const [showMiniCalendar, setShowMiniCalendar] = useState(true);
+
+  // Done column management state (collapsible overflow)
+  const [showAllDoneTasks, setShowAllDoneTasks] = useState(false);
+
+  // Task Actions & Delete Confirmation State
+  const [menuTaskId, setMenuTaskId] = useState<string | null>(null);
+  const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
+  const [isDeletingTask, setIsDeletingTask] = useState(false);
 
   // Active Employee and View-As Context (Shared across Agency OS)
   const {
@@ -130,7 +154,19 @@ export const TasksView: React.FC = () => {
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
 
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  // Suggestive search dropdown state
+  const [isSearchDropdownOpen, setIsSearchDropdownOpen] = useState(false);
+  const searchContainerRef = React.useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
+        setIsSearchDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Load clients and employees with live listeners
   useEffect(() => {
@@ -303,21 +339,127 @@ export const TasksView: React.FC = () => {
     }
   };
 
-  const handleDeleteTask = useCallback(async (taskId: string) => {
-    if (!window.confirm('Archive this task?')) return;
+  // ─── Safe Direct Delete Handler ──────────────────────────────────────
+  const handleConfirmDelete = async () => {
+    if (!taskToDelete) return;
+    setIsDeletingTask(true);
     try {
-      await persistDeleteTask(taskId);
-      setTasks(prev => prev.filter(t => t.id !== taskId));
-      triggerToast('Task archived');
+      await persistDeleteTask(taskToDelete.id, {
+        uid: user?.uid,
+        name: profile?.name,
+        role: profile?.role
+      }, { softDelete: true });
+
+      setTasks(prev => prev.filter(t => t.id !== taskToDelete.id));
+      if (selectedTask?.id === taskToDelete.id) {
+        setSelectedTask(null);
+      }
+      triggerToast(`✓ Deleted "${taskToDelete.title}"`);
+      setTaskToDelete(null);
     } catch (err) {
       console.error('Delete task error:', err);
+      triggerToast('Failed to delete task');
+    } finally {
+      setIsDeletingTask(false);
     }
+  };
+
+  // ─── Direct Duplicate Task Handler ───────────────────────────────────
+  const handleDuplicateTask = async (task: Task) => {
+    try {
+      const cloned = await duplicateTask(task.id, selectedOperationalDate, {
+        uid: user?.uid,
+        name: profile?.name,
+        role: profile?.role
+      });
+      if (cloned) {
+        setTasks(prev => [cloned, ...prev]);
+        triggerToast(`✓ Duplicated task for ${selectedOperationalDate}`);
+      }
+    } catch (err) {
+      console.error('Duplicate task error:', err);
+      triggerToast('Failed to duplicate task');
+    }
+  };
+
+  // ─── Operational Date Navigation Handlers ─────────────────────────────
+  const handlePrevDay = () => {
+    setSelectedOperationalDate(prev => addDaysToDateStr(prev, -1));
+    setDateFilterMode('day');
+  };
+
+  const handleNextDay = () => {
+    setSelectedOperationalDate(prev => addDaysToDateStr(prev, 1));
+    setDateFilterMode('day');
+  };
+
+  const handleGoToday = () => {
+    setSelectedOperationalDate(todayStr);
+    setDateFilterMode('day');
+  };
+
+  const handleClearAllFilters = () => {
+    setSearch('');
+    setFilterClient('');
+    setFilterPriority('');
+    setFilterCategory('');
+    setFilterAssignee('');
+    setDateFilterMode('day');
+    setSelectedOperationalDate(todayStr);
+    triggerToast('All filters cleared');
+  };
+
+  // ─── Keyboard Shortcuts (Alt+Left, Alt+Right, Alt+T) ──────────────────
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+
+      if (e.altKey && e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setSelectedOperationalDate(prev => addDaysToDateStr(prev, -1));
+        setDateFilterMode('day');
+      } else if (e.altKey && e.key === 'ArrowRight') {
+        e.preventDefault();
+        setSelectedOperationalDate(prev => addDaysToDateStr(prev, 1));
+        setDateFilterMode('day');
+      } else if (e.altKey && (e.key === 't' || e.key === 'T')) {
+        e.preventDefault();
+        setSelectedOperationalDate(todayStr);
+        setDateFilterMode('day');
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [todayStr]);
+
+  // Sync selectedOperationalDate to URL query param
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.history) {
+      try {
+        const url = new URL(window.location.href);
+        if (selectedOperationalDate === todayStr && dateFilterMode === 'day') {
+          url.searchParams.delete('date');
+        } else if (dateFilterMode === 'day') {
+          url.searchParams.set('date', selectedOperationalDate);
+        }
+        window.history.replaceState({}, '', url.toString());
+      } catch (e) {}
+    }
+  }, [selectedOperationalDate, dateFilterMode, todayStr]);
+
+  // Click outside to dismiss open 3-dot menus
+  useEffect(() => {
+    const handleClick = () => setMenuTaskId(null);
+    window.addEventListener('click', handleClick);
+    return () => window.removeEventListener('click', handleClick);
   }, []);
 
-  // Filter computation
+  // Filter computation with Unified Date Model
   const filteredTasks = useMemo(() => {
     return tasks.filter(t => {
-      if (t.status === 'Cancelled' || t.isArchived) return false;
+      if (t.status === 'Cancelled' || t.isArchived || t.is_deleted) return false;
       if (view === 'my-tasks') {
         const isMine = isTaskAssignedToEmployee(t, activeEmployee || resolvedEmployeeId);
         if (!isMine) return false;
@@ -334,35 +476,42 @@ export const TasksView: React.FC = () => {
       if (filterCategory && t.category !== filterCategory) return false;
       if (filterClient && t.clientId !== filterClient && t.clientName !== filterClient) return false;
 
-      // Mini Calendar Direct Date Filtering
+      // Canonical Date Model comparison (YYYY-MM-DD)
       const schDate = (t.scheduledDate || t.scheduled_date || todayStr).slice(0, 10);
       const dueDate = (t.dueDate || t.due_date || schDate).slice(0, 10);
       const normStatus = normalizeTaskStatus(t.status);
       const isDone = normStatus === 'Done';
 
-      if (selectedMiniDate) {
-        if (schDate !== selectedMiniDate.slice(0, 10)) return false;
-      }
-
-      // Date Filters Toolbar
-      if (dateFilter === 'today') {
-        const isToday = schDate === todayStr || (normStatus !== 'Done' && (t.rolloverCount || 0) > 0);
-        if (!isToday) return false;
-      } else if (dateFilter === 'tomorrow') {
-        const isTmrw = differenceInCalendarDays(schDate, todayStr) === 1;
+      // 1. Day View (The primary operational mode for selectedOperationalDate)
+      if (dateFilterMode === 'day') {
+        if (selectedOperationalDate === todayStr) {
+          // When viewing TODAY:
+          // Include: scheduled today, or active carried-forward rollover tasks, or tasks due today
+          const isTodayWork = schDate === todayStr || (!isDone && (t.rolloverCount || 0) > 0) || dueDate === todayStr;
+          if (!isTodayWork) return false;
+        } else {
+          // When viewing another specific date:
+          // Include: scheduled on that date or due on that date
+          const isSelectedDayWork = schDate === selectedOperationalDate || dueDate === selectedOperationalDate;
+          if (!isSelectedDayWork) return false;
+        }
+      } else if (dateFilterMode === 'tomorrow') {
+        const tmrwStr = addDaysToDateStr(todayStr, 1);
+        const isTmrw = schDate === tmrwStr || dueDate === tmrwStr;
         if (!isTmrw) return false;
-      } else if (dateFilter === 'week') {
+      } else if (dateFilterMode === 'week') {
         const diff = differenceInCalendarDays(schDate, todayStr);
         if (diff < 0 || diff > 7) return false;
-      } else if (dateFilter === 'overdue') {
+      } else if (dateFilterMode === 'overdue') {
         if (isDone || !dueDate || dueDate >= todayStr) return false;
-      } else if (dateFilter === 'carried_forward') {
+      } else if (dateFilterMode === 'carried_forward') {
         if ((t.rolloverCount || 0) === 0 && (!t.originalScheduledDate || t.originalScheduledDate >= schDate)) return false;
       }
+      // 'all' allows all dates through
 
       return true;
     });
-  }, [tasks, search, filterAssignee, filterPriority, filterCategory, filterClient, dateFilter, selectedMiniDate, view, activeEmployee, resolvedEmployeeId, todayStr]);
+  }, [tasks, search, filterAssignee, filterPriority, filterCategory, filterClient, dateFilterMode, selectedOperationalDate, view, activeEmployee, resolvedEmployeeId, todayStr]);
 
   // Mandatory Debugging Logs
   useEffect(() => {
@@ -382,13 +531,92 @@ export const TasksView: React.FC = () => {
   const completedCount = filteredTasks.filter(t => normalizeTaskStatus(t.status) === 'Done').length;
   const progressPercent = totalActiveCount > 0 ? Math.round((completedCount / totalActiveCount) * 100) : 0;
 
+  // Formatted representations for operational date header
+  const operationalDateInfo = useMemo(() => {
+    return formatOperationalDate(selectedOperationalDate);
+  }, [selectedOperationalDate]);
+
+  const isViewingToday = selectedOperationalDate === todayStr;
+
+  // Real canonical counts for the selected operational date summary context
+  const dayContextStats = useMemo(() => {
+    const scheduled = tasks.filter(t => {
+      if (t.isArchived || t.is_deleted || t.status === 'Cancelled') return false;
+      const sch = (t.scheduledDate || t.scheduled_date || '').slice(0, 10);
+      return sch === selectedOperationalDate;
+    }).length;
+
+    const overdue = tasks.filter(t => {
+      if (t.isArchived || t.is_deleted || t.status === 'Cancelled') return false;
+      if (normalizeTaskStatus(t.status) === 'Done') return false;
+      const due = (t.dueDate || t.due_date || '').slice(0, 10);
+      return due && due < todayStr;
+    }).length;
+
+    const carried = tasks.filter(t => {
+      if (t.isArchived || t.is_deleted || t.status === 'Cancelled') return false;
+      if (normalizeTaskStatus(t.status) === 'Done') return false;
+      const sch = (t.scheduledDate || t.scheduled_date || '').slice(0, 10);
+      return (t.rolloverCount || 0) > 0 || (t.originalScheduledDate && t.originalScheduledDate < sch);
+    }).length;
+
+    const completed = tasks.filter(t => {
+      if (t.isArchived || t.is_deleted || t.status === 'Cancelled') return false;
+      if (normalizeTaskStatus(t.status) !== 'Done') return false;
+      const comp = (t.completedAt ? t.completedAt.slice(0, 10) : '') || (t.scheduledDate || t.scheduled_date || '').slice(0, 10);
+      return comp === selectedOperationalDate;
+    }).length;
+
+    return { scheduled, overdue, carried, completed };
+  }, [tasks, selectedOperationalDate, todayStr]);
+
   // Counts for quick date filter pills
   const dateCounts = useMemo(() => {
-    const todayCount = tasks.filter(t => (t.scheduledDate === todayStr || (normalizeTaskStatus(t.status) !== 'Done' && (t.rolloverCount || 0) > 0)) && !t.isArchived).length;
-    const overdueCount = tasks.filter(t => normalizeTaskStatus(t.status) !== 'Done' && t.dueDate && t.dueDate < todayStr && !t.isArchived).length;
-    const carriedCount = tasks.filter(t => normalizeTaskStatus(t.status) !== 'Done' && (t.rolloverCount || 0) > 0 && !t.isArchived).length;
+    const todayCount = tasks.filter(t => 
+      !t.isArchived && !t.is_deleted && t.status !== 'Cancelled' &&
+      ((t.scheduledDate || t.scheduled_date || '').slice(0, 10) === todayStr || 
+       (normalizeTaskStatus(t.status) !== 'Done' && (t.rolloverCount || 0) > 0))
+    ).length;
+
+    const overdueCount = tasks.filter(t => 
+      !t.isArchived && !t.is_deleted && t.status !== 'Cancelled' &&
+      normalizeTaskStatus(t.status) !== 'Done' && 
+      t.dueDate && t.dueDate < todayStr
+    ).length;
+
+    const carriedCount = tasks.filter(t => 
+      !t.isArchived && !t.is_deleted && t.status !== 'Cancelled' &&
+      normalizeTaskStatus(t.status) !== 'Done' && 
+      ((t.rolloverCount || 0) > 0 || (t.originalScheduledDate && t.originalScheduledDate < (t.scheduledDate || t.scheduled_date || '')))
+    ).length;
+
     return { todayCount, overdueCount, carriedCount };
   }, [tasks, todayStr]);
+
+  // Suggestive search results for board search input
+  const suggestiveTasks = useMemo(() => {
+    if (!search.trim()) return [];
+    const q = search.trim().toLowerCase();
+    return tasks.filter(t => !t.is_deleted && !t.isArchived && (
+      t.title.toLowerCase().includes(q) ||
+      (t.clientName || '').toLowerCase().includes(q) ||
+      (t.assigneeName || '').toLowerCase().includes(q)
+    )).slice(0, 4);
+  }, [tasks, search]);
+
+  const suggestiveClients = useMemo(() => {
+    if (!search.trim()) return [];
+    const q = search.trim().toLowerCase();
+    return clients.filter(c => 
+      (c.clientName || c.name || '').toLowerCase().includes(q) ||
+      (c.businessName || '').toLowerCase().includes(q)
+    ).slice(0, 3);
+  }, [clients, search]);
+
+  const hasActiveFilters = !!(
+    search || filterClient || filterPriority || filterCategory || filterAssignee || 
+    dateFilterMode !== 'day' || selectedOperationalDate !== todayStr
+  );
 
   return (
     <div className="space-y-4 pb-20 font-sans text-[#101828] dark:text-[#F7F8FC]">
@@ -504,7 +732,7 @@ export const TasksView: React.FC = () => {
             <button
               onClick={() => setShowMiniCalendar(!showMiniCalendar)}
               className={`px-3.5 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-2xs ${
-                showMiniCalendar || selectedMiniDate
+                showMiniCalendar
                   ? 'bg-[#EEECFF] dark:bg-[#201D45] text-[#5B4BFF] dark:text-[#806CFF] border-[#5B4BFF]/40'
                   : 'bg-[#F8FAFC] dark:bg-[#171E31] border-[#D7DEE9] dark:border-[#293248] text-[#475467] dark:text-[#BAC1D1] hover:text-[#101828] dark:hover:text-white'
               }`}
@@ -512,7 +740,7 @@ export const TasksView: React.FC = () => {
             >
               <CalendarIcon className="w-4 h-4 text-[#5B4BFF] dark:text-[#806CFF]" />
               <span>Mini Calendar</span>
-              {selectedMiniDate && (
+              {selectedOperationalDate && (
                 <span className="w-2 h-2 rounded-full bg-[#5B4BFF] animate-pulse" />
               )}
             </button>
@@ -531,7 +759,7 @@ export const TasksView: React.FC = () => {
               onClick={() => {
                 setCreateDefaultColumn('To Do');
                 setCreateDefaultAssigneeId('');
-                setCreateDefaultDate(selectedMiniDate || todayStr);
+                setCreateDefaultDate(selectedOperationalDate);
                 setShowCreateModal(true);
               }}
               className="inline-flex items-center gap-2 px-4 py-2.5 bg-[#5B4BFF] hover:bg-[#4E3FE6] dark:bg-[#806CFF] dark:hover:bg-[#725DEF] text-white text-xs font-black rounded-xl shadow-xs hover:shadow-md transition-all cursor-pointer tracking-wide"
@@ -542,68 +770,247 @@ export const TasksView: React.FC = () => {
           </div>
         </div>
 
-        {/* ─── DATE FILTER CHIPS & SEARCH TOOLBAR ──────────────────────── */}
-        <div className="pt-3.5 border-t border-[#D7DEE9]/60 dark:border-[#293248] flex flex-wrap items-center justify-between gap-3">
+        {/* ─── 2. PROMINENT OPERATIONAL DATE NAVIGATOR ──────────────────── */}
+        <div className="pt-3.5 border-t border-[#D7DEE9]/60 dark:border-[#293248] flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
+            {/* Previous Day Arrow */}
+            <button
+              type="button"
+              onClick={handlePrevDay}
+              title="Previous Day (Alt+Left)"
+              className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-[#F8FAFC] dark:bg-[#171E31] border border-[#D7DEE9] dark:border-[#293248] text-[#334155] dark:text-[#CBD5E1] hover:bg-[#EEECFF] hover:text-[#5B4BFF] hover:border-[#5B4BFF]/40 dark:hover:bg-[#201D45] dark:hover:text-[#806CFF] flex items-center justify-center transition-all cursor-pointer shadow-2xs group"
+            >
+              <ArrowLeft className="w-5 h-5 group-hover:-translate-x-0.5 transition-transform" />
+            </button>
+
+            {/* Large Selected Date */}
+            <div>
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <h2 className="text-xl sm:text-2xl md:text-[26px] font-black tracking-tight text-[#101828] dark:text-[#F7F8FC] leading-none">
+                  {operationalDateInfo.fullDate}
+                </h2>
+
+                {/* TODAY Badge */}
+                {isViewingToday && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-black bg-[#EEECFF] text-[#5B4BFF] dark:bg-[#201D45] dark:text-[#806CFF] border border-[#5B4BFF]/30 tracking-wider">
+                    TODAY
+                  </span>
+                )}
+
+                {!isViewingToday && (
+                  <span className="text-xs font-bold text-[#64748B] dark:text-[#94A3B8]">
+                    ({differenceInCalendarDays(selectedOperationalDate, todayStr) > 0 ? `+${differenceInCalendarDays(selectedOperationalDate, todayStr)}d` : `${differenceInCalendarDays(selectedOperationalDate, todayStr)}d`})
+                  </span>
+                )}
+              </div>
+
+              {/* Date Context Summary */}
+              <p className="text-xs font-semibold text-[#64748B] dark:text-[#94A3B8] mt-1.5 flex items-center gap-2 flex-wrap">
+                <span className="font-bold text-[#101828] dark:text-[#F7F8FC]">
+                  {dayContextStats.scheduled} scheduled
+                </span>
+                <span>·</span>
+                <span className={dayContextStats.overdue > 0 ? "text-rose-600 dark:text-rose-400 font-bold" : ""}>
+                  {dayContextStats.overdue} overdue
+                </span>
+                <span>·</span>
+                <span className={dayContextStats.carried > 0 ? "text-amber-600 dark:text-amber-400 font-bold" : ""}>
+                  {dayContextStats.carried} carried forward
+                </span>
+                <span>·</span>
+                <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                  {dayContextStats.completed} completed
+                </span>
+              </p>
+            </div>
+
+            {/* Next Day Arrow */}
+            <button
+              type="button"
+              onClick={handleNextDay}
+              title="Next Day (Alt+Right)"
+              className="w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-[#F8FAFC] dark:bg-[#171E31] border border-[#D7DEE9] dark:border-[#293248] text-[#334155] dark:text-[#CBD5E1] hover:bg-[#EEECFF] hover:text-[#5B4BFF] hover:border-[#5B4BFF]/40 dark:hover:bg-[#201D45] dark:hover:text-[#806CFF] flex items-center justify-center transition-all cursor-pointer shadow-2xs group"
+            >
+              <ArrowRight className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
+            </button>
+
+            {/* Today Button Shortcut */}
+            <button
+              type="button"
+              onClick={handleGoToday}
+              title="Jump to Today (Alt+T)"
+              className={`px-3.5 py-2 text-xs font-black rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs ${
+                isViewingToday && dateFilterMode === 'day'
+                  ? 'bg-[#EEECFF] dark:bg-[#201D45] text-[#5B4BFF] dark:text-[#806CFF] border border-[#5B4BFF]/40'
+                  : 'bg-[#5B4BFF] hover:bg-[#4E3FE6] text-white'
+              }`}
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Today</span>
+            </button>
+          </div>
+
+          {/* Right Action: Clear Filters if active */}
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={handleClearAllFilters}
+              className="px-3.5 py-2 text-xs font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 rounded-xl hover:bg-rose-100 transition-all flex items-center gap-1.5 cursor-pointer self-start md:self-center"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Clear Filters</span>
+            </button>
+          )}
+        </div>
+
+        {/* ─── 3. DATE FILTER CHIPS & SEARCH TOOLBAR ───────────────────── */}
+        <div className="pt-3 border-t border-[#D7DEE9]/40 dark:border-[#293248]/60 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
             <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496] mr-1 flex items-center gap-1">
-              <Clock className="w-3.5 h-3.5" /> Date Filter:
+              <Filter className="w-3.5 h-3.5" /> Filter:
             </span>
             {[
               { key: 'all', label: 'All Dates', count: tasks.length },
-              { key: 'today', label: 'Today’s Work', count: dateCounts.todayCount, accent: 'text-blue-600 dark:text-blue-400' },
+              { key: 'day', label: isViewingToday ? "Today’s Work" : `${operationalDateInfo.shortDate} Work`, count: isViewingToday ? dateCounts.todayCount : dayContextStats.scheduled, accent: 'text-blue-600 dark:text-blue-400' },
               { key: 'tomorrow', label: 'Tomorrow', count: null },
               { key: 'week', label: 'This Week', count: null },
               { key: 'overdue', label: 'Overdue', count: dateCounts.overdueCount, accent: 'text-rose-600 dark:text-rose-400' },
               { key: 'carried_forward', label: 'Carried Forward', count: dateCounts.carriedCount, accent: 'text-amber-600 dark:text-amber-400' },
-            ].map(f => (
-              <button
-                key={f.key}
-                onClick={() => {
-                  setDateFilter(f.key as any);
-                  setSelectedMiniDate(null);
-                }}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
-                  dateFilter === f.key && !selectedMiniDate
-                    ? 'bg-[#5B4BFF] text-white shadow-2xs'
-                    : 'bg-[#F8FAFC] dark:bg-[#161B31] text-[#475467] dark:text-[#BAC1D1] hover:bg-[#EEECFF] hover:text-[#5B4BFF] border border-[#D7DEE9] dark:border-[#293248]'
-                }`}
-              >
-                <span>{f.label}</span>
-                {f.count !== null && f.count > 0 && (
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
-                    dateFilter === f.key && !selectedMiniDate ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-800 ' + (f.accent || 'text-[#475467]')
-                  }`}>
-                    {f.count}
-                  </span>
-                )}
-              </button>
-            ))}
-
-            {selectedMiniDate && (
-              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#EEECFF] dark:bg-[#201D45] text-[#5B4BFF] dark:text-[#806CFF] border border-[#5B4BFF]/40 rounded-xl text-xs font-bold">
-                <span>Focused: {selectedMiniDate}</span>
-                <button 
-                  onClick={() => setSelectedMiniDate(null)}
-                  className="p-0.5 hover:bg-rose-100 rounded text-rose-600 cursor-pointer"
-                  title="Clear Date Focus"
+            ].map(f => {
+              const isActive = (f.key === 'day' && dateFilterMode === 'day') || (f.key === dateFilterMode);
+              return (
+                <button
+                  key={f.key}
+                  type="button"
+                  onClick={() => {
+                    if (f.key === 'day') {
+                      setDateFilterMode('day');
+                    } else if (f.key === 'tomorrow') {
+                      setSelectedOperationalDate(addDaysToDateStr(todayStr, 1));
+                      setDateFilterMode('tomorrow');
+                    } else {
+                      setDateFilterMode(f.key as any);
+                    }
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                    isActive
+                      ? 'bg-[#5B4BFF] text-white shadow-2xs'
+                      : 'bg-[#F8FAFC] dark:bg-[#161B31] text-[#475467] dark:text-[#BAC1D1] hover:bg-[#EEECFF] hover:text-[#5B4BFF] border border-[#D7DEE9] dark:border-[#293248]'
+                  }`}
                 >
-                  <X className="w-3 h-3" />
+                  <span>{f.label}</span>
+                  {f.count !== null && f.count > 0 && (
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                      isActive ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-800 ' + (f.accent || 'text-[#475467]')
+                    }`}>
+                      {f.count}
+                    </span>
+                  )}
                 </button>
-              </div>
-            )}
+              );
+            })}
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
-            <div className="flex items-center gap-2 bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-3 py-1.5 shadow-2xs">
-              <Search className="w-3.5 h-3.5 text-[#7A8496]" />
-              <input
-                type="text"
-                placeholder="Search tasks, clients…"
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                className="bg-transparent text-xs text-[#101828] dark:text-[#F7F8FC] outline-none w-36 sm:w-48 font-medium"
-              />
-              {search && <button onClick={() => setSearch('')} className="text-[#98A2B3] text-xs">✕</button>}
+            {/* SUGGESTIVE SEARCH BAR */}
+            <div ref={searchContainerRef} className="relative">
+              <div className="flex items-center gap-2 bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-3 py-1.5 shadow-2xs focus-within:border-[#5B4BFF] focus-within:ring-2 focus-within:ring-[#5B4BFF]/20 transition-all">
+                <Search className="w-3.5 h-3.5 text-[#7A8496]" />
+                <input
+                  type="text"
+                  placeholder="Search tasks, clients…"
+                  value={search}
+                  onFocus={() => setIsSearchDropdownOpen(true)}
+                  onChange={e => {
+                    setSearch(e.target.value);
+                    setIsSearchDropdownOpen(true);
+                  }}
+                  className="bg-transparent text-xs text-[#101828] dark:text-[#F7F8FC] outline-none w-36 sm:w-52 font-medium"
+                />
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearch('');
+                      setIsSearchDropdownOpen(false);
+                    }}
+                    className="text-[#98A2B3] hover:text-slate-600 dark:hover:text-white text-xs cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Suggestive Quick Results Dropdown */}
+              {isSearchDropdownOpen && search.trim() && (suggestiveTasks.length > 0 || suggestiveClients.length > 0) && (
+                <div className="absolute right-0 top-full mt-1.5 z-60 w-80 sm:w-96 bg-white dark:bg-[#111728] border border-[#D8DEE9] dark:border-white/10 rounded-2xl shadow-2xl p-2.5 space-y-2.5 animate-in fade-in zoom-in-95">
+                  {/* Matching Tasks */}
+                  {suggestiveTasks.length > 0 && (
+                    <div className="space-y-1">
+                      <div className="text-[10px] font-black uppercase tracking-wider text-[#7A8496] px-2 flex items-center justify-between">
+                        <span>Matching Deliverables ({suggestiveTasks.length})</span>
+                        <span className="font-mono text-[9px]">Click to inspect</span>
+                      </div>
+                      <div className="space-y-1 max-h-40 overflow-y-auto">
+                        {suggestiveTasks.map(t => (
+                          <div
+                            key={t.id}
+                            onClick={() => {
+                              setSelectedTask(t);
+                              setIsSearchDropdownOpen(false);
+                            }}
+                            className="p-2 rounded-xl hover:bg-[#F8FAFC] dark:hover:bg-[#161B31] transition-colors cursor-pointer flex items-center justify-between gap-2"
+                          >
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-[#101828] dark:text-[#F7F8FC] truncate">
+                                {t.title}
+                              </p>
+                              <p className="text-[10px] text-[#64748B] dark:text-[#94A3B8] font-medium truncate">
+                                {t.clientName || 'General'} · {t.assigneeName || 'Unassigned'}
+                              </p>
+                            </div>
+                            <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-[#EEECFF] text-[#5B4BFF] dark:bg-[#201D45] dark:text-[#806CFF] shrink-0">
+                              {t.status}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Matching Clients */}
+                  {suggestiveClients.length > 0 && (
+                    <div className="space-y-1 pt-1.5 border-t border-[#D8DEE9]/60 dark:border-white/10">
+                      <div className="text-[10px] font-black uppercase tracking-wider text-[#7A8496] px-2 flex items-center justify-between">
+                        <span>Filter by Client</span>
+                      </div>
+                      <div className="grid grid-cols-1 gap-1">
+                        {suggestiveClients.map(c => {
+                          const cid = c.id || c.clientId;
+                          const cname = c.clientName || c.name || c.businessName;
+                          return (
+                            <button
+                              key={cid}
+                              type="button"
+                              onClick={() => {
+                                setFilterClient(cid);
+                                setSearch('');
+                                setIsSearchDropdownOpen(false);
+                              }}
+                              className="text-left p-1.5 px-2 rounded-xl text-xs font-bold hover:bg-[#EEECFF] hover:text-[#5B4BFF] dark:hover:bg-[#201D45] dark:hover:text-[#806CFF] text-[#334155] dark:text-[#CBD5E1] transition-all flex items-center gap-2 cursor-pointer"
+                            >
+                              <span className="w-5 h-5 rounded-md bg-[#5B4BFF]/10 text-[#5B4BFF] dark:text-[#806CFF] text-[10px] font-black flex items-center justify-center uppercase">
+                                {cname.charAt(0)}
+                              </span>
+                              <span className="truncate">{cname}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <select
@@ -703,6 +1110,7 @@ export const TasksView: React.FC = () => {
             /* DATE-BASED TASK SCHEDULE CALENDAR */
             <TaskScheduleCalendar
               tasks={filteredTasks}
+              selectedDate={selectedOperationalDate}
               onSelectTask={setSelectedTask}
               onOpenCreateTask={dateStr => {
                 setCreateDefaultColumn('To Do');
@@ -721,7 +1129,7 @@ export const TasksView: React.FC = () => {
               onSelectTask={setSelectedTask}
               onOpenCreateTask={empId => {
                 setCreateDefaultAssigneeId(empId || '');
-                setCreateDefaultDate(selectedMiniDate || todayStr);
+                setCreateDefaultDate(selectedOperationalDate || todayStr);
                 setShowCreateModal(true);
               }}
               onUpdateTask={(taskId, targetEmpId, targetEmpName) => {
@@ -825,6 +1233,20 @@ export const TasksView: React.FC = () => {
                 const colTasks = filteredTasks.filter(t => normalizeTaskStatus(t.status) === col.key);
                 const isDragTarget = dragOverColumn === col.key;
 
+                // Sort Done tasks so most recently completed are first
+                const sortedTasks = col.key === 'Done'
+                  ? [...colTasks].sort((a, b) => {
+                      const tA = a.completedAt ? new Date(a.completedAt).getTime() : 0;
+                      const tB = b.completedAt ? new Date(b.completedAt).getTime() : 0;
+                      return tB - tA;
+                    })
+                  : colTasks;
+
+                // Manage Done column length to prevent visual overloading
+                const displayedTasks = (col.key === 'Done' && !showAllDoneTasks)
+                  ? sortedTasks.slice(0, 4)
+                  : sortedTasks;
+
                 return (
                   <div
                     key={col.key}
@@ -853,7 +1275,7 @@ export const TasksView: React.FC = () => {
                         <button
                           onClick={() => {
                             setCreateDefaultColumn(col.key);
-                            setCreateDefaultDate(selectedMiniDate || todayStr);
+                            setCreateDefaultDate(selectedOperationalDate);
                             setShowCreateModal(true);
                           }}
                           title={`Add task to ${col.label}`}
@@ -863,18 +1285,41 @@ export const TasksView: React.FC = () => {
                         </button>
                       </div>
 
+                      {/* Done Column Collapse / Expand Control */}
+                      {col.key === 'Done' && colTasks.length > 4 && (
+                        <div className="pb-3">
+                          <button
+                            type="button"
+                            onClick={() => setShowAllDoneTasks(!showAllDoneTasks)}
+                            className="w-full py-1.5 px-3 rounded-xl text-xs font-black text-[#5B4BFF] dark:text-[#806CFF] bg-[#EEECFF] dark:bg-[#201D45] hover:bg-[#5B4BFF] hover:text-white transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
+                          >
+                            {showAllDoneTasks ? (
+                              <>
+                                <ChevronUp className="w-3.5 h-3.5" />
+                                <span>Show Latest 4 Only</span>
+                              </>
+                            ) : (
+                              <>
+                                <ChevronDown className="w-3.5 h-3.5" />
+                                <span>View all completed ({colTasks.length})</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )}
+
                       {/* Task Cards Container with Refined Spacing */}
                       <div className="space-y-3">
                         {colTasks.length === 0 ? (
-                          <div className="py-12 text-center border-2 border-dashed border-[#D8DEE9] dark:border-white/10 rounded-2xl p-4 text-xs text-[#64748B] bg-white/60 dark:bg-white/5 flex flex-col items-center justify-center space-y-2">
-                            <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-white/10 flex items-center justify-center text-slate-400">
-                              <CheckSquare className="w-4 h-4" />
+                          <div className="py-6 text-center border-2 border-dashed border-[#D8DEE9] dark:border-white/10 rounded-2xl p-4 text-xs text-[#64748B] bg-white/60 dark:bg-white/5 flex flex-col items-center justify-center space-y-2">
+                            <div className="w-7 h-7 rounded-full bg-slate-100 dark:bg-white/10 flex items-center justify-center text-slate-400">
+                              <CheckSquare className="w-3.5 h-3.5" />
                             </div>
                             <p className="font-bold text-[#334155] dark:text-[#CBD5E1]">No tasks in {col.label}</p>
                             <button
                               onClick={() => {
                                 setCreateDefaultColumn(col.key);
-                                setCreateDefaultDate(selectedMiniDate || todayStr);
+                                setCreateDefaultDate(selectedOperationalDate);
                                 setShowCreateModal(true);
                               }}
                               className="px-3 py-1 text-[11px] font-black text-[#5B4BFF] dark:text-[#806CFF] bg-[#EEECFF] dark:bg-[#201D45] rounded-lg hover:bg-[#5B4BFF] hover:text-white transition-all cursor-pointer"
@@ -883,12 +1328,13 @@ export const TasksView: React.FC = () => {
                             </button>
                           </div>
                         ) : (
-                          colTasks.map(task => {
+                          displayedTasks.map(task => {
                             const pStyle = priorityStyles[task.priority] || priorityStyles.Medium;
                             const ageing = getTaskAgeingInfo(task, todayStr);
                             const prevStatus = getPrevWorkflowStatus(task.status);
                             const nextStatus = getNextWorkflowStatus(task.status);
                             const isSelected = selectedTaskIds.has(task.id);
+                            const isDone = col.key === 'Done';
 
                             return (
                               <div
@@ -896,15 +1342,17 @@ export const TasksView: React.FC = () => {
                                 draggable
                                 onDragStart={e => handleDragStart(e, task.id)}
                                 onClick={() => setSelectedTask(task)}
-                                className={`bg-white dark:bg-[#161B31] border ${
+                                className={`rounded-2xl p-4 transition-all cursor-grab active:cursor-grabbing group relative space-y-3 border ${
                                   isSelected 
-                                    ? 'ring-2 ring-[#5B4BFF] border-[#5B4BFF] shadow-md' 
-                                    : 'border-[#D8DEE9] dark:border-white/10'
-                                } hover:border-[#5B4BFF] dark:hover:border-[#806CFF] rounded-2xl p-4 shadow-xs hover:shadow-md transition-all cursor-grab active:cursor-grabbing group relative space-y-3`}
+                                    ? 'ring-2 ring-[#5B4BFF] border-[#5B4BFF] shadow-md bg-white dark:bg-[#161B31]' 
+                                    : isDone
+                                    ? 'bg-[#F8FAFC]/80 dark:bg-[#13192B]/80 border-slate-200 dark:border-white/10 opacity-90 hover:opacity-100 shadow-2xs hover:shadow-xs'
+                                    : 'bg-white dark:bg-[#161B31] border-[#D8DEE9] dark:border-white/10 hover:border-[#5B4BFF] dark:hover:border-[#806CFF] shadow-xs hover:shadow-md'
+                                }`}
                               >
-                                {/* 1. Top Metadata Row: Client Pill + Priority Badge + Checkbox */}
+                                {/* 1. Top Metadata Row: Client Pill + Priority Badge + Direct Trash & 3-Dot Actions */}
                                 <div className="flex items-center justify-between gap-2">
-                                  <div className="flex items-center gap-2 truncate max-w-[190px]">
+                                  <div className="flex items-center gap-2 truncate max-w-[160px]">
                                     {isAdmin && (
                                       <input
                                         type="checkbox"
@@ -922,17 +1370,87 @@ export const TasksView: React.FC = () => {
                                     </span>
                                   </div>
 
-                                  <div className="flex items-center gap-1 shrink-0">
+                                  <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
                                     <span className={`text-[10px] px-2 py-0.5 rounded-full border ${pStyle.badge}`}>
                                       {task.priority}
                                     </span>
+
+                                    {/* Direct Visible Trash Icon for Authorized Users */}
+                                    {isAdmin && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setTaskToDelete(task)}
+                                        title="Delete task safely"
+                                        className="w-7 h-7 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 dark:hover:text-rose-400 flex items-center justify-center transition-colors cursor-pointer"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+
+                                    {/* Compact 3-Dot Quick Actions Menu */}
+                                    <div className="relative">
+                                      <button
+                                        type="button"
+                                        onClick={() => setMenuTaskId(menuTaskId === task.id ? null : task.id)}
+                                        title="Quick task actions"
+                                        className="w-7 h-7 rounded-lg text-slate-400 hover:text-[#101828] dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/10 flex items-center justify-center transition-colors cursor-pointer"
+                                      >
+                                        <MoreVertical className="w-3.5 h-3.5" />
+                                      </button>
+
+                                      {menuTaskId === task.id && (
+                                        <div 
+                                          className="absolute right-0 top-8 z-30 w-36 bg-white dark:bg-[#161B31] border border-[#D7DEE9] dark:border-[#293248] rounded-xl shadow-xl py-1 text-xs animate-in fade-in zoom-in-95"
+                                          onClick={e => e.stopPropagation()}
+                                        >
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setMenuTaskId(null);
+                                              setSelectedTask(task);
+                                            }}
+                                            className="w-full text-left px-3 py-1.5 font-bold hover:bg-[#F8FAFC] dark:hover:bg-white/5 flex items-center gap-2 text-[#334155] dark:text-[#CBD5E1] cursor-pointer"
+                                          >
+                                            <Edit2 className="w-3.5 h-3.5 text-[#5B4BFF]" />
+                                            <span>Edit Details</span>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setMenuTaskId(null);
+                                              handleDuplicateTask(task);
+                                            }}
+                                            className="w-full text-left px-3 py-1.5 font-bold hover:bg-[#F8FAFC] dark:hover:bg-white/5 flex items-center gap-2 text-[#334155] dark:text-[#CBD5E1] cursor-pointer"
+                                          >
+                                            <Copy className="w-3.5 h-3.5 text-blue-600" />
+                                            <span>Duplicate</span>
+                                          </button>
+                                          {isAdmin && (
+                                            <>
+                                              <div className="h-px bg-slate-200 dark:bg-white/10 my-1" />
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setMenuTaskId(null);
+                                                  setTaskToDelete(task);
+                                                }}
+                                                className="w-full text-left px-3 py-1.5 font-bold hover:bg-rose-50 dark:hover:bg-rose-950/40 flex items-center gap-2 text-rose-600 dark:text-rose-400 cursor-pointer"
+                                              >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                                <span>Delete Task</span>
+                                              </button>
+                                            </>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
 
                                 {/* 2. Main Title & Description */}
                                 <div>
                                   <h4 className={`text-xs md:text-sm font-bold leading-snug group-hover:text-[#5B4BFF] dark:group-hover:text-[#806CFF] transition-colors ${
-                                    col.key === 'Done' ? 'text-[#64748B] line-through' : 'text-[#101828] dark:text-white'
+                                    isDone ? 'text-[#64748B] line-through' : 'text-[#101828] dark:text-white'
                                   }`}>
                                     {task.title}
                                   </h4>
@@ -961,24 +1479,39 @@ export const TasksView: React.FC = () => {
 
                                 {/* 3. Badges Row: Overdue, Pending Age, Carried Forward */}
                                 <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-                                  {ageing.overdueBadge && col.key !== 'Done' && (
-                                    <span className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-md bg-rose-600 text-white shadow-2xs">
+                                  {ageing.overdueBadge && !isDone && (
+                                    <span 
+                                      title={`Overdue: deadline was ${task.dueDate}`}
+                                      className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-md bg-rose-600 text-white shadow-2xs"
+                                    >
                                       <AlertCircle className="w-3 h-3" />
                                       {ageing.overdueBadge}
                                     </span>
                                   )}
 
-                                  {ageing.pendingDays > 0 && col.key !== 'Done' && (
-                                    <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border ${ageing.pendingColorClass}`}>
+                                  {ageing.pendingDays > 0 && !isDone && (
+                                    <span 
+                                      title={`Continuously pending for ${ageing.pendingDays} day(s)`}
+                                      className={`inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md border ${ageing.pendingColorClass}`}
+                                    >
                                       <Clock className="w-3 h-3" />
                                       {ageing.pendingBadge}
                                     </span>
                                   )}
 
-                                  {ageing.rolloverBadge && col.key !== 'Done' && (
-                                    <span className="inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300">
+                                  {ageing.rolloverBadge && !isDone && (
+                                    <span 
+                                      title="Task was operationally rolled forward"
+                                      className="inline-flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300"
+                                    >
                                       <RotateCcw className="w-2.5 h-2.5" />
                                       {ageing.rolloverBadge}
+                                    </span>
+                                  )}
+
+                                  {isDone && task.completedAt && (
+                                    <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900 px-2 py-0.5 rounded-md">
+                                      Done: {new Date(task.completedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                     </span>
                                   )}
                                 </div>
@@ -1013,14 +1546,14 @@ export const TasksView: React.FC = () => {
                                   className="pt-2.5 border-t border-[#D8DEE9]/60 dark:border-white/10 flex items-center justify-between gap-1.5"
                                   onClick={e => e.stopPropagation()}
                                 >
-                                  {/* Larger Left / Right Workflow Buttons */}
+                                  {/* Larger Left / Right Workflow Buttons (36px comfortable click target) */}
                                   <div className="flex items-center gap-1 bg-[#F8FAFC] dark:bg-[#11152D] border border-[#D8DEE9] dark:border-white/10 rounded-xl p-1 shadow-2xs">
                                     <button
                                       type="button"
                                       disabled={!prevStatus}
                                       onClick={() => prevStatus && handleStatusChange(task.id, prevStatus, 'left_arrow')}
                                       title={prevStatus ? `Move backward to "${prevStatus}"` : 'Already in To Do'}
-                                      className="w-7 h-7 rounded-lg flex items-center justify-center text-[#334155] dark:text-[#CBD5E1] hover:bg-white dark:hover:bg-white/10 hover:text-[#5B4BFF] disabled:opacity-20 disabled:cursor-not-allowed transition-all cursor-pointer shadow-2xs"
+                                      className="w-8 h-8 rounded-lg flex items-center justify-center text-[#334155] dark:text-[#CBD5E1] hover:bg-white dark:hover:bg-white/10 hover:text-[#5B4BFF] disabled:opacity-20 disabled:cursor-not-allowed transition-all cursor-pointer shadow-2xs"
                                     >
                                       <ArrowLeft className="w-4 h-4" />
                                     </button>
@@ -1042,15 +1575,17 @@ export const TasksView: React.FC = () => {
                                       disabled={!nextStatus}
                                       onClick={() => nextStatus && handleStatusChange(task.id, nextStatus, 'right_arrow')}
                                       title={nextStatus ? `Advance to "${nextStatus}"` : 'Already Done'}
-                                      className="w-7 h-7 rounded-lg flex items-center justify-center text-[#334155] dark:text-[#CBD5E1] hover:bg-white dark:hover:bg-white/10 hover:text-[#5B4BFF] disabled:opacity-20 disabled:cursor-not-allowed transition-all cursor-pointer shadow-2xs"
+                                      className="w-8 h-8 rounded-lg flex items-center justify-center text-[#334155] dark:text-[#CBD5E1] hover:bg-white dark:hover:bg-white/10 hover:text-[#5B4BFF] disabled:opacity-20 disabled:cursor-not-allowed transition-all cursor-pointer shadow-2xs"
                                     >
                                       <ArrowRight className="w-4 h-4" />
                                     </button>
                                   </div>
 
-                                  {col.key !== 'Done' ? (
+                                  {!isDone ? (
                                     <button
+                                      type="button"
                                       onClick={() => handleStatusChange(task.id, 'Done', 'right_arrow')}
+                                      title="Complete deliverable & record Work Log"
                                       className="px-3.5 py-1.5 bg-[#ECFDF3] hover:bg-[#16A34A] text-[#15803D] hover:text-white border border-[#BBF7D0] rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs hover:shadow-xs"
                                     >
                                       <Check className="w-3.5 h-3.5" /> Done
@@ -1071,7 +1606,7 @@ export const TasksView: React.FC = () => {
                     <button
                       onClick={() => {
                         setCreateDefaultColumn(col.key);
-                        setCreateDefaultDate(selectedMiniDate || todayStr);
+                        setCreateDefaultDate(selectedOperationalDate);
                         setShowCreateModal(true);
                       }}
                       className="w-full mt-4 py-2 bg-white dark:bg-white/5 hover:bg-[#F1F5F9] text-[#475467] dark:text-[#BAC1D1] text-xs font-black rounded-xl border border-[#D8DEE9] dark:border-white/10 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-2xs"
@@ -1255,11 +1790,15 @@ export const TasksView: React.FC = () => {
           <aside className="w-full lg:w-[280px] shrink-0 sticky top-20 lg:top-24 self-start space-y-3 z-10 animate-in fade-in slide-in-from-right-3">
             <MiniCalendarWidget
               tasks={tasks}
-              selectedDate={selectedMiniDate}
+              selectedDate={dateFilterMode === 'all' ? null : selectedOperationalDate}
               onSelectDate={(dateStr) => {
-                setSelectedMiniDate(dateStr);
                 if (dateStr) {
-                  triggerToast(`Focused tasks for ${dateStr}`);
+                  setSelectedOperationalDate(dateStr);
+                  setDateFilterMode('day');
+                  triggerToast(`Focused operational date: ${dateStr}`);
+                } else {
+                  setDateFilterMode('all');
+                  triggerToast('Showing all dates');
                 }
               }}
             />
@@ -1274,7 +1813,7 @@ export const TasksView: React.FC = () => {
           employees={employees}
           defaultColumn={createDefaultColumn}
           defaultAssigneeId={createDefaultAssigneeId}
-          defaultDate={createDefaultDate}
+          defaultDate={selectedOperationalDate}
           profile={profile}
           user={user}
           onClose={() => setShowCreateModal(false)}
@@ -1291,18 +1830,33 @@ export const TasksView: React.FC = () => {
         <TaskDetailDrawer
           task={selectedTask}
           employees={employees}
+          clients={clients}
           isAdmin={isAdmin}
           onClose={() => setSelectedTask(null)}
           onStatusChange={handleStatusChange}
           onDelete={() => {
-            handleDeleteTask(selectedTask.id);
+            const target = selectedTask;
             setSelectedTask(null);
+            setTaskToDelete(target);
+          }}
+          onDuplicate={() => {
+            handleDuplicateTask(selectedTask);
           }}
           onSave={updated => {
             setTasks(prev => prev.map(t => t.id === updated.id ? updated : t));
             setSelectedTask(updated);
             triggerToast('Task details saved');
           }}
+        />
+      )}
+
+      {/* ─── SAFE DELETE CONFIRMATION MODAL ────────────────────────────── */}
+      {taskToDelete && (
+        <DeleteTaskConfirmationModal
+          task={taskToDelete}
+          isDeleting={isDeletingTask}
+          onClose={() => !isDeletingTask && setTaskToDelete(null)}
+          onConfirm={handleConfirmDelete}
         />
       )}
 
@@ -1348,6 +1902,50 @@ const CreateTaskModal: React.FC<{
       return [];
     }
   });
+
+  const [customClientName, setCustomClientName] = useState('');
+  const [showTitleSuggestions, setShowTitleSuggestions] = useState(false);
+
+  const TASK_TEMPLATES = [
+    "Edit 5 Instagram Reels with Motion Typography & Sound FX",
+    "Design 10 Figma Carousel Slides with Dark Aesthetic",
+    "Weekly Performance Analytics & Client Growth Review Deck",
+    "Meta & Google Ad Creatives (1:1, 9:16 & 16:9 Formats)",
+    "YouTube Long-Form Video Cut with B-Roll & Chapter Markers",
+    "Full Landing Page UI Redesign & Conversion Optimization",
+    "Brand Identity Guideline Kit & Vector Typography Assets",
+    "Organic SEO Content Plan & 4 High-Impact Articles"
+  ];
+
+  // Suggestive options for Client / Brand
+  const clientOptions: SuggestiveOption[] = useMemo(() => {
+    return clientList.map(c => {
+      const id = c.id || c.clientId;
+      const name = c.clientName || c.name || c.businessName || 'Client';
+      const sub = c.businessName && c.businessName !== name ? c.businessName : c.industry || undefined;
+      return {
+        id,
+        label: name,
+        sublabel: sub,
+        badge: c.status || undefined,
+        avatarText: name.substring(0, 2).toUpperCase(),
+      };
+    });
+  }, [clientList]);
+
+  // Suggestive options for Employees
+  const employeeOptions: SuggestiveOption[] = useMemo(() => {
+    return [
+      { id: '', label: 'Unassigned', sublabel: 'No assignee assigned yet' },
+      ...employeeList.map(e => ({
+        id: e.id,
+        label: e.name,
+        sublabel: e.email || undefined,
+        badge: e.role,
+        avatarText: e.name.substring(0, 2).toUpperCase(),
+      }))
+    ];
+  }, [employeeList]);
 
   const [form, setForm] = useState({
     title: '',
@@ -1401,7 +1999,7 @@ const CreateTaskModal: React.FC<{
         title: form.title.trim(),
         description: form.description.trim(),
         clientId: form.clientId,
-        clientName: client?.clientName || client?.name || client?.businessName || (form.clientId ? 'Client' : 'Direct'),
+        clientName: client?.clientName || client?.name || client?.businessName || customClientName || (form.clientId ? 'Client' : 'General'),
         category: form.category,
         assigneeId: form.assigneeId,
         assigneeName: emp?.name || (form.assigneeId ? 'Assigned' : 'Unassigned'),
@@ -1452,18 +2050,55 @@ const CreateTaskModal: React.FC<{
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">
-              Task Title *
-            </label>
+          <div className="relative">
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496]">
+                Task Title *
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowTitleSuggestions(!showTitleSuggestions)}
+                className="text-[10px] font-bold text-[#5B4BFF] dark:text-[#806CFF] hover:underline cursor-pointer flex items-center gap-1"
+              >
+                <Sparkles className="w-3 h-3" />
+                <span>{showTitleSuggestions ? 'Hide Templates' : 'Suggestive Templates'}</span>
+              </button>
+            </div>
             <input
               required
               type="text"
               value={form.title}
+              onFocus={() => { if (!form.title) setShowTitleSuggestions(true); }}
               onChange={e => setForm(p => ({ ...p, title: e.target.value }))}
               placeholder="e.g. Design 10 Figma Carousel Slides with Dark Aesthetic"
               className={inputCls}
             />
+
+            {/* Quick Suggestive Title Templates Dropdown */}
+            {showTitleSuggestions && (
+              <div className="mt-1.5 p-2 bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-2xl space-y-1 animate-in fade-in">
+                <div className="text-[10px] font-black uppercase text-[#7A8496] px-2 py-0.5">
+                  Click to use template:
+                </div>
+                <div className="grid grid-cols-1 gap-1 max-h-36 overflow-y-auto">
+                  {TASK_TEMPLATES
+                    .filter(t => !form.title || t.toLowerCase().includes(form.title.toLowerCase()))
+                    .map(tpl => (
+                      <button
+                        key={tpl}
+                        type="button"
+                        onClick={() => {
+                          setForm(p => ({ ...p, title: tpl }));
+                          setShowTitleSuggestions(false);
+                        }}
+                        className="text-left text-xs font-semibold px-2.5 py-1.5 rounded-xl text-[#334155] dark:text-[#CBD5E1] hover:bg-[#EEECFF] hover:text-[#5B4BFF] dark:hover:bg-[#201D45] dark:hover:text-[#806CFF] transition-all cursor-pointer truncate"
+                      >
+                        ⚡ {tpl}
+                      </button>
+                    ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div>
@@ -1480,40 +2115,40 @@ const CreateTaskModal: React.FC<{
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            {/* CLIENT / BRAND SUGGESTIVE SEARCH */}
             <div>
-              <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">Client / Brand</label>
-              <select
+              <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">
+                Client / Brand (Suggestive Search)
+              </label>
+              <SuggestiveCombobox
+                options={clientOptions}
                 value={form.clientId}
-                onChange={e => setForm(p => ({ ...p, clientId: e.target.value }))}
-                className={`${inputCls} cursor-pointer font-bold`}
-              >
-                <option value="" className="bg-white dark:bg-[#161B31] text-[#101828] dark:text-white">Select client…</option>
-                {clientList.map(c => {
-                  const val = c.id || c.clientId;
-                  const label = c.clientName || c.name || c.businessName || 'Client';
-                  return (
-                    <option key={val} value={val} className="bg-white dark:bg-[#161B31] text-[#101828] dark:text-white">
-                      {label}
-                    </option>
-                  );
-                })}
-              </select>
+                onChange={(id, opt) => {
+                  setForm(p => ({ ...p, clientId: id }));
+                  if (opt?.sublabel === 'Custom') {
+                    setCustomClientName(opt.label);
+                  }
+                }}
+                placeholder="Search or select client…"
+                emptyText="No client found"
+                allowCustom
+                icon="client"
+              />
             </div>
 
+            {/* ASSIGN EMPLOYEE SUGGESTIVE SEARCH */}
             <div>
-              <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">Assign Employee</label>
-              <select
+              <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">
+                Assign Employee (Suggestive Search)
+              </label>
+              <SuggestiveCombobox
+                options={employeeOptions}
                 value={form.assigneeId}
-                onChange={e => setForm(p => ({ ...p, assigneeId: e.target.value }))}
-                className={`${inputCls} cursor-pointer font-bold`}
-              >
-                <option value="" className="bg-white dark:bg-[#161B31] text-[#101828] dark:text-white">-- Unassigned --</option>
-                {employeeList.map(e => (
-                  <option key={e.id} value={e.id} className="bg-white dark:bg-[#161B31] text-[#101828] dark:text-white">
-                    {e.name} ({e.role})
-                  </option>
-                ))}
-              </select>
+                onChange={id => setForm(p => ({ ...p, assigneeId: id }))}
+                placeholder="Search employee or role…"
+                emptyText="No employee found"
+                icon="user"
+              />
             </div>
 
             <div>
@@ -1663,12 +2298,16 @@ const CreateTaskModal: React.FC<{
 const TaskDetailDrawer: React.FC<{
   task: Task;
   employees: any[];
+  clients?: any[];
   isAdmin: boolean;
   onClose: () => void;
   onStatusChange: (taskId: string, newCol: KanbanColumnKey, source?: any) => void;
   onDelete: () => void;
+  onDuplicate?: () => void;
   onSave: (t: Task) => void;
-}> = ({ task, employees, isAdmin, onClose, onStatusChange, onDelete, onSave }) => {
+}> = ({ task, employees, clients = [], isAdmin, onClose, onStatusChange, onDelete, onDuplicate, onSave }) => {
+  const [title, setTitle] = useState(task.title || '');
+  const [clientId, setClientId] = useState(task.clientId || '');
   const [desc, setDesc] = useState(task.description || '');
   const [notes, setNotes] = useState(task.internalNotes || '');
   const [assigneeId, setAssigneeId] = useState(task.assigneeId || '');
@@ -1683,11 +2322,46 @@ const TaskDetailDrawer: React.FC<{
   const prevStatus = getPrevWorkflowStatus(task.status);
   const nextStatus = getNextWorkflowStatus(task.status);
 
+  const clientOptions: SuggestiveOption[] = useMemo(() => {
+    return [
+      { id: '', label: 'General Client', sublabel: 'No specific client profile' },
+      ...clients.map(c => {
+        const id = c.id || c.clientId;
+        const name = c.clientName || c.name || c.businessName || 'Client';
+        const sub = c.businessName && c.businessName !== name ? c.businessName : c.industry || undefined;
+        return {
+          id,
+          label: name,
+          sublabel: sub,
+          badge: c.status || undefined,
+          avatarText: name.substring(0, 2).toUpperCase(),
+        };
+      })
+    ];
+  }, [clients]);
+
+  const employeeOptions: SuggestiveOption[] = useMemo(() => {
+    return [
+      { id: '', label: 'Unassigned', sublabel: 'No assignee assigned yet' },
+      ...employees.map(e => ({
+        id: e.id,
+        label: e.name,
+        sublabel: e.email || undefined,
+        badge: e.role,
+        avatarText: e.name.substring(0, 2).toUpperCase(),
+      }))
+    ];
+  }, [employees]);
+
   const handleUpdate = async () => {
     setSaving(true);
     try {
       const emp = employees.find(e => e.id === assigneeId);
+      const matchedClient = clients.find(c => (c.id || c.clientId) === clientId);
       const updatedData: Partial<Task> = {
+        title: title.trim() || task.title,
+        clientId,
+        clientName: matchedClient?.clientName || matchedClient?.name || task.clientName || 'General',
         description: desc.trim(),
         internalNotes: notes.trim(),
         assigneeId,
@@ -1740,11 +2414,15 @@ const TaskDetailDrawer: React.FC<{
 
           <div>
             <span className="text-[10px] font-black text-[#5B4BFF] dark:text-[#806CFF] uppercase tracking-wider">
-              {task.clientName || 'General Client'} · {task.category || 'Deliverable'}
+              {task.category || 'Deliverable'}
             </span>
-            <h2 className="text-lg font-black text-[#101828] dark:text-white mt-1 leading-snug">
-              {task.title}
-            </h2>
+            <input
+              type="text"
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              placeholder="Task deliverable title"
+              className="w-full bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-3 py-2 text-base font-black text-[#101828] dark:text-white mt-1 outline-none focus:border-[#5B4BFF]"
+            />
           </div>
 
           {/* Workflow Status Arrow Controls */}
@@ -1784,17 +2462,34 @@ const TaskDetailDrawer: React.FC<{
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">Assignee</label>
-                <select
+                <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">
+                  Client (Suggestive Search)
+                </label>
+                <SuggestiveCombobox
+                  options={clientOptions}
+                  value={clientId}
+                  onChange={id => setClientId(id)}
+                  placeholder="Search client…"
+                  emptyText="No client found"
+                  allowCustom
+                  icon="client"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">
+                  Assignee (Suggestive Search)
+                </label>
+                <SuggestiveCombobox
+                  options={employeeOptions}
                   value={assigneeId}
-                  onChange={e => setAssigneeId(e.target.value)}
-                  className="w-full bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl p-2.5 text-xs font-bold text-[#101828] dark:text-[#F7F8FC] outline-none cursor-pointer"
-                >
-                  <option value="">Unassigned</option>
-                  {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                </select>
+                  onChange={id => setAssigneeId(id)}
+                  placeholder="Search team member…"
+                  emptyText="No employee found"
+                  icon="user"
+                />
               </div>
 
               <div>
@@ -1872,15 +2567,29 @@ const TaskDetailDrawer: React.FC<{
 
         {/* Footer Actions */}
         <div className="pt-4 border-t border-[#D8DEE9] dark:border-white/10 flex items-center justify-between gap-3">
-          {isAdmin && (
-            <button
-              onClick={onDelete}
-              className="p-3 rounded-xl text-rose-600 hover:bg-rose-50 border border-rose-200 transition-colors cursor-pointer"
-              title="Archive Task"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={onDelete}
+                className="p-3 rounded-xl text-rose-600 hover:bg-rose-50 border border-rose-200 transition-colors cursor-pointer"
+                title="Delete Task safely"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            )}
+            {onDuplicate && (
+              <button
+                type="button"
+                onClick={onDuplicate}
+                className="px-3 py-2.5 rounded-xl text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 border border-blue-200 dark:border-blue-900 transition-colors cursor-pointer flex items-center gap-1.5 text-xs font-bold"
+                title="Duplicate Deliverable"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>Duplicate</span>
+              </button>
+            )}
+          </div>
 
           <div className="flex items-center gap-2 flex-1 justify-end">
             <button
@@ -1898,6 +2607,117 @@ const TaskDetailDrawer: React.FC<{
               Save Changes
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── SAFE DIRECT DELETE CONFIRMATION MODAL ────────────────────────────
+const DeleteTaskConfirmationModal: React.FC<{
+  task: Task;
+  isDeleting: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}> = ({ task, isDeleting, onClose, onConfirm }) => {
+  const hasLinkedVideo = !!(task.videoProductionId || task.videoTrackerId);
+  const isInReview = normalizeTaskStatus(task.status) === 'In Review';
+  const isDone = normalizeTaskStatus(task.status) === 'Done';
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-70 flex items-center justify-center p-4">
+      <div className="bg-white dark:bg-[#11152D] border border-[#D8DEE9] dark:border-white/10 rounded-3xl w-full max-w-lg shadow-2xl p-6 space-y-5 animate-in zoom-in-95">
+        <div className="flex items-center justify-between pb-3 border-b border-[#D8DEE9] dark:border-white/10">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400 border border-rose-200 dark:border-rose-900 flex items-center justify-center">
+              <Trash2 className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-black text-[#101828] dark:text-white">Delete this task?</h2>
+              <p className="text-xs text-[#64748B] dark:text-[#94A3B8]">
+                This task will be removed from active operational views.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            disabled={isDeleting}
+            className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-white/10"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Task Summary Preview */}
+        <div className="bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-2xl p-4 space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-bold text-[#64748B] dark:text-[#94A3B8]">Client:</span>
+            <span className="font-black text-[#101828] dark:text-white">{task.clientName || 'General'}</span>
+          </div>
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-bold text-[#64748B] dark:text-[#94A3B8]">Assignee:</span>
+            <span className="font-black text-[#101828] dark:text-white">{task.assigneeName || 'Unassigned'}</span>
+          </div>
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-bold text-[#64748B] dark:text-[#94A3B8]">Scheduled:</span>
+            <span className="font-semibold text-[#101828] dark:text-white">
+              {task.scheduledDate} {task.dueDate && task.dueDate !== task.scheduledDate ? `· Due ${task.dueDate}` : ''}
+            </span>
+          </div>
+          <div className="pt-2 border-t border-[#D8DEE9]/60 dark:border-white/10">
+            <h4 className="text-xs font-black text-[#101828] dark:text-white leading-snug">
+              {task.title}
+            </h4>
+          </div>
+        </div>
+
+        {/* Linked Records Warning Banner */}
+        {(hasLinkedVideo || isInReview) && (
+          <div className="p-3.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 rounded-xl space-y-1.5 text-xs text-amber-900 dark:text-amber-300 font-medium">
+            <div className="flex items-center gap-1.5 font-bold text-amber-800 dark:text-amber-200">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>Linked Records Inspection Notice</span>
+            </div>
+            {hasLinkedVideo && (
+              <p className="text-[11px] leading-relaxed">
+                • <strong>Video Production:</strong> This deliverable is linked to video production. Deleting it safely detaches the relationship; the underlying source video asset is NOT deleted.
+              </p>
+            )}
+            {isInReview && (
+              <p className="text-[11px] leading-relaxed">
+                • <strong>Approvals Queue:</strong> Active in review. The associated pending approval will be decommissioned.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Audit & Work Log Preservation Assurance */}
+        <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900 rounded-xl text-[11px] text-emerald-800 dark:text-emerald-300 font-medium leading-relaxed flex items-start gap-2">
+          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+          <span>
+            {isDone ? 'Historical Work Logs and audit events recorded upon task completion remain permanently preserved.' : 'Audit logs remain preserved. This task will be soft-archived and removed from active boards.'}
+          </span>
+        </div>
+
+        {/* Modal Action Buttons */}
+        <div className="flex items-center justify-end gap-3 pt-2">
+          <button
+            type="button"
+            disabled={isDeleting}
+            onClick={onClose}
+            className="px-4 py-2.5 rounded-xl border border-[#D8DEE9] dark:border-white/10 text-xs font-bold text-[#475467] dark:text-[#CBD5E1] hover:bg-slate-100 dark:hover:bg-white/10 cursor-pointer transition-all"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={isDeleting}
+            onClick={onConfirm}
+            className="px-5 py-2.5 rounded-xl text-xs font-black text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+          >
+            {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+            <span>Delete Task</span>
+          </button>
         </div>
       </div>
     </div>

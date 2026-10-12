@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   ChevronLeft, ChevronRight, Calendar as CalendarIcon, 
   Plus, AlertCircle, Clock, CheckCircle2, User, ArrowLeft, ArrowRight, Flag
@@ -13,6 +13,7 @@ import {
 
 interface TaskScheduleCalendarProps {
   tasks: Task[];
+  selectedDate?: string;
   onSelectTask: (task: Task) => void;
   onOpenCreateTask: (dateStr?: string) => void;
   onStatusChange: (taskId: string, targetStatus: any, source: any) => void;
@@ -21,13 +22,28 @@ interface TaskScheduleCalendarProps {
 
 export const TaskScheduleCalendar: React.FC<TaskScheduleCalendarProps> = ({
   tasks,
+  selectedDate,
   onSelectTask,
   onOpenCreateTask,
   onStatusChange,
   onRescheduleTask
 }) => {
-  const [currentDate, setCurrentDate] = useState<Date>(new Date());
+  const [currentDate, setCurrentDate] = useState<Date>(() => {
+    if (selectedDate && /^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) {
+      const [y, m, d] = selectedDate.split('-').map(Number);
+      return new Date(y, m - 1, d);
+    }
+    return new Date();
+  });
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
+
+  // Sync calendar month when selectedDate changes externally
+  useEffect(() => {
+    if (selectedDate && /^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) {
+      const [y, m, d] = selectedDate.split('-').map(Number);
+      setCurrentDate(new Date(y, m - 1, d));
+    }
+  }, [selectedDate]);
 
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
 

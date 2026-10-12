@@ -13,6 +13,27 @@ import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { MotionalBackground } from './components/UI/MotionalBackground';
 
+// Automatic one-time purge of legacy seed data caches to start clean
+if (typeof window !== 'undefined') {
+  const PURGE_KEY = 'digi_agency_clean_slate_v1';
+  if (!localStorage.getItem(PURGE_KEY)) {
+    const keysToPurge = [
+      'digi_tasks_cache_v2',
+      'digi_video_tracker_cache',
+      'digi_social_calendar_cache_v2',
+      'digi_local_employees',
+      'digi_clients_cache',
+      'digi_attendance_cache',
+      'digi_work_log_cache',
+      'digi_approvals_cache'
+    ];
+    keysToPurge.forEach(k => {
+      try { localStorage.removeItem(k); } catch (e) {}
+    });
+    localStorage.setItem(PURGE_KEY, 'true');
+  }
+}
+
 const ScrollToTop = () => {
   const { pathname } = useLocation();
   useEffect(() => {

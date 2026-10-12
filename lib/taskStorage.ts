@@ -52,6 +52,10 @@ export interface Task {
   createdAt: string;
   updatedAt?: string;
   isArchived?: boolean;
+  is_deleted?: boolean;
+  deleted_at?: string;
+  deleted_by?: string;
+  deleted_by_id?: string;
   videoProductionId?: string;
   videoTrackerId?: string;
   productionRole?: 'shoot' | 'edit';
@@ -108,185 +112,7 @@ export const setRolloverSettings = (settings: Partial<RolloverSettings>) => {
   }
 };
 
-export const DEFAULT_MASTER_TASKS: Task[] = [
-  {
-    id: 'tsk-master-sa-1',
-    taskId: 'tsk-master-sa-1',
-    title: 'Agency Executive Review & High-Ticket Proposal Strategy',
-    description: 'Review pitch architecture, custom deliverables matrix, and profit margins for enterprise prospect.',
-    clientId: 'client_nexus_coaching',
-    clientName: 'Nexus Coaching Institute',
-    category: 'Client Coordination',
-    assigneeId: 'emp_superadmin',
-    assigneeName: 'Digiexplode Super Admin',
-    assigned_employee_id: 'emp_superadmin',
-    priority: 'Urgent',
-    scheduledDate: new Date().toISOString().split('T')[0],
-    dueDate: new Date().toISOString().split('T')[0],
-    originalScheduledDate: new Date().toISOString().split('T')[0],
-    originalDueDate: new Date().toISOString().split('T')[0],
-    firstPendingSince: new Date().toISOString().split('T')[0],
-    rolloverCount: 0,
-    status: 'In Progress',
-    createdAt: new Date().toISOString(),
-    isArchived: false,
-  },
-  {
-    id: 'tsk-master-sa-2',
-    taskId: 'tsk-master-sa-2',
-    title: 'Campaign Revenue & Growth Strategy Review',
-    description: 'Approve monthly ad budgets, growth projections, and resource allocation across creative pipelines.',
-    clientId: 'client_dr_anupam_jindal',
-    clientName: 'Dr. Anupam Jindal',
-    category: 'Reporting',
-    assigneeId: 'emp_superadmin',
-    assigneeName: 'Digiexplode Super Admin',
-    assigned_employee_id: 'emp_superadmin',
-    priority: 'High',
-    scheduledDate: new Date().toISOString().split('T')[0],
-    dueDate: new Date(Date.now() + 86400000).toISOString().split('T')[0],
-    originalScheduledDate: new Date().toISOString().split('T')[0],
-    originalDueDate: new Date(Date.now() + 86400000).toISOString().split('T')[0],
-    firstPendingSince: new Date().toISOString().split('T')[0],
-    rolloverCount: 0,
-    status: 'To Do',
-    createdAt: new Date().toISOString(),
-    isArchived: false,
-  },
-  {
-    id: 'tsk-master-1',
-    taskId: 'tsk-master-1',
-    title: 'Edit 5 Instagram Reels with Motion Typography',
-    description: 'Create high-converting medical reels with animated subtitles and sound design.',
-    clientId: 'client_dr_anupam_jindal',
-    clientName: 'Dr. Anupam Jindal',
-    category: 'Reel Editing',
-    assigneeId: 'emp_2',
-    assigneeName: 'Neha Gupta',
-    assigned_employee_id: 'emp_2',
-    priority: 'Urgent',
-    scheduledDate: new Date().toISOString().split('T')[0],
-    dueDate: new Date(Date.now() + 86400000).toISOString().split('T')[0],
-    originalScheduledDate: new Date().toISOString().split('T')[0],
-    originalDueDate: new Date(Date.now() + 86400000).toISOString().split('T')[0],
-    firstPendingSince: new Date().toISOString().split('T')[0],
-    rolloverCount: 0,
-    status: 'In Progress',
-    createdAt: new Date().toISOString(),
-    isArchived: false,
-  },
-  {
-    id: 'tsk-master-2',
-    taskId: 'tsk-master-2',
-    title: 'Meta Ads Retargeting Campaign Optimization',
-    description: 'Configure custom pixel audiences and launch high-ROAS lead generation creatives.',
-    clientId: 'client_dr_manishi_bansal',
-    clientName: 'Dr. Manishi Bansal',
-    category: 'Meta Ads',
-    assigneeId: 'emp_1',
-    assigneeName: 'Aman Sharma',
-    assigned_employee_id: 'emp_1',
-    priority: 'High',
-    scheduledDate: new Date().toISOString().split('T')[0],
-    dueDate: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0],
-    originalScheduledDate: new Date().toISOString().split('T')[0],
-    originalDueDate: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0],
-    firstPendingSince: new Date().toISOString().split('T')[0],
-    rolloverCount: 0,
-    status: 'To Do',
-    createdAt: new Date().toISOString(),
-    isArchived: false,
-  },
-  {
-    id: 'tsk-master-3',
-    taskId: 'tsk-master-3',
-    title: 'Monthly SEO Health & Core Web Vitals Audit',
-    description: 'Audit backlink profile, page speed, schema markup, and keyword rank fluctuations.',
-    clientId: 'client_dr_sankalp_sharma',
-    clientName: 'Dr. Sankalp Sharma',
-    category: 'SEO',
-    assigneeId: 'emp_3',
-    assigneeName: 'Rahul Verma',
-    assigned_employee_id: 'emp_3',
-    priority: 'Medium',
-    scheduledDate: new Date().toISOString().split('T')[0],
-    dueDate: new Date(Date.now() + 86400000 * 3).toISOString().split('T')[0],
-    originalScheduledDate: new Date().toISOString().split('T')[0],
-    originalDueDate: new Date(Date.now() + 86400000 * 3).toISOString().split('T')[0],
-    firstPendingSince: new Date().toISOString().split('T')[0],
-    rolloverCount: 0,
-    status: 'In Review',
-    createdAt: new Date().toISOString(),
-    isArchived: false,
-  },
-  {
-    id: 'tsk-master-4',
-    taskId: 'tsk-master-4',
-    title: 'Brand Identity Vector Assets & Carousel Templates',
-    description: 'Design 10 customizable Figma carousel slides with dark and light aesthetic.',
-    clientId: 'client_gangotri_ice',
-    clientName: 'Gangotri Ice Cubes',
-    category: 'Graphic Design',
-    assigneeId: 'emp_4',
-    assigneeName: 'Priya Singh',
-    assigned_employee_id: 'emp_4',
-    priority: 'High',
-    scheduledDate: new Date(Date.now() - 86400000).toISOString().split('T')[0],
-    dueDate: new Date(Date.now() - 86400000).toISOString().split('T')[0],
-    originalScheduledDate: new Date(Date.now() - 86400000).toISOString().split('T')[0],
-    originalDueDate: new Date(Date.now() - 86400000).toISOString().split('T')[0],
-    firstPendingSince: new Date(Date.now() - 86400000).toISOString().split('T')[0],
-    rolloverCount: 0,
-    status: 'Done',
-    completedAt: new Date().toISOString(),
-    createdAt: new Date().toISOString(),
-    isArchived: false,
-  },
-  {
-    id: 'tsk-master-5',
-    taskId: 'tsk-master-5',
-    title: 'Edit 4K Cinematic Brand Film & Sound Mix',
-    description: 'Color grade ARRI Log footage, apply multi-stem sound design, and master 4K ProRes deliverables.',
-    clientId: 'client_dr_anupam_jindal',
-    clientName: 'Dr. Anupam Jindal',
-    category: 'Video Editing',
-    assigneeId: 'emp_5',
-    assigneeName: 'Vansh',
-    assigned_employee_id: 'emp_5',
-    priority: 'Urgent',
-    scheduledDate: new Date().toISOString().split('T')[0],
-    dueDate: new Date(Date.now() + 86400000).toISOString().split('T')[0],
-    originalScheduledDate: new Date().toISOString().split('T')[0],
-    originalDueDate: new Date(Date.now() + 86400000).toISOString().split('T')[0],
-    firstPendingSince: new Date().toISOString().split('T')[0],
-    rolloverCount: 0,
-    status: 'In Progress',
-    createdAt: new Date().toISOString(),
-    isArchived: false,
-  },
-  {
-    id: 'tsk-master-6',
-    taskId: 'tsk-master-6',
-    title: 'Creative Campaign Script & Hook Architecture',
-    description: 'Develop 10 viral hooks and script structures for multi-platform ad creative testing.',
-    clientId: 'client_nexus_coaching',
-    clientName: 'Nexus Coaching Institute',
-    category: 'Script Writing',
-    assigneeId: 'emp_5',
-    assigneeName: 'Vansh',
-    assigned_employee_id: 'emp_5',
-    priority: 'High',
-    scheduledDate: new Date().toISOString().split('T')[0],
-    dueDate: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0],
-    originalScheduledDate: new Date().toISOString().split('T')[0],
-    originalDueDate: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0],
-    firstPendingSince: new Date().toISOString().split('T')[0],
-    rolloverCount: 0,
-    status: 'To Do',
-    createdAt: new Date().toISOString(),
-    isArchived: false,
-  },
-];
+export const DEFAULT_MASTER_TASKS: Task[] = [];
 
 /**
  * Normalizes raw status string to canonical Kanban column key
@@ -375,7 +201,11 @@ export function normalizeTaskDateModel(raw: any): Task {
     completedAt: raw.completedAt || raw.completed_at,
     createdAt: raw.createdAt || nowIso,
     updatedAt: raw.updatedAt || nowIso,
-    isArchived: !!raw.isArchived,
+    isArchived: !!raw.isArchived || !!raw.is_deleted,
+    is_deleted: !!raw.is_deleted || !!raw.isArchived,
+    deleted_at: raw.deleted_at || raw.deletedAt,
+    deleted_by: raw.deleted_by || raw.deletedBy,
+    deleted_by_id: raw.deleted_by_id || raw.deletedById,
 
     // Aliases
     scheduled_date: initialScheduled,
@@ -431,6 +261,57 @@ export function differenceInCalendarDays(targetDateStr: string, baseDateStr: str
     return Math.floor(diffMs / (1000 * 60 * 60 * 24));
   } catch {
     return 0;
+  }
+}
+
+/**
+ * Returns today's date in local calendar timezone as YYYY-MM-DD
+ */
+export function getTodayDateStr(): string {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * Adds or subtracts days from a YYYY-MM-DD date string
+ */
+export function addDaysToDateStr(dateStr: string, days: number): string {
+  try {
+    if (!dateStr) return getTodayDateStr();
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dateObj = new Date(y, m - 1, d);
+    dateObj.setDate(dateObj.getDate() + days);
+    const ny = dateObj.getFullYear();
+    const nm = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const nd = String(dateObj.getDate()).padStart(2, '0');
+    return `${ny}-${nm}-${nd}`;
+  } catch {
+    return dateStr;
+  }
+}
+
+/**
+ * Formats a YYYY-MM-DD date string into human-friendly full, day-of-week, and short representations
+ */
+export function formatOperationalDate(dateStr: string): { fullDate: string; dayOfWeek: string; shortDate: string } {
+  try {
+    if (!dateStr) return { fullDate: '', dayOfWeek: '', shortDate: '' };
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const dateObj = new Date(y, m - 1, d);
+    const fullDate = dateObj.toLocaleDateString('en-US', {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric'
+    });
+    const dayOfWeek = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
+    const shortDate = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return { fullDate, dayOfWeek, shortDate };
+  } catch {
+    return { fullDate: dateStr, dayOfWeek: '', shortDate: dateStr };
   }
 }
 
@@ -614,7 +495,7 @@ export const getCachedTasks = (): Task[] => {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
         return parsed
-          .filter(t => !t.isArchived && t.status !== 'Cancelled')
+          .filter(t => !t.isArchived && !t.is_deleted && t.status !== 'Cancelled')
           .map(normalizeTaskDateModel);
       }
     }
@@ -1012,18 +893,113 @@ export const transitionTaskStatus = async (
 };
 
 /**
- * Archives or Deletes a task
+ * Safely Archives or Soft-Deletes a task with audit event emission.
+ * Preserves historical Work Logs and audit history.
  */
-export const persistDeleteTask = async (taskId: string): Promise<void> => {
+export const persistDeleteTask = async (
+  taskId: string,
+  userProfile?: { uid?: string; name?: string; role?: string },
+  options?: { softDelete?: boolean }
+): Promise<boolean> => {
   const currentCached = getCachedTasks();
+  const targetTask = currentCached.find(t => t.id === taskId);
   const updatedList = currentCached.filter(t => t.id !== taskId);
   setCachedTasks(updatedList);
 
+  const nowIso = new Date().toISOString();
+  const actorName = userProfile?.name || 'User';
+  const actorId = userProfile?.uid || 'admin';
+  const actorRole = userProfile?.role || 'employee';
+
   try {
-    await deleteDoc(doc(db, 'tasks', taskId));
+    if (options?.softDelete !== false) {
+      // Soft-delete / Archive canonical Task in Firestore
+      await setDoc(doc(db, 'tasks', taskId), {
+        is_deleted: true,
+        isArchived: true,
+        deleted_at: nowIso,
+        deleted_by: actorName,
+        deleted_by_id: actorId,
+        updatedAt: nowIso
+      }, { merge: true });
+    } else {
+      await deleteDoc(doc(db, 'tasks', taskId));
+    }
+
+    // Audit Event: task.deleted and activityLog
+    try {
+      await addDoc(collection(db, 'activityLogs'), {
+        userId: actorId,
+        userName: actorName,
+        action: `deleted task "${targetTask?.title || taskId}"`,
+        details: `Client: ${targetTask?.clientName || 'N/A'} · Assignee: ${targetTask?.assigneeName || 'N/A'}`,
+        createdAt: nowIso,
+      });
+
+      await WorkspaceEventService.emit({
+        eventType: 'task.deleted',
+        entityType: 'task',
+        entityId: taskId,
+        actorId,
+        actorName,
+        actorRole,
+        clientId: targetTask?.clientId,
+        targetMemberIds: targetTask?.assigneeId ? [targetTask.assigneeId] : [],
+        metadata: {
+          taskId,
+          taskTitle: targetTask?.title || 'Task',
+          clientName: targetTask?.clientName,
+          assigneeName: targetTask?.assigneeName,
+          deletedAt: nowIso,
+        },
+        customDescription: `Task "${targetTask?.title || taskId}" was deleted by ${actorName}`
+      });
+    } catch (e) {
+      console.warn('Task delete audit warning:', e);
+    }
+
+    return true;
   } catch (err) {
-    console.warn('Firestore delete warning for task (removed locally):', err);
+    console.warn('Firestore delete error for task (removed locally):', err);
+    return false;
   }
+};
+
+/**
+ * Duplicates a task for quick operational cloning
+ */
+export const duplicateTask = async (
+  sourceTaskId: string,
+  targetScheduledDate?: string,
+  userProfile?: { uid?: string; name?: string; role?: string }
+): Promise<Task | null> => {
+  const currentCached = getCachedTasks();
+  const source = currentCached.find(t => t.id === sourceTaskId);
+  if (!source) return null;
+
+  const targetDate = targetScheduledDate || getTodayDateStr();
+  const clonedData: Partial<Task> = {
+    title: `${source.title} (Copy)`,
+    description: source.description,
+    clientId: source.clientId,
+    clientName: source.clientName,
+    category: source.category,
+    platform: source.platform,
+    assigneeId: source.assigneeId,
+    assigneeName: source.assigneeName,
+    assigned_employee_id: source.assigned_employee_id,
+    priority: source.priority,
+    scheduledDate: targetDate,
+    dueDate: source.dueDate || targetDate,
+    status: 'To Do',
+    internalNotes: source.internalNotes,
+    videoProductionId: source.videoProductionId,
+    videoTrackerId: source.videoTrackerId,
+    productionRole: source.productionRole,
+    blockedByShoot: source.blockedByShoot,
+  };
+
+  return await persistNewTask(clonedData, userProfile);
 };
 
 /**
@@ -1048,7 +1024,7 @@ export const subscribeToCanonicalTasks = (
       const list: Task[] = [];
       snapshot.forEach(docSnap => {
         const d = docSnap.data();
-        if (!d.isArchived && d.status !== 'Cancelled') {
+        if (!d.isArchived && !d.is_deleted && d.status !== 'Cancelled') {
           list.push(normalizeTaskDateModel({ id: docSnap.id, taskId: docSnap.id, ...d }));
         }
       });

@@ -1,0 +1,19 @@
+name = "digiexplodai"
+main = "worker/index.ts"
+account_id = "d09bc578982cdeee5de34f8458c4eb95"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "digiexplodai-db"
+database_id = "cd28fb94-777d-4cea-ae59-0c4ece651ce6"
+
+[vars]
+ENVIRONMENT = "production"
+
+# For local development
+[dev]
+port = 8787
+local_protocol = "http"

@@ -31,7 +31,9 @@ import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId); /* CRITICAL: The app will break without this line */
+// Using default Firestore database for persistent data storage
+// The AI Studio database (firestoreDatabaseId) is ephemeral and gets wiped — do NOT use it
+export const db = getFirestore(app);
 export const auth = getAuth(app);
 
 // Authentication Providers

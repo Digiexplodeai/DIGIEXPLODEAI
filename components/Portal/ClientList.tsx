@@ -128,6 +128,7 @@ interface TeamMember {
 }
 
 import { ensureCentralClientsSeeded, DEFAULT_CLIENTS_MASTER, getCachedClients, setCachedClients } from '../../lib/clientMaster';
+import { cfGetClients, cfSaveClient, cfDeleteClient } from '../../lib/cloudflareApi';
 
 const DEFAULT_AGENCY_TEAM: TeamMember[] = [];
 
@@ -269,7 +270,15 @@ export const ClientList: React.FC = () => {
     if (!profile) return;
     ensureCentralClientsSeeded().catch(e => console.warn("Seed non-fatal:", e));
     
-    // A. Listen to clients
+    // A. Listen to clients (Cloudflare D1 primary, Firestore fallback)
+    cfGetClients().then((cfList) => {
+      if (Array.isArray(cfList) && cfList.length > 0) {
+        setCachedClients(cfList as any);
+        setClients(cfList);
+        setLoading(false);
+      }
+    }).catch(e => console.warn("Cloudflare D1 clients load notice:", e));
+
     const clientsRef = collection(db, 'clients');
     const unsubscribeClients = onSnapshot(clientsRef, (snapshot) => {
       const clientList: ClientData[] = [];
@@ -281,16 +290,20 @@ export const ClientList: React.FC = () => {
         setCachedClients(clientList as any);
         setClients(clientList);
       } else {
-        // Firestore empty — use localStorage cache so UI stays populated
+        // Firestore empty — use localStorage cache or Cloudflare list so UI stays populated
         const cached = getCachedClients();
-        setClients(cached.length > 0 ? cached as ClientData[] : DEFAULT_CLIENTS_MASTER);
+        if (cached.length > 0) {
+          setClients(cached as ClientData[]);
+        }
       }
       setLoading(false);
     }, (error) => {
       console.warn("Clients list listener notice:", error);
       // On error, stay with cached data rather than wiping to empty
       const cached = getCachedClients();
-      setClients(cached.length > 0 ? cached as ClientData[] : DEFAULT_CLIENTS_MASTER);
+      if (cached.length > 0) {
+        setClients(cached as ClientData[]);
+      }
       setLoading(false);
     });
 
@@ -577,6 +590,7 @@ export const ClientList: React.FC = () => {
   const handleDeleteClient = async (id: string) => {
     if (confirm("Are you sure you want to remove this client account? This will permanently delete the client record.")) {
       try {
+        cfDeleteClient(id).catch(e => console.warn("Cloudflare delete client notice:", e));
         await deleteDoc(doc(db, 'clients', id));
         if (selectedClientId === id) {
           setSelectedClientId(null);
@@ -617,6 +631,7 @@ export const ClientList: React.FC = () => {
     };
 
     try {
+      cfSaveClient(payload).catch(e => console.warn("Cloudflare save client notice:", e));
       await setDoc(doc(db, 'clients', targetId), payload);
       // Cache immediately so it's available on next refresh
       const updated = clients.filter(c => c.clientId !== targetId).concat(payload);

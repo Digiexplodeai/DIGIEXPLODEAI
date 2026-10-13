@@ -127,7 +127,7 @@ interface TeamMember {
   role: string;
 }
 
-import { ensureCentralClientsSeeded, DEFAULT_CLIENTS_MASTER } from '../../lib/clientMaster';
+import { ensureCentralClientsSeeded, DEFAULT_CLIENTS_MASTER, getCachedClients, setCachedClients } from '../../lib/clientMaster';
 
 const DEFAULT_AGENCY_TEAM: TeamMember[] = [];
 
@@ -135,7 +135,11 @@ export const ClientList: React.FC = () => {
   const { profile, user } = useAuth();
   
   // Real-time states
-  const [clients, setClients] = useState<ClientData[]>(DEFAULT_CLIENTS_MASTER);
+  const [clients, setClients] = useState<ClientData[]>(() => {
+    // Hydrate immediately from localStorage so clients show on refresh
+    const cached = getCachedClients();
+    return cached.length > 0 ? cached as ClientData[] : DEFAULT_CLIENTS_MASTER;
+  });
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>(DEFAULT_AGENCY_TEAM);
   const [allTasks, setAllTasks] = useState<TaskData[]>([]);
   const [allApprovals, setAllApprovals] = useState<any[]>([]);
@@ -273,14 +277,20 @@ export const ClientList: React.FC = () => {
         clientList.push({ clientId: doc.id, ...doc.data() } as ClientData);
       });
       if (clientList.length > 0) {
+        // Cache so next refresh shows clients instantly
+        setCachedClients(clientList as any);
         setClients(clientList);
       } else {
-        setClients(DEFAULT_CLIENTS_MASTER);
+        // Firestore empty — use localStorage cache so UI stays populated
+        const cached = getCachedClients();
+        setClients(cached.length > 0 ? cached as ClientData[] : DEFAULT_CLIENTS_MASTER);
       }
       setLoading(false);
     }, (error) => {
       console.warn("Clients list listener notice:", error);
-      setClients(DEFAULT_CLIENTS_MASTER);
+      // On error, stay with cached data rather than wiping to empty
+      const cached = getCachedClients();
+      setClients(cached.length > 0 ? cached as ClientData[] : DEFAULT_CLIENTS_MASTER);
       setLoading(false);
     });
 
@@ -608,6 +618,9 @@ export const ClientList: React.FC = () => {
 
     try {
       await setDoc(doc(db, 'clients', targetId), payload);
+      // Cache immediately so it's available on next refresh
+      const updated = clients.filter(c => c.clientId !== targetId).concat(payload);
+      setCachedClients(updated as any);
 
       // Auto-bridge client users matching email
       const usersRef = collection(db, 'users');

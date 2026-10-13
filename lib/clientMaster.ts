@@ -28,8 +28,36 @@ export const CENTRAL_CLIENT_MASTER_LIST: CentralClient[] = [];
 
 export const DEFAULT_CLIENTS_MASTER: CentralClient[] = [];
 
+const LOCAL_STORAGE_CLIENTS_KEY = 'digi_local_clients';
+
+/**
+ * Reads clients from localStorage cache.
+ * Returns an empty array if nothing is cached yet.
+ */
 export const getCachedClients = (): CentralClient[] => {
-  return DEFAULT_CLIENTS_MASTER;
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_CLIENTS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed as CentralClient[];
+    }
+  } catch (e) {
+    console.warn('[clientMaster] Could not read cached clients:', e);
+  }
+  return [];
+};
+
+/**
+ * Saves clients to localStorage cache.
+ */
+export const setCachedClients = (clients: CentralClient[]) => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(LOCAL_STORAGE_CLIENTS_KEY, JSON.stringify(clients));
+  } catch (e) {
+    console.warn('[clientMaster] Could not write cached clients:', e);
+  }
 };
 
 // In-memory cache & initialization flag
@@ -47,19 +75,31 @@ export function subscribeToCanonicalClients(
   onUpdate: (clients: CentralClient[]) => void,
   onError?: (err: any) => void
 ): () => void {
-  onUpdate(DEFAULT_CLIENTS_MASTER);
+  // 1. Emit cached clients immediately so the UI is never blank on refresh
+  const cached = getCachedClients();
+  if (cached.length > 0) {
+    onUpdate(cached);
+  } else {
+    onUpdate([]);
+  }
 
   try {
     const unsub = onSnapshot(collection(db, 'clients'), (snapshot) => {
       if (!snapshot.empty) {
         const list = snapshot.docs.map(d => ({ id: d.id, clientId: d.id, ...d.data() } as CentralClient));
+        // Persist to localStorage so next refresh shows them instantly
+        setCachedClients(list);
         onUpdate(list);
       } else {
-        onUpdate([]);
+        // Firestore empty — emit from cache so UI doesn't blank out
+        const fallback = getCachedClients();
+        onUpdate(fallback.length > 0 ? fallback : []);
       }
     }, (err) => {
-      console.warn('Clients snapshot notice (using local fallback):', err);
-      onUpdate([]);
+      console.warn('[clientMaster] Clients snapshot error (using local cache):', err);
+      // On error (e.g. auth not ready), use localStorage cache
+      const fallback = getCachedClients();
+      onUpdate(fallback.length > 0 ? fallback : []);
       if (onError) onError(err);
     });
     return unsub;

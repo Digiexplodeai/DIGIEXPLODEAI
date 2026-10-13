@@ -26,6 +26,62 @@ export const CENTRAL_EMPLOYEES_MASTER_LIST: MasterEmployee[] = [
     status: 'Active',
     monthlySalary: 250000,
     createdAt: '2024-01-01T00:00:00.000Z'
+  },
+  {
+    id: 'emp_priyanshu',
+    employeeId: 'emp_priyanshu',
+    name: 'Priyanshu',
+    email: 'bgrltwrrt@gmail.com',
+    phone: '+91 98765 43211',
+    role: 'Developer',
+    designation: 'Developer',
+    department: 'Development',
+    joiningDate: '2024-01-15',
+    status: 'Active',
+    monthlySalary: 55000,
+    createdAt: '2024-01-15T00:00:00.000Z'
+  },
+  {
+    id: 'emp_vansh',
+    employeeId: 'emp_vansh',
+    name: 'Vansh',
+    email: 'f3434@gmail.com',
+    phone: '+91 87250 72731',
+    role: 'Graphic Designer',
+    designation: 'Graphic Designer',
+    department: 'Design',
+    joiningDate: '2024-02-01',
+    status: 'Active',
+    monthlySalary: 50000,
+    createdAt: '2024-02-01T00:00:00.000Z'
+  },
+  {
+    id: 'emp_ravinder',
+    employeeId: 'emp_ravinder',
+    name: 'Ravinder',
+    email: '3r3rc5@gmail.com',
+    phone: '+91 98150 77889',
+    role: 'Graphic Designer',
+    designation: 'Graphic Designer',
+    department: 'Design',
+    joiningDate: '2024-02-15',
+    status: 'Active',
+    monthlySalary: 50000,
+    createdAt: '2024-02-15T00:00:00.000Z'
+  },
+  {
+    id: 'emp_aakib',
+    employeeId: 'emp_aakib',
+    name: 'Mohd Aakib',
+    email: 'f4344@gmail.com',
+    phone: '+91 98765 99001',
+    role: 'Graphic Designer',
+    designation: 'Graphic Designer',
+    department: 'Design',
+    joiningDate: '2024-03-01',
+    status: 'Active',
+    monthlySalary: 50000,
+    createdAt: '2024-03-01T00:00:00.000Z'
   }
 ];
 
@@ -214,6 +270,15 @@ export const EMPLOYEE_ID_ALIASES: Record<string, string> = {
   'emp_4': 'emp_priya_05',
   'emp_rohit_06': 'emp_6',
   'emp_6': 'emp_rohit_06',
+  'priyanshu': 'emp_priyanshu',
+  'emp_priyanshu': 'priyanshu',
+  'vansh': 'emp_vansh',
+  'emp_vansh': 'vansh',
+  'ravinder': 'emp_ravinder',
+  'emp_ravinder': 'ravinder',
+  'mohdaakib': 'emp_aakib',
+  'aakib': 'emp_aakib',
+  'emp_aakib': 'mohdaakib',
 };
 
 /**

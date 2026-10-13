@@ -34,7 +34,7 @@ const getNavGroups = (role: string, notifCount: number): NavGroup[] => {
       label: 'Overview',
       items: [
         { id: 'dashboard',        label: 'Command Center', icon: LayoutDashboard, roles: ['superAdmin','admin'] },
-        { id: 'myday',            label: 'My Day',          icon: Sun,             roles: ['superAdmin','admin','employee'] },
+        { id: 'myday',            label: role === 'employee' ? 'Employee Workspace' : 'Employee View (My Day)', icon: Sun, roles: ['superAdmin','admin','employee'] },
         { id: 'client-workspace', label: 'My Workspace',    icon: LayoutDashboard, roles: ['client'] },
       ]
     },

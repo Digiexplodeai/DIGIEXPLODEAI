@@ -13,15 +13,45 @@ import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { MotionalBackground } from './components/UI/MotionalBackground';
 
-// Automatic one-time purge of legacy seed data caches to start clean
+import { collection, getDocs, deleteDoc } from 'firebase/firestore';
+import { db } from './lib/firebase';
+
+// Nuclear clean slate — purges ALL cached mock/seed data so portal starts empty
+// Version bump forces re-run on all existing browsers that ran older purges
 if (typeof window !== 'undefined') {
-  const PURGE_KEY = 'digi_agency_clean_slate_v1';
+  const PURGE_KEY = 'digi_agency_clean_slate_v4';
   if (!localStorage.getItem(PURGE_KEY)) {
+    // Remove old purge flags so this one supersedes them
+    localStorage.removeItem('digi_agency_clean_slate_v1');
+    localStorage.removeItem('digi_agency_clean_slate_v2');
+    localStorage.removeItem('digi_agency_clean_slate_v3');
     const keysToPurge = [
-      'digi_tasks_cache_v2',
-      'digi_video_tracker_cache',
-      'digi_social_calendar_cache_v2',
+      // Tasks & rollover
+      'digi_persisted_tasks_v2',
+      'digi_rollover_settings_v1',
+      // Employees
       'digi_local_employees',
+      // Video tracker
+      'digi_video_tracker_cache',
+      // Social / content calendar
+      'digi_social_calendar_cache_v2',
+      // Approvals
+      'digi_persisted_approvals_v2',
+      // Work logs
+      'digi_persisted_worklogs_v2',
+      // Payroll
+      'digi_payroll_records',
+      'digi_payroll_seq',
+      // HR docs
+      'digi_hr_documents',
+      'digi_hr_docs_seq',
+      // Notifications & audit
+      'digi_notifications_local',
+      'digi_audit_log_local',
+      // Attendance
+      'digi_local_attendance',
+      // Old cache key names (legacy)
+      'digi_tasks_cache_v2',
       'digi_clients_cache',
       'digi_attendance_cache',
       'digi_work_log_cache',

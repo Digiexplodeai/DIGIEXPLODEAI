@@ -39,6 +39,7 @@ interface AuthContextType {
   ) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
   loginAsDemoRole: (role?: "superAdmin" | "admin" | "employee" | "client") => Promise<void> | void;
+  loginAsEmployee: (employeeNameOrId: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -178,6 +179,127 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     return () => unsubscribeAuth();
   }, []);
 
+  const REGISTERED_SPECIALISTS = [
+    {
+      id: 'emp_priyanshu',
+      name: 'Priyanshu',
+      email: 'bgrltwrrt@gmail.com',
+      role: 'employee' as const,
+      designation: 'Developer',
+      department: 'Development',
+      phone: '+91 98765 43211',
+      aliases: ['priyanshu', 'bgrltwrrt@gmail.com', 'emp_priyanshu'],
+    },
+    {
+      id: 'emp_vansh',
+      name: 'Vansh',
+      email: 'f3434@gmail.com',
+      role: 'employee' as const,
+      designation: 'Graphic Designer',
+      department: 'Design',
+      phone: '+91 87250 72731',
+      aliases: ['vansh', 'f3434@gmail.com', 'emp_vansh'],
+    },
+    {
+      id: 'emp_ravinder',
+      name: 'Ravinder',
+      email: '3r3rc5@gmail.com',
+      role: 'employee' as const,
+      designation: 'Graphic Designer',
+      department: 'Design',
+      phone: '+91 98150 77889',
+      aliases: ['ravinder', '3r3rc5@gmail.com', 'emp_ravinder'],
+    },
+    {
+      id: 'emp_aakib',
+      name: 'Mohd Aakib',
+      email: 'f4344@gmail.com',
+      role: 'employee' as const,
+      designation: 'Graphic Designer',
+      department: 'Design',
+      phone: '+91 98765 99001',
+      aliases: ['mohdaakib', 'aakib', 'mohd aakib', 'f4344@gmail.com', 'emp_aakib'],
+    },
+  ];
+
+  const loginAsCustomEmployee = async (empData: UserProfile) => {
+    setLoading(true);
+    localStorage.setItem("digi_demo_profile", JSON.stringify(empData));
+    setProfile(empData);
+    setUser({
+      uid: empData.userId,
+      email: empData.email,
+      displayName: empData.name,
+      phoneNumber: empData.phone,
+    } as any);
+
+    try {
+      let activeUser = auth.currentUser;
+      if (!activeUser) {
+        const cred = await signInAnonymously(auth);
+        activeUser = cred.user;
+      }
+      if (activeUser) {
+        const fullProf: UserProfile = { ...empData, userId: activeUser.uid };
+        await setDoc(doc(db, "users", activeUser.uid), fullProf, { merge: true });
+        setProfile(fullProf);
+      }
+      await setDoc(doc(db, "users", empData.userId), empData, { merge: true });
+    } catch (err) {
+      console.warn("Employee session sync note:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loginAsEmployee = async (nameOrId: string) => {
+    const clean = nameOrId.trim().toLowerCase().replace(/[\s_\-.]+/g, '');
+    const found = REGISTERED_SPECIALISTS.find(e =>
+      e.aliases.some(a => a.toLowerCase().replace(/[\s_\-.]+/g, '') === clean) ||
+      e.name.toLowerCase().replace(/[\s_\-.]+/g, '') === clean
+    );
+    if (found) {
+      await loginAsCustomEmployee({
+        userId: found.id,
+        name: found.name,
+        email: found.email,
+        phone: found.phone,
+        role: 'employee',
+        department: found.department,
+        designation: found.designation,
+        status: 'active',
+        createdAt: new Date().toISOString(),
+      });
+      return;
+    }
+
+    try {
+      const rawLocal = localStorage.getItem('digi_local_employees');
+      if (rawLocal) {
+        const parsed = JSON.parse(rawLocal);
+        if (Array.isArray(parsed)) {
+          const matched = parsed.find((e: any) => {
+            const eClean = (e.name || '').toLowerCase().replace(/[\s_\-.]+/g, '');
+            return eClean === clean || (e.id || '').toLowerCase() === clean;
+          });
+          if (matched) {
+            await loginAsCustomEmployee({
+              userId: matched.id || matched.employeeId || `emp_${Date.now()}`,
+              name: matched.name,
+              email: matched.email || '',
+              phone: matched.phone || '',
+              role: 'employee',
+              department: matched.department || 'Operations',
+              designation: matched.designation || matched.role || 'Specialist',
+              status: 'active',
+              createdAt: matched.createdAt || new Date().toISOString(),
+            });
+          }
+        }
+      }
+    } catch (e) {}
+  };
+
   const loginWithEmail = async (email: string, pass: string) => {
     setLoading(true);
     const cleanEmail = email.trim().toLowerCase();
@@ -198,7 +320,79 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       return;
     }
 
-    if (cleanEmail === "employee" || cleanEmail.includes("vansh")) {
+    // 2. Employee login: Name as ID and Name as Password!
+    const cleanInput = cleanEmail.replace(/[\s_\-.]+/g, '');
+    const cleanPass = pass.trim().toLowerCase().replace(/[\s_\-.]+/g, '');
+
+    const matchedFixed = REGISTERED_SPECIALISTS.find(e =>
+      e.aliases.some(a => a.toLowerCase().replace(/[\s_\-.]+/g, '') === cleanInput) ||
+      e.name.toLowerCase().replace(/[\s_\-.]+/g, '') === cleanInput ||
+      e.email.toLowerCase() === cleanEmail
+    );
+
+    if (matchedFixed) {
+      const isPassValid = 
+        cleanPass === matchedFixed.name.toLowerCase().replace(/[\s_\-.]+/g, '') ||
+        cleanPass === matchedFixed.aliases[0].toLowerCase().replace(/[\s_\-.]+/g, '') ||
+        (matchedFixed.aliases[1] && cleanPass === matchedFixed.aliases[1].toLowerCase().replace(/[\s_\-.]+/g, '')) ||
+        pass.trim() === matchedFixed.email;
+
+      if (!isPassValid) {
+        setLoading(false);
+        throw new Error(`Incorrect password for ${matchedFixed.name}. Password is their name: ${matchedFixed.name.toLowerCase()}`);
+      }
+
+      await loginAsCustomEmployee({
+        userId: matchedFixed.id,
+        name: matchedFixed.name,
+        email: matchedFixed.email,
+        phone: matchedFixed.phone,
+        role: 'employee',
+        department: matchedFixed.department,
+        designation: matchedFixed.designation,
+        status: 'active',
+        createdAt: new Date().toISOString(),
+      });
+      return;
+    }
+
+    // Dynamic local employees check
+    try {
+      const rawLocal = localStorage.getItem('digi_local_employees');
+      if (rawLocal) {
+        const parsed = JSON.parse(rawLocal);
+        if (Array.isArray(parsed)) {
+          const matchedDyn = parsed.find((e: any) => {
+            if (e.id === 'emp_superadmin' || e.role === 'superAdmin') return false;
+            const eClean = (e.name || '').toLowerCase().replace(/[\s_\-.]+/g, '');
+            return eClean === cleanInput || (e.email || '').toLowerCase() === cleanEmail;
+          });
+
+          if (matchedDyn) {
+            const eClean = (matchedDyn.name || '').toLowerCase().replace(/[\s_\-.]+/g, '');
+            if (cleanPass === eClean || pass.trim() === matchedDyn.email) {
+              await loginAsCustomEmployee({
+                userId: matchedDyn.id || matchedDyn.employeeId || `emp_${Date.now()}`,
+                name: matchedDyn.name,
+                email: matchedDyn.email || '',
+                phone: matchedDyn.phone || '',
+                role: 'employee',
+                department: matchedDyn.department || 'Operations',
+                designation: matchedDyn.designation || matchedDyn.role || 'Specialist',
+                status: 'active',
+                createdAt: matchedDyn.createdAt || new Date().toISOString(),
+              });
+              return;
+            } else {
+              setLoading(false);
+              throw new Error(`Incorrect password for ${matchedDyn.name}. Password is their name: ${matchedDyn.name.toLowerCase()}`);
+            }
+          }
+        }
+      }
+    } catch (e) {}
+
+    if (cleanEmail === "employee") {
       loginAsDemoRole("employee");
       return;
     }
@@ -423,6 +617,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         signUpWithEmail,
         loginWithGoogle,
         loginAsDemoRole,
+        loginAsEmployee,
       }}
     >
       {children}

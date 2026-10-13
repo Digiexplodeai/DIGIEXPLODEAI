@@ -8,11 +8,23 @@ import {
   Sparkles,
   AlertTriangle,
   KeyRound,
+  Users,
+  ChevronDown,
+  Check,
+  ArrowRight,
 } from "lucide-react";
 
 export const LoginView: React.FC = () => {
-  const { loginWithEmail, signUpWithEmail, loginWithGoogle, loginAsDemoRole } = useAuth();
+  const { loginWithEmail, signUpWithEmail, loginWithGoogle, loginAsDemoRole, loginAsEmployee } = useAuth();
   const [isSignUp, setIsSignUp] = useState(false);
+  const [showEmployeePicker, setShowEmployeePicker] = useState(false);
+
+  const employeeAccounts = [
+    { name: 'Priyanshu', role: 'Developer', id: 'priyanshu', email: 'bgrltwrrt@gmail.com', dept: 'Development' },
+    { name: 'Vansh', role: 'Graphic Designer', id: 'vansh', email: 'f3434@gmail.com', dept: 'Design' },
+    { name: 'Ravinder', role: 'Graphic Designer', id: 'ravinder', email: '3r3rc5@gmail.com', dept: 'Design' },
+    { name: 'Mohd Aakib', role: 'Graphic Designer', id: 'aakib', email: 'f4344@gmail.com', dept: 'Design' },
+  ];
 
   // Field values
   const [email, setEmail] = useState("");
@@ -289,7 +301,7 @@ export const LoginView: React.FC = () => {
                     type="text"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="admin or name@company.com"
+                    placeholder="admin, priyanshu, vansh, ravinder, aakib, or email..."
                     className="w-full text-xs font-medium bg-slate-55 dark:bg-slate-950 hover:bg-slate-100/40 border border-slate-202 dark:border-slate-805 p-3.5 pl-10 rounded-xl outline-none text-slate-850 dark:text-slate-150"
                     required
                   />
@@ -322,6 +334,33 @@ export const LoginView: React.FC = () => {
                     required
                   />
                 </div>
+
+                {!isSignUp && (
+                  <div className="mt-2.5 p-2.5 rounded-xl bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200/70 dark:border-blue-900/40 text-[10px] text-slate-600 dark:text-slate-300">
+                    <div className="flex items-center gap-1.5 font-bold text-blue-600 dark:text-blue-400 mb-1">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Employee Login: Name as ID &amp; Password</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 mb-1.5">
+                      Click to auto-fill credentials:
+                    </p>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {employeeAccounts.map(emp => (
+                        <button
+                          key={emp.id}
+                          type="button"
+                          onClick={() => { setEmail(emp.id); setPassword(emp.id); }}
+                          className={`text-left px-2 py-1 rounded bg-white dark:bg-slate-900 border text-[10px] font-semibold transition-all cursor-pointer ${
+                            email === emp.id ? 'border-blue-500 text-blue-600 dark:text-blue-400 font-bold shadow-2xs' : 'border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-blue-400'
+                          }`}
+                        >
+                          <span className="font-bold">{emp.name}</span>
+                          <span className="text-[9px] text-slate-400 block">{emp.id} / {emp.id}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -504,19 +543,60 @@ export const LoginView: React.FC = () => {
             <div className="grid grid-cols-2 gap-2 pt-1">
               <button
                 type="button"
-                onClick={() => loginAsDemoRole("employee")}
-                className="py-2 px-2 text-[10px] font-bold text-teal-700 bg-teal-50 dark:bg-teal-950/40 dark:text-teal-300 rounded-lg hover:bg-teal-100 transition-colors text-center"
+                onClick={() => setShowEmployeePicker(!showEmployeePicker)}
+                className={`py-2 px-2 text-[10px] font-bold rounded-lg transition-all text-center flex items-center justify-center gap-1 cursor-pointer ${
+                  showEmployeePicker
+                    ? 'bg-blue-600 text-white font-black shadow-xs'
+                    : 'text-blue-700 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-300 hover:bg-blue-100 border border-blue-200/60 dark:border-blue-900/40'
+                }`}
               >
-                Team Member View
+                <Users className="w-3.5 h-3.5" />
+                <span>Employee View ({employeeAccounts.length})</span>
+                <ChevronDown className={`w-3 h-3 transition-transform ${showEmployeePicker ? 'rotate-180' : ''}`} />
               </button>
               <button
                 type="button"
                 onClick={() => loginAsDemoRole("client")}
-                className="py-2 px-2 text-[10px] font-bold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-300 rounded-lg hover:bg-emerald-100 transition-colors text-center"
+                className="py-2 px-2 text-[10px] font-bold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-300 rounded-lg hover:bg-emerald-100 transition-colors text-center border border-emerald-200/60 dark:border-emerald-900/40 cursor-pointer"
               >
                 Client View
               </button>
             </div>
+
+            {/* Expandable Employee Fast-Track Picker */}
+            {showEmployeePicker && (
+              <div className="bg-slate-50 dark:bg-slate-900/90 border border-blue-200 dark:border-blue-900/50 rounded-xl p-3 space-y-2 animate-in fade-in-50 zoom-in-95">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                    Select Specialist Account:
+                  </span>
+                  <span className="text-[9px] text-slate-400">1-Click Fast Login</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {employeeAccounts.map(emp => (
+                    <button
+                      key={emp.id}
+                      type="button"
+                      onClick={() => loginAsEmployee(emp.id)}
+                      className="text-left p-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-blue-950/30 transition-all cursor-pointer group"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black text-slate-850 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                          {emp.name}
+                        </span>
+                        <ArrowRight className="w-3 h-3 text-slate-400 group-hover:text-blue-500 group-hover:translate-x-0.5 transition-all" />
+                      </div>
+                      <span className="text-[9px] text-slate-500 dark:text-slate-400 block font-medium">
+                        {emp.role} · {emp.dept}
+                      </span>
+                      <span className="text-[9px] font-mono text-blue-500 dark:text-blue-400 font-bold block mt-0.5">
+                        ID: {emp.id}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -249,73 +249,12 @@ export function normalizeVideoEntry(docId: string, data: any): VideoProductionEn
   };
 }
 
-const DEFAULT_INITIAL_VIDEOS: VideoProductionEntry[] = [
-  {
-    id: 'vid-demo-1',
-    clientId: 'client_dr_anupam_jindal',
-    clientName: 'Dr. Anupam Jindal',
-    title: 'Neurosurgery Patient Recovery & Robotic Spine FAQ Set',
-    plannedQuantity: 4,
-    shotQuantity: 4,
-    finishedQuantity: 0,
-    shootDate: new Date().toISOString().split('T')[0],
-    status: 'shot',
-    videographerId: 'emp_1',
-    videographerName: 'Aman Sharma',
-    editorId: 'emp_2',
-    editorName: 'Neha Gupta',
-    notes: 'Brain surgery patient testimonial & robotic spine Q&A reel set',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    createdBy: 'Super Admin'
-  },
-  {
-    id: 'vid-demo-2',
-    clientId: 'client_dr_manishi_bansal',
-    clientName: 'Dr. Manishi Bansal',
-    title: 'High-Risk Pregnancy Awareness Series',
-    plannedQuantity: 3,
-    shotQuantity: 3,
-    finishedQuantity: 3,
-    shootDate: new Date(Date.now() - 86400000 * 2).toISOString().split('T')[0],
-    status: 'finished',
-    videographerId: 'emp_3',
-    videographerName: 'Rahul Verma',
-    editorId: 'emp_2',
-    editorName: 'Neha Gupta',
-    completedByEmployeeId: 'emp_2',
-    completedByName: 'Neha Gupta',
-    completedAt: new Date().toISOString(),
-    notes: 'High-risk pregnancy awareness series with animated infographics',
-    createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
-    updatedAt: new Date().toISOString(),
-    createdBy: 'Super Admin'
-  },
-  {
-    id: 'vid-demo-3',
-    clientId: 'client_dr_sankalp_sharma',
-    clientName: 'Dr. Sankalp Sharma',
-    title: 'Arthroscopy & Joint Care Exercise Demonstrations',
-    plannedQuantity: 5,
-    shotQuantity: 0,
-    finishedQuantity: 0,
-    shootDate: new Date(Date.now() + 86400000 * 2).toISOString().split('T')[0],
-    status: 'pending_shoot',
-    videographerId: 'emp_1',
-    videographerName: 'Aman Sharma',
-    editorId: 'emp_2',
-    editorName: 'Neha Gupta',
-    notes: 'Scheduled filming slot at Ortho clinic',
-    createdAt: new Date(Date.now() - 86400000).toISOString(),
-    updatedAt: new Date().toISOString(),
-    createdBy: 'Super Admin'
-  }
-];
+const DEFAULT_INITIAL_VIDEOS: VideoProductionEntry[] = [];
 
 export const VideoTrackerView: React.FC = () => {
   const { profile, user } = useAuth();
-  const [videos, setVideos] = useState<VideoProductionEntry[]>(DEFAULT_INITIAL_VIDEOS);
-  const [clients, setClients] = useState<ClientData[]>(DEFAULT_CLIENTS_MASTER);
+  const [videos, setVideos] = useState<VideoProductionEntry[]>([]);
+  const [clients, setClients] = useState<ClientData[]>([]);
   const [employees, setEmployees] = useState<MasterEmployee[]>(() => getCachedEmployees());
   const [loading, setLoading] = useState(true);
 
@@ -429,14 +368,14 @@ export const VideoTrackerView: React.FC = () => {
         setVideos(list);
         saveToLocalCache(list);
       } else {
-        setVideos(DEFAULT_INITIAL_VIDEOS);
+        setVideos([]);
       }
       setContradictionCount(contradictionsFound);
       setLoading(false);
     }, (error) => {
       console.warn("videoTracker listener notice:", error);
       // Retain current or fallback to default
-      setVideos(prev => prev.length > 0 ? prev : DEFAULT_INITIAL_VIDEOS);
+      setVideos(prev => prev.length > 0 ? prev : []);
       setLoading(false);
     });
 

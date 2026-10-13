@@ -82,7 +82,10 @@ export interface CanonicalApprovalRecord {
 
 export const LOCAL_STORAGE_APPROVALS_KEY = 'digi_persisted_approvals_v2';
 
-export const DEFAULT_APPROVAL_SEEDS: CanonicalApprovalRecord[] = [
+export const DEFAULT_APPROVAL_SEEDS: CanonicalApprovalRecord[] = [];
+
+// Legacy placeholder — kept for type compatibility only
+const _LEGACY_SEED_PLACEHOLDER = [
   {
     id: 'appr_task_tsk-master-3',
     approval_id: 'appr_task_tsk-master-3',
@@ -360,26 +363,22 @@ export const DEFAULT_APPROVAL_SEEDS: CanonicalApprovalRecord[] = [
 ];
 
 /**
- * Gets cached approvals from local storage, with fallback to default seeds
+ * Gets cached approvals from local storage. Returns empty array if no real data yet.
  */
 export const getCachedApprovals = (): CanonicalApprovalRecord[] => {
-  if (typeof window === 'undefined') return DEFAULT_APPROVAL_SEEDS;
+  if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_APPROVALS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         return parsed;
       }
     }
   } catch (e) {
     console.warn('Could not read cached approvals:', e);
   }
-  // Initialize with seed data
-  try {
-    localStorage.setItem(LOCAL_STORAGE_APPROVALS_KEY, JSON.stringify(DEFAULT_APPROVAL_SEEDS));
-  } catch (e) {}
-  return DEFAULT_APPROVAL_SEEDS;
+  return [];
 };
 
 /**

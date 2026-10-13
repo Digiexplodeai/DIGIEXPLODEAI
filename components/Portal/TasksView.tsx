@@ -69,15 +69,7 @@ export const CATEGORIES = [
 
 export const PRIORITIES: ('Urgent' | 'High' | 'Medium' | 'Low')[] = ['Urgent', 'High', 'Medium', 'Low'];
 
-export const DEFAULT_EMPLOYEES_LIST = [
-  { id: 'emp_superadmin', name: 'Digiexplode Super Admin', role: 'Super Admin / Managing Director' },
-  { id: 'emp_1', name: 'Aman Sharma', role: 'Performance Marketer' },
-  { id: 'emp_2', name: 'Neha Gupta', role: 'Senior Video Editor' },
-  { id: 'emp_3', name: 'Rahul Verma', role: 'Full Stack & SEO Lead' },
-  { id: 'emp_4', name: 'Priya Singh', role: 'Creative Visual Designer' },
-  { id: 'emp_5', name: 'Vansh', role: 'Creative Specialist' },
-  { id: 'emp_6', name: 'Rohit Kumar', role: 'Content Strategist' },
-];
+export const DEFAULT_EMPLOYEES_LIST: { id: string; name: string; role: string }[] = [];
 
 const priorityStyles: Record<string, { badge: string; text: string; dot: string }> = {
   Urgent: { badge: 'bg-rose-50 border-rose-200 text-rose-700 dark:bg-rose-950/50 dark:border-rose-900/60 dark:text-rose-300 font-black', text: 'text-rose-700', dot: 'bg-rose-500' },
@@ -89,8 +81,8 @@ const priorityStyles: Record<string, { badge: string; text: string; dot: string 
 export const TasksView: React.FC = () => {
   const { profile, user } = useAuth();
   const [tasks, setTasks] = useState<Task[]>(() => getCachedTasks());
-  const [clients, setClients] = useState<any[]>(DEFAULT_CLIENTS_MASTER);
-  const [employees, setEmployees] = useState<any[]>(DEFAULT_EMPLOYEES_LIST);
+  const [clients, setClients] = useState<any[]>([]);
+  const [employees, setEmployees] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
   // View state: 5 tabs
@@ -1887,8 +1879,8 @@ const CreateTaskModal: React.FC<{
   onClose: () => void;
   onCreated: (t: Task) => void;
 }> = ({ clients, employees, defaultColumn, defaultAssigneeId, defaultDate, profile, user, onClose, onCreated }) => {
-  const clientList = (clients && clients.length > 0) ? clients : DEFAULT_CLIENTS_MASTER;
-  const employeeList = (employees && employees.length > 0) ? employees : DEFAULT_EMPLOYEES_LIST;
+  const clientList = (clients && clients.length > 0) ? clients : [];
+  const employeeList = (employees && employees.length > 0) ? employees : [];
   const inputCls = 'w-full bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-[#101828] dark:text-[#F7F8FC] placeholder-[#98A2B3] outline-none focus:border-[#5B4BFF] focus:bg-white dark:focus:bg-[#1A203C] transition-all shadow-2xs';
 
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);

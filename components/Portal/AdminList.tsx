@@ -235,6 +235,39 @@ export const AdminList: React.FC = () => {
     }
   }, [employees]);
 
+  const handleDeleteEmployee = useCallback(async (emp: Employee) => {
+    if (emp.id === 'emp_superadmin' || emp.role === 'superAdmin') {
+      alert('Super Admin cannot be deleted.');
+      return;
+    }
+    if (!confirm(`Are you sure you want to permanently delete "${emp.name}"?`)) return;
+    const updated = employees.filter(e => e.id !== emp.id);
+    setEmployees(updated);
+    localStorage.setItem('digi_local_employees', JSON.stringify(updated));
+    window.dispatchEvent(new CustomEvent('digi_employees_sync', { detail: updated }));
+
+    try {
+      await deleteDoc(doc(db, 'employees', emp.id));
+    } catch (e) {
+      console.warn('Could not delete from Firestore:', e);
+    }
+  }, [employees]);
+
+  const handleClearAllEmployees = useCallback(async () => {
+    if (!confirm('Are you sure you want to permanently delete ALL specialist employees? (Super Admin will be kept)')) return;
+    const kept = employees.filter(e => e.id === 'emp_superadmin' || e.role === 'superAdmin');
+    const toRemove = employees.filter(e => e.id !== 'emp_superadmin' && e.role !== 'superAdmin');
+    setEmployees(kept);
+    localStorage.setItem('digi_local_employees', JSON.stringify(kept));
+    window.dispatchEvent(new CustomEvent('digi_employees_sync', { detail: kept }));
+
+    for (const emp of toRemove) {
+      try {
+        await deleteDoc(doc(db, 'employees', emp.id));
+      } catch (e) {}
+    }
+  }, [employees]);
+
   const handleAddEmployee = async (newEmp: Omit<Employee, 'id' | 'createdAt'>) => {
     const empId = `emp_${Date.now()}`;
     const created: any = {
@@ -294,12 +327,23 @@ export const AdminList: React.FC = () => {
           </p>
         </div>
         {isAdmin && (
-          <button
-            onClick={() => setShowCreate(true)}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider text-white bg-[#5B4BFF] hover:bg-[#4E3FE6] dark:bg-[#806CFF] dark:hover:bg-[#725DEF] transition-all shadow-xs cursor-pointer"
-          >
-            <Plus className="w-4 h-4" /> Add Employee
-          </button>
+          <div className="flex items-center gap-2">
+            {employees.some(e => e.id !== 'emp_superadmin' && e.role !== 'superAdmin') && (
+              <button
+                onClick={handleClearAllEmployees}
+                className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider text-rose-600 border border-rose-200 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/30 dark:border-rose-800/40 dark:text-rose-400 transition-all shadow-xs cursor-pointer"
+                title="Delete all specialists except Super Admin"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Clear All Data
+              </button>
+            )}
+            <button
+              onClick={() => setShowCreate(true)}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider text-white bg-[#5B4BFF] hover:bg-[#4E3FE6] dark:bg-[#806CFF] dark:hover:bg-[#725DEF] transition-all shadow-xs cursor-pointer"
+            >
+              <Plus className="w-4 h-4" /> Add Employee
+            </button>
+          </div>
         )}
       </div>
 
@@ -372,6 +416,7 @@ export const AdminList: React.FC = () => {
               isAdmin={isAdmin}
               onSelect={() => { setSelectedEmployee(emp); setActiveProfileTab('overview'); }}
               onToggle={() => handleToggleStatus(emp)}
+              onDelete={() => handleDeleteEmployee(emp)}
             />
           ))}
         </div>
@@ -415,7 +460,13 @@ export const AdminList: React.FC = () => {
 };
 
 // ─── EMPLOYEE CARD ────────────────────────────────────────────────────
-const EmployeeCard: React.FC<{ emp: Employee; isAdmin: boolean; onSelect: () => void; onToggle: () => void }> = ({ emp, isAdmin, onSelect, onToggle }) => {
+const EmployeeCard: React.FC<{
+  emp: Employee;
+  isAdmin: boolean;
+  onSelect: () => void;
+  onToggle: () => void;
+  onDelete?: () => void;
+}> = ({ emp, isAdmin, onSelect, onToggle, onDelete }) => {
   const initials = emp.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
   const gradients = [
     'from-[#5B4BFF] to-[#2864FF]',
@@ -456,13 +507,23 @@ const EmployeeCard: React.FC<{ emp: Employee; isAdmin: boolean; onSelect: () => 
           <Mail className="w-3.5 h-3.5" />
           <span className="truncate max-w-[160px]">{emp.email}</span>
         </div>
-        <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
           {isAdmin && (
             <button
               onClick={onToggle}
-              className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${emp.status === 'Active' ? 'text-rose-600 border-rose-200 hover:bg-rose-50 dark:text-rose-400 dark:border-rose-800/40 dark:hover:bg-rose-950/30' : 'text-emerald-700 border-emerald-200 hover:bg-emerald-50 dark:text-emerald-300 dark:border-emerald-800/40 dark:hover:bg-emerald-950/30'}`}
+              className={`text-[10px] font-bold px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${emp.status === 'Active' ? 'text-amber-600 border-amber-200 hover:bg-amber-50 dark:text-amber-400 dark:border-amber-800/40 dark:hover:bg-amber-950/30' : 'text-emerald-700 border-emerald-200 hover:bg-emerald-50 dark:text-emerald-300 dark:border-emerald-800/40 dark:hover:bg-emerald-950/30'}`}
             >
               {emp.status === 'Active' ? 'Deactivate' : 'Activate'}
+            </button>
+          )}
+          {isAdmin && onDelete && emp.id !== 'emp_superadmin' && emp.role !== 'superAdmin' && (
+            <button
+              onClick={onDelete}
+              className="text-[10px] font-bold px-2 py-1 rounded-lg border text-rose-600 border-rose-200 hover:bg-rose-50 dark:text-rose-400 dark:border-rose-800/40 dark:hover:bg-rose-950/30 transition-all cursor-pointer flex items-center gap-1"
+              title="Delete employee permanently"
+            >
+              <Trash2 className="w-3 h-3" />
+              Delete
             </button>
           )}
         </div>

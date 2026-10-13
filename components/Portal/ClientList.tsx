@@ -129,14 +129,7 @@ interface TeamMember {
 
 import { ensureCentralClientsSeeded, DEFAULT_CLIENTS_MASTER } from '../../lib/clientMaster';
 
-const DEFAULT_AGENCY_TEAM: TeamMember[] = [
-  { userId: 'team-1', name: 'Vansh', email: 'admin@digiexplode.com', role: 'superAdmin' },
-  { userId: 'team-2', name: 'Aman Sharma', email: 'aman@digiexplode.com', role: 'admin' },
-  { userId: 'team-3', name: 'Neha Gupta', email: 'neha@digiexplode.com', role: 'employee' },
-  { userId: 'team-4', name: 'Rahul Verma', email: 'rahul@digiexplode.com', role: 'employee' },
-  { userId: 'team-5', name: 'Priya Singh', email: 'priya@digiexplode.com', role: 'employee' },
-  { userId: 'team-6', name: 'Rohit Kumar', email: 'rohit@digiexplode.com', role: 'employee' },
-];
+const DEFAULT_AGENCY_TEAM: TeamMember[] = [];
 
 export const ClientList: React.FC = () => {
   const { profile, user } = useAuth();

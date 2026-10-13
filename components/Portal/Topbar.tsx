@@ -135,6 +135,28 @@ export const Topbar: React.FC<TopbarProps> = ({
 
         {/* Right: Quick Actions, Theme Toggle, Notifications & Profile */}
         <div className="flex items-center gap-2.5">
+          {profile?.role === 'employee' && (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800/40 text-xs font-bold shadow-2xs">
+              <span className="w-2 h-2 rounded-full bg-teal-500 animate-pulse" />
+              <span className="truncate max-w-[180px]">Specialist Hub · {profile.name}</span>
+            </div>
+          )}
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('myday')}
+              className={`hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'myday'
+                  ? 'bg-[#5B4BFF] text-white shadow-xs'
+                  : 'bg-[#EEECFF] dark:bg-[#201D45] text-[#5B4BFF] dark:text-[#806CFF] border border-[#5B4BFF]/20 dark:border-[#806CFF]/30 hover:bg-[#5B4BFF] hover:text-white'
+              }`}
+              title="Open Employee View / Workspace"
+            >
+              <User className="w-3.5 h-3.5" />
+              <span>Employee View</span>
+            </button>
+          )}
+
           {/* Global +Create Dropdown */}
           <div className="relative" ref={quickCreateRef}>
             <button

@@ -143,45 +143,13 @@ const DEFAULT_AGENCY_HOLIDAYS: Holiday[] = [
 ];
 
 // Default Seed Data
-const DEFAULT_AGENCY_EMPLOYEES: Employee[] = [
-  { employeeId: "emp-1", name: "Vansh", email: "admin@digiexplode.com", phone: "+91 98000 11111", role: "Super Admin", department: "Executive", joiningDate: "2024-01-01", status: "Active", monthlySalary: 150000, createdAt: "2024-01-01T00:00:00Z" },
-  { employeeId: "emp-2", name: "Aman Sharma", email: "aman@digiexplode.com", phone: "+91 98000 22222", role: "Performance Marketer", department: "Growth & Ads", joiningDate: "2024-01-15", status: "Active", monthlySalary: 65000, createdAt: "2024-01-15T00:00:00Z" },
-  { employeeId: "emp-3", name: "Neha Gupta", email: "neha@digiexplode.com", phone: "+91 98000 33333", role: "Senior Video Editor", department: "Creative Production", joiningDate: "2024-02-01", status: "Active", monthlySalary: 60000, createdAt: "2024-02-01T00:00:00Z" },
-  { employeeId: "emp-4", name: "Rahul Verma", email: "rahul@digiexplode.com", phone: "+91 98000 44444", role: "Full Stack & SEO Lead", department: "Engineering", joiningDate: "2024-02-15", status: "Active", monthlySalary: 75000, createdAt: "2024-02-15T00:00:00Z" },
-  { employeeId: "emp-5", name: "Priya Singh", email: "priya@digiexplode.com", phone: "+91 98000 55555", role: "Creative Visual Designer", department: "Design & Branding", joiningDate: "2024-03-01", status: "Active", monthlySalary: 55000, createdAt: "2024-03-01T00:00:00Z" },
-  { employeeId: "emp-6", name: "Rohit Kumar", email: "rohit@digiexplode.com", phone: "+91 98000 66666", role: "Content Strategist", department: "Copy & Social", joiningDate: "2024-03-10", status: "Active", monthlySalary: 50000, createdAt: "2024-03-10T00:00:00Z" },
-];
+const DEFAULT_AGENCY_EMPLOYEES: Employee[] = [];
 
 const todayDateStr = new Date().toISOString().split("T")[0];
 
-const DEFAULT_INITIAL_ATTENDANCE: Attendance[] = DEFAULT_AGENCY_EMPLOYEES.map((emp, i) => ({
-  attendanceId: `${emp.employeeId}_${todayDateStr}`,
-  employeeId: emp.employeeId,
-  employeeName: emp.name,
-  employeeEmail: emp.email,
-  date: todayDateStr,
-  status: (i === 4 ? "Half Day" : i === 5 ? "Late" : "Present") as any,
-  checkIn: i === 5 ? "10:15" : "09:30",
-  checkOut: "18:30",
-  markedAt: new Date().toISOString(),
-  markedBy: "System Marker",
-}));
+const DEFAULT_INITIAL_ATTENDANCE: Attendance[] = [];
 
-const DEFAULT_LEAVES_SAMPLE: LeaveRequest[] = [
-  {
-    requestId: "leave-1",
-    employeeId: "emp-3",
-    employeeName: "Neha Gupta",
-    employeeEmail: "neha@digiexplode.com",
-    startDate: new Date(Date.now() + 86400000 * 5).toISOString().split("T")[0],
-    endDate: new Date(Date.now() + 86400000 * 6).toISOString().split("T")[0],
-    days: 2,
-    reason: "Creative Video Summit, Mumbai",
-    leaveType: "Paid",
-    status: "Pending",
-    createdAt: new Date().toISOString(),
-  },
-];
+const DEFAULT_LEAVES_SAMPLE: LeaveRequest[] = [];
 
 // Helper: Calculate work hours
 function computeWorkDuration(inTime?: string, outTime?: string): { text: string; hours: number; tag: "Full Day" | "Short Hours" | "Overtime" | "In Progress" | "-" } {
@@ -231,7 +199,7 @@ export const AttendanceView: React.FC = () => {
         }
       }
     } catch (e) {}
-    return DEFAULT_AGENCY_EMPLOYEES;
+    return [];
   });
 
   const [attendance, setAttendance] = useState<Attendance[]>(() => {
@@ -242,7 +210,7 @@ export const AttendanceView: React.FC = () => {
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch (e) {}
-    return DEFAULT_INITIAL_ATTENDANCE;
+    return [];
   });
 
   const [leaves, setLeaves] = useState<LeaveRequest[]>(DEFAULT_LEAVES_SAMPLE);
@@ -402,7 +370,7 @@ export const AttendanceView: React.FC = () => {
   });
 
   // Reports view states
-  const [reportEmployeeId, setReportEmployeeId] = useState<string>(DEFAULT_AGENCY_EMPLOYEES[0].employeeId);
+  const [reportEmployeeId, setReportEmployeeId] = useState<string>(DEFAULT_AGENCY_EMPLOYEES[0]?.employeeId || '');
   const [reportMonth, setReportMonth] = useState<string>(new Date().toISOString().substring(0, 7));
 
   // Leave Form state for staff
@@ -414,7 +382,7 @@ export const AttendanceView: React.FC = () => {
   });
 
   // Employee view linked state
-  const [linkedEmployee, setLinkedEmployee] = useState<Employee | null>(DEFAULT_AGENCY_EMPLOYEES[0]);
+  const [linkedEmployee, setLinkedEmployee] = useState<Employee | null>(DEFAULT_AGENCY_EMPLOYEES[0] || null);
 
   const showToast = (text: string, type: "success" | "info" | "error" = "success") => {
     setToastMessage({ text, type });

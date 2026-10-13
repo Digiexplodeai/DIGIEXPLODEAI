@@ -5,24 +5,27 @@ import { type Employee } from './AttendanceView';
 import { Shield, Brain, Sparkles, TrendingUp, AlertTriangle, User, Clock, CheckCircle2 } from 'lucide-react';
 import { type Task, subscribeToCanonicalTasks, getCachedTasks } from '../../lib/taskStorage';
 import { type CalendarEntry } from './ContentCalendar';
+import { getCachedEmployees, subscribeToCanonicalEmployees } from '../../lib/employeeMaster';
+import { cfGetEmployees } from '../../lib/cloudflareApi';
 
 interface CalendarWorkloadViewProps {
   onOpenEdit?: (item: any) => void;
 }
 
 export const CalendarWorkloadView: React.FC<CalendarWorkloadViewProps> = ({ onOpenEdit }) => {
-  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>(() => getCachedEmployees() as unknown as Employee[]);
   const [tasks, setTasks] = useState<Task[]>(() => getCachedTasks());
   const [calendarEntries, setCalendarEntries] = useState<CalendarEntry[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     // 1. Subscribe to Employees
-    const unsubEmployees = onSnapshot(collection(db, 'employees'), (snap) => {
-      const list: Employee[] = [];
-      snap.forEach(d => list.push({ employeeId: d.id, ...d.data() } as Employee));
-      setEmployees(list);
+    const unsubEmployees = subscribeToCanonicalEmployees((loaded) => {
+      if (loaded && loaded.length > 0) setEmployees(loaded as unknown as Employee[]);
     });
+    cfGetEmployees().then((cfList) => {
+      if (Array.isArray(cfList) && cfList.length > 0) setEmployees(cfList as unknown as Employee[]);
+    }).catch(console.warn);
 
     // 2. Subscribe to canonical Tasks
     const unsubTasks = subscribeToCanonicalTasks((taskList) => {

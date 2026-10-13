@@ -7,6 +7,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { type Employee } from '../components/Portal/AttendanceView';
+import { cfGetEmployees } from './cloudflareApi';
 
 export interface MasterEmployee extends Employee {
   id: string;
@@ -129,8 +130,11 @@ export const getCachedEmployees = (): MasterEmployee[] => {
           role: item.role || item.designation || 'Team Member',
           status: item.status || 'Active'
         }));
-        // Super Admin must always be present — merge guarantees it
-        return mergeWithSuperAdmin(normalized);
+        // Merge with master list so default employees (Priyanshu, Vansh, Ravinder, Aakib) are never lost
+        const byId = new Map<string, any>();
+        CENTRAL_EMPLOYEES_MASTER_LIST.forEach(m => byId.set(m.id, m));
+        normalized.forEach(n => byId.set(n.id || n.employeeId, n));
+        return mergeWithSuperAdmin(Array.from(byId.values()));
       }
     }
   } catch (e) {
@@ -203,8 +207,26 @@ export function subscribeToCanonicalEmployees(
   console.debug('[employeeMaster] initial emit, member[0]:', initial[0]?.id, 'total:', initial.length);
   onUpdate(initial);
 
-  // 2. Trigger non-blocking seed
-  ensureCentralEmployeesSeeded().catch(e => console.warn('Employee seed notice:', e));
+  // 2. Fetch from Cloudflare D1
+  cfGetEmployees().then((cfList) => {
+    if (Array.isArray(cfList) && cfList.length > 0) {
+      const normalized = cfList.map((item: any) => ({
+        ...item,
+        employeeId: item.employeeId || item.id,
+        id: item.employeeId || item.id,
+        name: item.name || 'Employee',
+        role: item.role || item.designation || 'Team Member',
+        status: (item.status === 'Inactive' ? 'Inactive' : 'Active') as 'Active' | 'Inactive',
+        monthlySalary: typeof item.monthlySalary === 'number' ? item.monthlySalary : 50000
+      }));
+      const byId = new Map<string, any>();
+      CENTRAL_EMPLOYEES_MASTER_LIST.forEach(m => byId.set(m.id, m));
+      normalized.forEach(n => byId.set(n.id || n.employeeId, n));
+      const merged = mergeWithSuperAdmin(Array.from(byId.values()));
+      setCachedEmployees(merged);
+      onUpdate(merged);
+    }
+  }).catch(e => console.warn('[employeeMaster] Cloudflare fetch notice:', e));
 
   // 3. Firestore snapshot listener
   const unsub = onSnapshot(collection(db, 'employees'), (snapshot) => {
@@ -229,8 +251,10 @@ export function subscribeToCanonicalEmployees(
       });
 
       if (firestoreList.length > 0) {
-        // CRITICAL: Always merge Super Admin in — Firestore list must never displace it
-        const merged = mergeWithSuperAdmin(firestoreList);
+        const byId = new Map<string, any>();
+        CENTRAL_EMPLOYEES_MASTER_LIST.forEach(m => byId.set(m.id, m));
+        firestoreList.forEach(n => byId.set(n.id || n.employeeId, n));
+        const merged = mergeWithSuperAdmin(Array.from(byId.values()));
         setCachedEmployees(merged);
         console.debug('[employeeMaster] Firestore update, member[0]:', merged[0]?.id, 'total:', merged.length);
         onUpdate(merged);

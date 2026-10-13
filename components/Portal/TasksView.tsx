@@ -16,8 +16,8 @@ import {
 } from 'firebase/firestore';
 import { useActiveEmployee } from '../../hooks/useActiveEmployee';
 import { DEFAULT_CLIENTS_MASTER, ensureCentralClientsSeeded, getCachedClients, subscribeToCanonicalClients } from '../../lib/clientMaster';
-import { cfGetClients } from '../../lib/cloudflareApi';
-import { isTaskAssignedToEmployee } from '../../lib/employeeMaster';
+import { cfGetClients, cfGetEmployees } from '../../lib/cloudflareApi';
+import { isTaskAssignedToEmployee, getCachedEmployees, subscribeToCanonicalEmployees, CENTRAL_EMPLOYEES_MASTER_LIST } from '../../lib/employeeMaster';
 import { AssignmentBoard } from './AssignmentBoard';
 import { TaskScheduleCalendar } from './TaskScheduleCalendar';
 import { MiniCalendarWidget } from './MiniCalendarWidget';
@@ -70,7 +70,7 @@ export const CATEGORIES = [
 
 export const PRIORITIES: ('Urgent' | 'High' | 'Medium' | 'Low')[] = ['Urgent', 'High', 'Medium', 'Low'];
 
-export const DEFAULT_EMPLOYEES_LIST: { id: string; name: string; role: string }[] = [];
+export const DEFAULT_EMPLOYEES_LIST = CENTRAL_EMPLOYEES_MASTER_LIST;
 
 const priorityStyles: Record<string, { badge: string; text: string; dot: string }> = {
   Urgent: { badge: 'bg-rose-50 border-rose-200 text-rose-700 dark:bg-rose-950/50 dark:border-rose-900/60 dark:text-rose-300 font-black', text: 'text-rose-700', dot: 'bg-rose-500' },
@@ -83,7 +83,7 @@ export const TasksView: React.FC = () => {
   const { profile, user } = useAuth();
   const [tasks, setTasks] = useState<Task[]>(() => getCachedTasks());
   const [clients, setClients] = useState<any[]>(() => getCachedClients());
-  const [employees, setEmployees] = useState<any[]>([]);
+  const [employees, setEmployees] = useState<any[]>(() => getCachedEmployees());
   const [loading, setLoading] = useState(false);
 
   // View state: 5 tabs
@@ -177,17 +177,17 @@ export const TasksView: React.FC = () => {
       }
     }).catch(console.warn);
 
-    const unsubEmployees = onSnapshot(collection(db, 'employees'), snap => {
-      if (!snap.empty) {
-        const loaded = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    const unsubEmployees = subscribeToCanonicalEmployees((loaded) => {
+      if (loaded && loaded.length > 0) {
         setEmployees(loaded);
-      } else {
-        setEmployees(DEFAULT_EMPLOYEES_LIST);
       }
-    }, err => {
-      console.warn('Employees sync notice:', err);
-      setEmployees(DEFAULT_EMPLOYEES_LIST);
     });
+
+    cfGetEmployees().then((cfList) => {
+      if (Array.isArray(cfList) && cfList.length > 0) {
+        setEmployees(cfList);
+      }
+    }).catch(console.warn);
 
     return () => {
       unsubClients();
@@ -1880,8 +1880,8 @@ const CreateTaskModal: React.FC<{
   onClose: () => void;
   onCreated: (t: Task) => void;
 }> = ({ clients, employees, defaultColumn, defaultAssigneeId, defaultDate, profile, user, onClose, onCreated }) => {
-  const clientList = (clients && clients.length > 0) ? clients : [];
-  const employeeList = (employees && employees.length > 0) ? employees : [];
+  const clientList = (clients && clients.length > 0) ? clients : getCachedClients();
+  const employeeList = (employees && employees.length > 0) ? employees : getCachedEmployees();
   const inputCls = 'w-full bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-[#101828] dark:text-[#F7F8FC] placeholder-[#98A2B3] outline-none focus:border-[#5B4BFF] focus:bg-white dark:focus:bg-[#1A203C] transition-all shadow-2xs';
 
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
@@ -1928,15 +1928,20 @@ const CreateTaskModal: React.FC<{
 
   // Suggestive options for Employees
   const employeeOptions: SuggestiveOption[] = useMemo(() => {
+    const list = (employeeList && employeeList.length > 0) ? employeeList : CENTRAL_EMPLOYEES_MASTER_LIST;
     return [
       { id: '', label: 'Unassigned', sublabel: 'No assignee assigned yet' },
-      ...employeeList.map(e => ({
-        id: e.id,
-        label: e.name,
-        sublabel: e.email || undefined,
-        badge: e.role,
-        avatarText: e.name.substring(0, 2).toUpperCase(),
-      }))
+      ...list.map(e => {
+        const id = e.id || e.employeeId || '';
+        const name = e.name || 'Employee';
+        return {
+          id,
+          label: name,
+          sublabel: e.role || e.designation || e.email || undefined,
+          badge: e.role || e.designation,
+          avatarText: name.substring(0, 2).toUpperCase(),
+        };
+      })
     ];
   }, [employeeList]);
 

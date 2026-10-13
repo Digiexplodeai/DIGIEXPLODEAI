@@ -6,6 +6,7 @@ import { db } from '../../lib/firebase';
 import { useAuth, type UserProfile } from '../../context/AuthContext';
 import { type ClientData } from './ClientList';
 import { mergeWithSuperAdmin, PERMANENT_SUPER_ADMIN_MEMBER, CENTRAL_EMPLOYEES_MASTER_LIST, getCachedEmployees } from '../../lib/employeeMaster';
+import { cfGetEmployees, cfCreateEmployee, cfUpdateEmployee, cfDeleteEmployee } from '../../lib/cloudflareApi';
 import {
   Users, Plus, Search, X, Loader2, Check, Edit2, UserCheck, UserX,
   Mail, Phone, Calendar, Shield, Briefcase, ChevronRight, Star,
@@ -34,19 +35,14 @@ export interface Employee {
 const DEPARTMENTS = ['Design', 'Video Editing', 'Marketing', 'Development', 'Operations', 'Sales', 'Management'];
 const DESIGNATIONS = ['Graphic Designer', 'Video Editor', 'Social Media Manager', 'Content Writer', 'Account Manager', 'Developer', 'Photographer', 'Team Lead', 'Manager'];
 
-const INITIAL_DEMO_EMPLOYEES: Employee[] = [];
-
 const inputCls = 'w-full bg-[#F7F8FC] dark:bg-[#171E31] border border-[#D7DEE9] dark:border-[#293248] rounded-xl px-3.5 py-2.5 text-xs font-semibold text-[#101828] dark:text-[#F7F8FC] placeholder-[#7A8496] outline-none focus:border-[#5B4BFF] dark:focus:border-[#806CFF] transition-all';
 
 // ─── Main Component ───────────────────────────────────────────────────
 export const AdminList: React.FC = () => {
   const { profile: currentUser } = useAuth();
   const [employees, setEmployees]     = useState<Employee[]>(() => {
-    const cached = localStorage.getItem('digi_local_employees');
-    if (cached) {
-      try { return JSON.parse(cached); } catch (e) {}
-    }
-    return INITIAL_DEMO_EMPLOYEES;
+    const cached = getCachedEmployees();
+    return (cached && cached.length > 0 ? cached : CENTRAL_EMPLOYEES_MASTER_LIST) as unknown as Employee[];
   });
   const [users, setUsers]             = useState<UserProfile[]>([]);
   const [clients, setClients]         = useState<ClientData[]>([]);
@@ -87,6 +83,18 @@ export const AdminList: React.FC = () => {
       } catch (e) {}
     });
 
+    // Fetch from Cloudflare D1
+    cfGetEmployees().then(cfList => {
+      if (Array.isArray(cfList) && cfList.length > 0) {
+        const byId = new Map<string, any>();
+        CENTRAL_EMPLOYEES_MASTER_LIST.forEach(m => byId.set(m.id, m));
+        cfList.forEach((e: any) => byId.set(e.id || e.employeeId, e));
+        const merged = mergeWithSuperAdmin(Array.from(byId.values())) as Employee[];
+        setEmployees(merged);
+        localStorage.setItem('digi_local_employees', JSON.stringify(merged));
+      }
+    }).catch(console.warn);
+
     // Sync with Firestore if available
     try {
       const empUnsub = onSnapshot(collection(db, 'employees'), async snap => {
@@ -103,31 +111,22 @@ export const AdminList: React.FC = () => {
             } as unknown as Employee;
           });
           // CRITICAL: merge Super Admin back in — Firestore snapshot must never strip it
-          const merged = mergeWithSuperAdmin(firestoreList) as Employee[];
+          const byId = new Map<string, any>();
+          CENTRAL_EMPLOYEES_MASTER_LIST.forEach(m => byId.set(m.id, m));
+          firestoreList.forEach(e => byId.set(e.id, e));
+          const merged = mergeWithSuperAdmin(Array.from(byId.values())) as Employee[];
           setEmployees(merged);
           localStorage.setItem('digi_local_employees', JSON.stringify(merged));
           console.debug('[AdminList] Firestore snap, merged[0]:', merged[0]?.id, 'total:', merged.length);
         } else {
-          // Firestore collection is empty — seed it with the master employee list
-          console.debug('[AdminList] Firestore employees empty — seeding master list…');
-          const masterList = mergeWithSuperAdmin(CENTRAL_EMPLOYEES_MASTER_LIST) as Employee[];
-          setEmployees(masterList);
-          localStorage.setItem('digi_local_employees', JSON.stringify(masterList));
-          // Seed all master employees into Firestore so they persist
-          try {
-            await Promise.all(
-              CENTRAL_EMPLOYEES_MASTER_LIST.map(emp =>
-                setDoc(doc(db, 'employees', emp.employeeId), emp, { merge: true })
-              )
-            );
-            console.debug('[AdminList] Master employees seeded to Firestore.');
-          } catch (seedErr) {
-            console.warn('[AdminList] Could not seed employees to Firestore:', seedErr);
-          }
+          // Firestore collection is empty — use cached or master
+          const fallback = getCachedEmployees();
+          const list = fallback.length > 0 ? fallback : CENTRAL_EMPLOYEES_MASTER_LIST;
+          setEmployees(list as Employee[]);
+          localStorage.setItem('digi_local_employees', JSON.stringify(list));
         }
       }, err => {
         console.warn('Employees Firestore listener fallback to local:', err);
-        // On error, fallback to cached/master data
         const fallback = getCachedEmployees();
         if (fallback.length > 0) setEmployees(fallback as Employee[]);
       });
@@ -162,6 +161,8 @@ export const AdminList: React.FC = () => {
     localStorage.setItem('digi_local_employees', JSON.stringify(updated));
     window.dispatchEvent(new CustomEvent('digi_employees_sync', { detail: updated }));
 
+    cfUpdateEmployee(emp.id, { status: newStatus }).catch(console.warn);
+
     try {
       await setDoc(doc(db, 'employees', emp.id), { status: newStatus, updatedAt: new Date().toISOString() }, { merge: true });
     } catch (e) {
@@ -180,6 +181,8 @@ export const AdminList: React.FC = () => {
     localStorage.setItem('digi_local_employees', JSON.stringify(updated));
     window.dispatchEvent(new CustomEvent('digi_employees_sync', { detail: updated }));
 
+    cfDeleteEmployee(emp.id).catch(console.warn);
+
     try {
       await deleteDoc(doc(db, 'employees', emp.id));
     } catch (e) {
@@ -196,6 +199,7 @@ export const AdminList: React.FC = () => {
     window.dispatchEvent(new CustomEvent('digi_employees_sync', { detail: kept }));
 
     for (const emp of toRemove) {
+      cfDeleteEmployee(emp.id).catch(console.warn);
       try {
         await deleteDoc(doc(db, 'employees', emp.id));
       } catch (e) {}
@@ -215,15 +219,13 @@ export const AdminList: React.FC = () => {
       createdAt: new Date().toISOString(),
     };
 
-    // Append new employee AFTER existing list, keeping Super Admin always at index 0.
-    // NEVER prepend at index 0 — that would risk displacing SA and breaking active member detection.
     const existingWithoutNew = employees.filter(e => e.id !== empId);
     const updated = mergeWithSuperAdmin([...existingWithoutNew, created]) as Employee[];
     setEmployees(updated);
     localStorage.setItem('digi_local_employees', JSON.stringify(updated));
-    // Broadcast the update — all subscribers get SA-guaranteed list
     window.dispatchEvent(new CustomEvent('digi_employees_sync', { detail: updated }));
-    console.debug('[AdminList] Employee created:', empId, '— active member context UNCHANGED');
+
+    cfCreateEmployee(created).catch(console.warn);
 
     try {
       await setDoc(doc(db, 'employees', empId), {
@@ -375,6 +377,7 @@ export const AdminList: React.FC = () => {
             setSelectedEmployee({ ...selectedEmployee, ...updates });
             localStorage.setItem('digi_local_employees', JSON.stringify(updated));
             window.dispatchEvent(new CustomEvent('digi_employees_sync', { detail: updated }));
+            cfUpdateEmployee(selectedEmployee.id, updates).catch(console.warn);
             try {
               await updateDoc(doc(db, 'employees', selectedEmployee.id), { ...updates, updatedAt: new Date().toISOString() });
             } catch (e) {}

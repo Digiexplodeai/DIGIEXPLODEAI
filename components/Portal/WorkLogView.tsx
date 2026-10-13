@@ -12,8 +12,8 @@ import {
   doc, orderBy, onSnapshot, Timestamp
 } from 'firebase/firestore';
 import { DEFAULT_CLIENTS_MASTER, ensureCentralClientsSeeded, getCachedClients, subscribeToCanonicalClients } from '../../lib/clientMaster';
-import { cfGetClients } from '../../lib/cloudflareApi';
-import { DEFAULT_EMPLOYEES_LIST } from './TasksView';
+import { cfGetClients, cfGetEmployees } from '../../lib/cloudflareApi';
+import { DEFAULT_EMPLOYEES_MASTER, getCachedEmployees, subscribeToCanonicalEmployees } from '../../lib/employeeMaster';
 import { persistNewTask } from '../../lib/taskStorage';
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -151,7 +151,7 @@ export const WorkLogView: React.FC = () => {
   const [logs, setLogs] = useState<WorkLog[]>(() => getCachedWorkLogs());
   const [tasks, setTasks] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>(() => getCachedClients());
-  const [employees, setEmployees] = useState<any[]>(DEFAULT_EMPLOYEES_LIST);
+  const [employees, setEmployees] = useState<any[]>(() => getCachedEmployees());
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [search, setSearch] = useState('');
@@ -180,13 +180,12 @@ export const WorkLogView: React.FC = () => {
       if (Array.isArray(cfList) && cfList.length > 0) setClients(cfList);
     }).catch(console.warn);
 
-    const unsubEmployees = onSnapshot(collection(db, 'employees'), snap => {
-      if (!snap.empty) {
-        setEmployees(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      } else {
-        setEmployees(DEFAULT_EMPLOYEES_LIST);
-      }
-    }, () => setEmployees(DEFAULT_EMPLOYEES_LIST));
+    const unsubEmployees = subscribeToCanonicalEmployees((loaded) => {
+      if (loaded && loaded.length > 0) setEmployees(loaded);
+    });
+    cfGetEmployees().then((cfList) => {
+      if (Array.isArray(cfList) && cfList.length > 0) setEmployees(cfList);
+    }).catch(console.warn);
 
     const unsubTasks = onSnapshot(collection(db, 'tasks'), snap => {
       if (!snap.empty) {

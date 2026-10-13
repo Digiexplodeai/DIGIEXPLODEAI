@@ -14,6 +14,8 @@ import {
 } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "../../lib/firebase";
 import { useAuth } from "../../context/AuthContext";
+import { CENTRAL_EMPLOYEES_MASTER_LIST, getCachedEmployees, mergeWithSuperAdmin } from "../../lib/employeeMaster";
+import { cfGetEmployees, cfCreateEmployee, cfUpdateEmployee } from "../../lib/cloudflareApi";
 import {
   Calendar as CalendarIcon,
   Clock,
@@ -143,7 +145,7 @@ const DEFAULT_AGENCY_HOLIDAYS: Holiday[] = [
 ];
 
 // Default Seed Data
-const DEFAULT_AGENCY_EMPLOYEES: Employee[] = [];
+const DEFAULT_AGENCY_EMPLOYEES: Employee[] = CENTRAL_EMPLOYEES_MASTER_LIST as unknown as Employee[];
 
 const todayDateStr = new Date().toISOString().split("T")[0];
 
@@ -180,26 +182,23 @@ export const AttendanceView: React.FC = () => {
   // Data states
   const [employees, setEmployees] = useState<Employee[]>(() => {
     try {
-      const cached = localStorage.getItem('digi_local_employees');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((item: any) => ({
-            employeeId: item.employeeId || item.id,
-            name: item.name,
-            email: item.email,
-            phone: item.phone || '',
-            role: item.role || item.designation || 'Specialist',
-            department: item.department || 'Operations',
-            joiningDate: item.joiningDate || todayDateStr,
-            status: item.status || 'Active',
-            monthlySalary: Number(item.monthlySalary) || 45000,
-            createdAt: item.createdAt || new Date().toISOString(),
-          }));
-        }
+      const cached = getCachedEmployees();
+      if (Array.isArray(cached) && cached.length > 0) {
+        return cached.map((item: any) => ({
+          employeeId: item.employeeId || item.id,
+          name: item.name,
+          email: item.email,
+          phone: item.phone || '',
+          role: item.role || item.designation || 'Specialist',
+          department: item.department || 'Operations',
+          joiningDate: item.joiningDate || todayDateStr,
+          status: item.status || 'Active',
+          monthlySalary: Number(item.monthlySalary) || 45000,
+          createdAt: item.createdAt || new Date().toISOString(),
+        }));
       }
     } catch (e) {}
-    return [];
+    return DEFAULT_AGENCY_EMPLOYEES;
   });
 
   const [attendance, setAttendance] = useState<Attendance[]>(() => {
@@ -417,47 +416,54 @@ export const AttendanceView: React.FC = () => {
       leaveQuery = query(collection(db, "leaveRequests"), where("employeeEmail", "==", profile.email));
     }
 
+    // Fetch from Cloudflare D1
+    cfGetEmployees().then((cfList) => {
+      if (Array.isArray(cfList) && cfList.length > 0) {
+        const byId = new Map<string, any>();
+        CENTRAL_EMPLOYEES_MASTER_LIST.forEach(m => byId.set(m.id, m));
+        cfList.forEach((item: any) => {
+          const id = item.employeeId || item.id;
+          byId.set(id, {
+            employeeId: id,
+            name: item.name || 'Employee',
+            email: item.email || '',
+            phone: item.phone || '',
+            role: item.role || item.designation || 'Specialist',
+            department: item.department || 'Operations',
+            joiningDate: item.joiningDate || todayDateStr,
+            status: item.status || 'Active',
+            monthlySalary: Number(item.monthlySalary) || 45000,
+            createdAt: item.createdAt || new Date().toISOString(),
+          });
+        });
+        const merged = Array.from(byId.values()) as Employee[];
+        setEmployees(merged);
+        localStorage.setItem('digi_local_employees', JSON.stringify(merged));
+      }
+    }).catch(console.warn);
+
     const unsubEmp = onSnapshot(
       empQuery,
       (snap: any) => {
         const list: Employee[] = [];
         snap.forEach((d: any) => list.push({ employeeId: d.id, ...d.data() } as Employee));
-        // Keep locally onboarded staff while Firestore catches up.  The
-        // attendance screen used to replace the local list whenever the
-        // snapshot returned the older set of employees, making newly added
-        // staff disappear until a full refresh/sync.
         let merged = list;
         try {
-          const cached = localStorage.getItem('digi_local_employees');
-          const localList = cached ? JSON.parse(cached) : [];
-          if (Array.isArray(localList) && localList.length > 0) {
-            const byId = new Map<string, Employee>();
-            localList.forEach((item: any) => {
-              const id = item.employeeId || item.id;
-              if (id) byId.set(id, { employeeId: id, ...item } as Employee);
-            });
-            // Firestore is authoritative for records it has, while local
-            // records that are still pending sync remain visible.
-            list.forEach((item) => byId.set(item.employeeId, item));
-            merged = Array.from(byId.values());
-          }
+          const cached = getCachedEmployees();
+          const byId = new Map<string, Employee>();
+          CENTRAL_EMPLOYEES_MASTER_LIST.forEach(m => byId.set(m.id, { employeeId: m.id, ...m } as unknown as Employee));
+          cached.forEach((item: any) => {
+            const id = item.employeeId || item.id;
+            if (id) byId.set(id, { employeeId: id, ...item } as Employee);
+          });
+          list.forEach((item) => byId.set(item.employeeId, item));
+          merged = Array.from(byId.values());
         } catch (e) {}
 
         if (merged.length > 0) {
           setEmployees(merged);
           localStorage.setItem('digi_local_employees', JSON.stringify(merged));
         } else {
-          try {
-            const cached = localStorage.getItem('digi_local_employees');
-            if (cached) {
-              const parsed = JSON.parse(cached);
-              if (Array.isArray(parsed) && parsed.length > 0) {
-                setEmployees(parsed);
-                setLoading(false);
-                return;
-              }
-            }
-          } catch (e) {}
           setEmployees(DEFAULT_AGENCY_EMPLOYEES);
         }
 
@@ -1301,7 +1307,14 @@ export const AttendanceView: React.FC = () => {
       console.warn("Local storage sync notice:", err);
     }
 
-    // 3. Write to Firestore
+    // 3. Write to Cloudflare D1
+    if (editingEmployee) {
+      cfUpdateEmployee(empId, payload).catch(console.warn);
+    } else {
+      cfCreateEmployee(payload).catch(console.warn);
+    }
+
+    // 4. Write to Firestore
     try {
       await setDoc(doc(db, "employees", empId), payload, { merge: true });
     } catch (err) {
@@ -1316,6 +1329,8 @@ export const AttendanceView: React.FC = () => {
     const newStatus: "Active" | "Inactive" = emp.status === "Active" ? "Inactive" : "Active";
     const updated = employees.map((item) => (item.employeeId === emp.employeeId ? { ...item, status: newStatus } : item));
     setEmployees(updated);
+
+    cfUpdateEmployee(emp.employeeId, { status: newStatus }).catch(console.warn);
 
     try {
       const existingStr = localStorage.getItem('digi_local_employees');

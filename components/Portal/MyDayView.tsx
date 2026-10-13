@@ -15,6 +15,7 @@ import {
 } from 'firebase/firestore';
 import { DEFAULT_CLIENTS_MASTER } from '../../lib/clientMaster';
 import { isTaskAssignedToEmployee, EMPLOYEE_ID_ALIASES } from '../../lib/employeeMaster';
+import { SuggestiveCombobox, type SuggestiveOption } from './SuggestiveCombobox';
 import { ensureActiveFirebaseAuth } from '../../lib/calendarStorage';
 import { 
   type Task, 
@@ -1754,46 +1755,45 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
               {/* Client / Brand */}
               <div>
                 <label className="block font-bold text-[#344054] dark:text-[#CBD5E1] mb-1">Client / Brand</label>
-                <select
+                <SuggestiveCombobox
+                  icon="client"
+                  placeholder="Search or select client…"
                   value={assignTaskForm.clientId}
-                  onChange={e => {
-                    const chosen = uniqueClients.find(c => c.id === e.target.value);
-                    setAssignTaskForm(p => ({
-                      ...p,
-                      clientId: e.target.value,
-                      clientName: chosen?.name || ''
-                    }));
+                  options={[
+                    { id: '', label: '— No Client —', sublabel: 'Internal task' },
+                    ...uniqueClients.map(c => ({ id: c.id, label: c.name, avatarText: c.name.charAt(0).toUpperCase() }))
+                  ]}
+                  onChange={(id) => {
+                    const chosen = uniqueClients.find(c => c.id === id);
+                    setAssignTaskForm(p => ({ ...p, clientId: id, clientName: chosen?.name || '' }));
                   }}
-                  className="w-full p-2.5 rounded-xl border border-[#D8DEE9] dark:border-white/10 bg-[#F8FAFC] dark:bg-[#161B31] text-[#101828] dark:text-white font-bold outline-none cursor-pointer focus:border-[#5B4BFF]"
-                >
-                  <option value="">-- Select client --</option>
-                  {uniqueClients.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
+                />
               </div>
 
               {/* Category + Priority */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-[#344054] dark:text-[#CBD5E1] mb-1">Category</label>
-                  <select
+                  <SuggestiveCombobox
+                    icon="search"
+                    placeholder="Pick category…"
                     value={assignTaskForm.category}
-                    onChange={e => setAssignTaskForm(p => ({ ...p, category: e.target.value }))}
-                    className="w-full p-2.5 rounded-xl border border-[#D8DEE9] dark:border-white/10 bg-[#F8FAFC] dark:bg-[#161B31] text-[#101828] dark:text-white font-bold outline-none cursor-pointer focus:border-[#5B4BFF]"
-                  >
-                    {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
+                    options={CATEGORIES.map(c => ({ id: c, label: c, avatarText: c.charAt(0) }))}
+                    onChange={(val) => setAssignTaskForm(p => ({ ...p, category: val }))}
+                  />
                 </div>
                 <div>
                   <label className="block font-bold text-[#344054] dark:text-[#CBD5E1] mb-1">Priority</label>
-                  <select
+                  <SuggestiveCombobox
+                    icon="search"
+                    placeholder="Set priority…"
                     value={assignTaskForm.priority}
-                    onChange={e => setAssignTaskForm(p => ({ ...p, priority: e.target.value as any }))}
-                    className="w-full p-2.5 rounded-xl border border-[#D8DEE9] dark:border-white/10 bg-[#F8FAFC] dark:bg-[#161B31] text-[#101828] dark:text-white font-bold outline-none cursor-pointer focus:border-[#5B4BFF]"
-                  >
-                    {(['Urgent', 'High', 'Medium', 'Low'] as const).map(p => <option key={p} value={p}>{p}</option>)}
-                  </select>
+                    options={(['Urgent', 'High', 'Medium', 'Low'] as const).map(p => ({
+                      id: p, label: p,
+                      badge: p === 'Urgent' ? '🔴' : p === 'High' ? '🟠' : p === 'Medium' ? '🟡' : '🟢'
+                    }))}
+                    onChange={(val) => setAssignTaskForm(p => ({ ...p, priority: val as any }))}
+                  />
                 </div>
               </div>
 

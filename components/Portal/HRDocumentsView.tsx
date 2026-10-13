@@ -12,6 +12,7 @@ import {
   subscribeToCanonicalEmployees,
   CanonicalEmployee
 } from '../../lib/employeeMaster';
+import { SuggestiveCombobox } from './SuggestiveCombobox';
 import {
   DocType,
   DocStatus,
@@ -1167,22 +1168,21 @@ DigiexplodeAI HR Team`
                 <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#94A3B8', marginBottom: '6px' }}>
                   Target Employee <span style={{ color: '#EF4444' }}>*</span>
                 </label>
-                <select
+                <SuggestiveCombobox
+                  icon="user"
+                  placeholder="Search employee by name or role…"
                   value={selectedEmpId}
-                  onChange={(e) => handleSelectEmployee(e.target.value)}
-                  style={{
-                    width: '100%', padding: '10px 14px', borderRadius: '8px',
-                    background: '#111728', border: '1px solid #293248', color: '#F8FAFC',
-                    fontSize: '13px', outline: 'none', cursor: 'pointer'
-                  }}
-                >
-                  <option value="">-- Select Employee from Master --</option>
-                  {employees.map((emp) => (
-                    <option key={emp.id} value={emp.id}>
-                      {emp.name} ({emp.role || 'Staff'} • {emp.department || 'Agency'})
-                    </option>
-                  ))}
-                </select>
+                  options={[
+                    { id: '', label: '— Select Employee —', sublabel: 'From master list' },
+                    ...employees.map(emp => ({
+                      id: emp.id,
+                      label: emp.name,
+                      sublabel: `${emp.role || 'Staff'} • ${emp.department || 'Agency'}`,
+                      avatarText: emp.name.charAt(0).toUpperCase()
+                    }))
+                  ]}
+                  onChange={(id) => handleSelectEmployee(id)}
+                />
               </div>
 
               {/* Step 2: Historical / Custom Effective Date & Designation */}

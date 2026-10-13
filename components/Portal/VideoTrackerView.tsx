@@ -51,6 +51,7 @@ import {
   type MasterEmployee 
 } from '../../lib/employeeMaster';
 import { ClientSelect } from './ClientSelect';
+import { SuggestiveCombobox } from './SuggestiveCombobox';
 import { ensureActiveFirebaseAuth } from '../../lib/calendarStorage';
 import { 
   syncVideoProductionToTasks, 
@@ -1420,19 +1421,22 @@ export const VideoTrackerView: React.FC = () => {
               {/* Videographer Crew */}
               <div className="space-y-1">
                 <label className="text-[10px] font-black uppercase tracking-wider text-slate-400">Videographer (Crew Lead)</label>
-                <select
+                <SuggestiveCombobox
+                  icon="user"
+                  placeholder="Search videographer…"
                   value={formVideographerId}
-                  onChange={(e) => setFormVideographerId(e.target.value)}
-                  className="w-full text-xs font-bold bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2.5 rounded-xl outline-none"
-                >
-                  <option value="">-- Select Videographer --</option>
-                  {employees.map(emp => (
-                    <option key={emp.employeeId || emp.id} value={emp.employeeId || emp.id}>
-                      {emp.name} ({emp.role})
-                    </option>
-                  ))}
-                  <option value="other">+ Other (Type Custom Name)</option>
-                </select>
+                  allowCustom
+                  options={[
+                    { id: '', label: '— Unassigned —', sublabel: 'No videographer' },
+                    ...employees.map(emp => ({
+                      id: emp.employeeId || emp.id,
+                      label: emp.name,
+                      sublabel: emp.role,
+                      avatarText: emp.name.charAt(0).toUpperCase()
+                    }))
+                  ]}
+                  onChange={(id) => setFormVideographerId(id)}
+                />
                 {formVideographerId === 'other' && (
                   <input
                     type="text"
@@ -1447,19 +1451,22 @@ export const VideoTrackerView: React.FC = () => {
               {/* Editor Assignment */}
               <div className="space-y-1">
                 <label className="text-[10px] font-black uppercase tracking-wider text-slate-400">Assigned Video Editor</label>
-                <select
+                <SuggestiveCombobox
+                  icon="user"
+                  placeholder="Search video editor…"
                   value={formEditorId}
-                  onChange={(e) => setFormEditorId(e.target.value)}
-                  className="w-full text-xs font-bold bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2.5 rounded-xl outline-none"
-                >
-                  <option value="">-- Select Video Editor --</option>
-                  {employees.map(emp => (
-                    <option key={emp.employeeId || emp.id} value={emp.employeeId || emp.id}>
-                      {emp.name} ({emp.role})
-                    </option>
-                  ))}
-                  <option value="other">+ Other (Type Custom Name)</option>
-                </select>
+                  allowCustom
+                  options={[
+                    { id: '', label: '— Unassigned —', sublabel: 'No editor' },
+                    ...employees.map(emp => ({
+                      id: emp.employeeId || emp.id,
+                      label: emp.name,
+                      sublabel: emp.role,
+                      avatarText: emp.name.charAt(0).toUpperCase()
+                    }))
+                  ]}
+                  onChange={(id) => setFormEditorId(id)}
+                />
                 {formEditorId === 'other' && (
                   <input
                     type="text"
@@ -1563,25 +1570,28 @@ export const VideoTrackerView: React.FC = () => {
               <div className="space-y-3">
                 <div className="space-y-1">
                   <label className="text-[10px] font-black uppercase text-slate-400">Assigned Editor</label>
-                  <select
+                  <SuggestiveCombobox
+                    icon="user"
+                    placeholder="Search editor…"
                     value={confirmModal.customEditorId || confirmModal.entry.editorId || ''}
-                    onChange={(e) => {
-                      const emp = employees.find(em => em.employeeId === e.target.value || em.id === e.target.value);
+                    options={[
+                      { id: '', label: '— Unassigned —', sublabel: 'No editor' },
+                      ...employees.map(emp => ({
+                        id: emp.employeeId || emp.id,
+                        label: emp.name,
+                        sublabel: emp.role,
+                        avatarText: emp.name.charAt(0).toUpperCase()
+                      }))
+                    ]}
+                    onChange={(id) => {
+                      const emp = employees.find(em => em.employeeId === id || em.id === id);
                       setConfirmModal({
                         ...confirmModal,
-                        customEditorId: e.target.value,
+                        customEditorId: id,
                         customEditorName: emp ? emp.name : ''
                       });
                     }}
-                    className="w-full text-xs font-bold bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2.5 rounded-xl outline-none"
-                  >
-                    <option value="">-- Select Editor --</option>
-                    {employees.map(emp => (
-                      <option key={emp.employeeId || emp.id} value={emp.employeeId || emp.id}>
-                        {emp.name} ({emp.role})
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
               </div>
             )}

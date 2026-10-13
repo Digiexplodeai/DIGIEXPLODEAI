@@ -57,6 +57,7 @@ import {
 } from '../../lib/calendarStorage';
 import { PopoverDatePicker } from './PopoverDatePicker';
 import { SmartContentRoutines } from './SmartContentRoutines';
+import { SuggestiveCombobox } from './SuggestiveCombobox';
 
 export interface QuickWorkEntryProps {
   onTaskCreated?: () => void;
@@ -1029,19 +1030,21 @@ export const QuickWorkEntry: React.FC<QuickWorkEntryProps> = ({ onTaskCreated, s
             {/* Assignee Maker */}
             <div className="space-y-1">
               <label className="text-[10px] font-black uppercase tracking-wider text-slate-400">Maker (Assignee) *</label>
-              <select
+              <SuggestiveCombobox
+                icon="user"
+                placeholder="Search assignee…"
                 value={easyAssigneeId}
-                onChange={(e) => setEasyAssigneeId(e.target.value)}
-                className="w-full text-xs font-bold bg-slate-50/60 dark:bg-slate-950/40 border border-slate-200 dark:border-slate-800 p-2 rounded-xl outline-none text-slate-800 dark:text-slate-200"
-                required
-              >
-                <option value="">-- Select Maker (Assignee) * --</option>
-                {activeEmployees.map(emp => (
-                  <option key={emp.employeeId || emp.id} value={emp.employeeId || emp.id}>
-                    {emp.name} ({emp.role})
-                  </option>
-                ))}
-              </select>
+                options={[
+                  { id: '', label: '— Unassigned —', sublabel: 'No assignee' },
+                  ...activeEmployees.map(emp => ({
+                    id: emp.employeeId || emp.id,
+                    label: emp.name,
+                    sublabel: emp.role,
+                    avatarText: emp.name.charAt(0).toUpperCase()
+                  }))
+                ]}
+                onChange={(id) => setEasyAssigneeId(id)}
+              />
             </div>
 
             {/* Status & Priority */}
@@ -1497,24 +1500,27 @@ export const QuickWorkEntry: React.FC<QuickWorkEntryProps> = ({ onTaskCreated, s
                     {/* Assignee */}
                     <div className="space-y-1">
                       <label className="text-[9px] font-black uppercase text-slate-400">Assign Maker</label>
-                      <select
+                      <SuggestiveCombobox
+                        icon="user"
+                        placeholder="Search assignee…"
                         value={task.assigneeId}
-                        onChange={(e) => {
+                        options={[
+                          { id: '', label: '— Unassigned —', sublabel: 'No assignee' },
+                          ...activeEmployees.map(emp => ({
+                            id: emp.employeeId || emp.id,
+                            label: emp.name,
+                            sublabel: emp.role,
+                            avatarText: emp.name.charAt(0).toUpperCase()
+                          }))
+                        ]}
+                        onChange={(id) => {
                           const updated = [...reviewTasks];
-                          const emp = employees.find(em => em.employeeId === e.target.value || em.id === e.target.value);
-                          updated[idx].assigneeId = e.target.value;
+                          const emp = employees.find(em => em.employeeId === id || em.id === id);
+                          updated[idx].assigneeId = id;
                           updated[idx].assigneeName = emp ? emp.name : 'Unassigned';
                           setReviewTasks(updated);
                         }}
-                        className="w-full text-xs font-medium bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2 rounded-xl outline-none"
-                      >
-                        <option value="">-- Unassigned --</option>
-                        {activeEmployees.map(emp => (
-                          <option key={emp.employeeId || emp.id} value={emp.employeeId || emp.id}>
-                            {emp.name} ({emp.role})
-                          </option>
-                        ))}
-                      </select>
+                      />
                     </div>
 
                     {/* Priority */}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  collection, onSnapshot, doc, updateDoc, setDoc, addDoc, query, where, getDocs, orderBy
+  collection, onSnapshot, doc, updateDoc, setDoc, addDoc, query, where, getDocs, orderBy, deleteDoc
 } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { useAuth, type UserProfile } from '../../context/AuthContext';
@@ -9,7 +9,7 @@ import { mergeWithSuperAdmin, PERMANENT_SUPER_ADMIN_MEMBER } from '../../lib/emp
 import {
   Users, Plus, Search, X, Loader2, Check, Edit2, UserCheck, UserX,
   Mail, Phone, Calendar, Shield, Briefcase, ChevronRight, Star,
-  TrendingUp, Clock, AlertTriangle, FileText, Activity, Zap, Sparkles
+  TrendingUp, Clock, AlertTriangle, FileText, Activity, Zap, Sparkles, Trash2
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────
@@ -34,92 +34,7 @@ export interface Employee {
 const DEPARTMENTS = ['Design', 'Video Editing', 'Marketing', 'Development', 'Operations', 'Sales', 'Management'];
 const DESIGNATIONS = ['Graphic Designer', 'Video Editor', 'Social Media Manager', 'Content Writer', 'Account Manager', 'Developer', 'Photographer', 'Team Lead', 'Manager'];
 
-const INITIAL_DEMO_EMPLOYEES: Employee[] = [
-  {
-    id: 'emp_vansh_01',
-    name: 'Vansh Creative Specialist',
-    email: 'vansh@digiexplode.ai',
-    phone: '+91 87250 72731',
-    role: 'employee',
-    designation: 'Video Editor',
-    department: 'Video Editing',
-    joiningDate: '2024-01-10',
-    status: 'Active',
-    skills: ['Premiere Pro', 'After Effects', 'Reels Production', 'Color Grading'],
-    notes: 'Lead video editor and viral hooks producer for healthcare & luxury brands.',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'emp_aman_02',
-    name: 'Aman Sharma',
-    email: 'aman@digiexplode.ai',
-    phone: '+91 98140 33445',
-    role: 'employee',
-    designation: 'Team Lead',
-    department: 'Marketing',
-    joiningDate: '2024-01-15',
-    status: 'Active',
-    skills: ['Meta Ads Manager', 'Google Search & PMax', 'ROAS Optimization'],
-    notes: 'Direct-response performance marketing lead.',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'emp_neha_03',
-    name: 'Neha Kapoor',
-    email: 'neha@digiexplode.ai',
-    phone: '+91 98720 55667',
-    role: 'employee',
-    designation: 'Graphic Designer',
-    department: 'Design',
-    joiningDate: '2024-02-01',
-    status: 'Active',
-    skills: ['Figma', 'Photoshop', 'Illustrator', 'Visual Identity'],
-    notes: 'Brand visual identity and high-converting carousel designer.',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'emp_rahul_04',
-    name: 'Rahul Verma',
-    email: 'rahul@digiexplode.ai',
-    phone: '+91 98150 77889',
-    role: 'employee',
-    designation: 'Social Media Manager',
-    department: 'Marketing',
-    joiningDate: '2024-02-15',
-    status: 'Active',
-    skills: ['SEO Dominance', 'Local Citations', 'Content Strategy'],
-    notes: 'Organic search growth and local maps optimization.',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'emp_priya_05',
-    name: 'Priya Patel',
-    email: 'priya@digiexplode.ai',
-    phone: '+91 98765 99001',
-    role: 'employee',
-    designation: 'Content Writer',
-    department: 'Marketing',
-    joiningDate: '2024-03-01',
-    status: 'Active',
-    skills: ['Direct-Response Copywriting', 'Video Scripts', 'Ad Hooks'],
-    notes: 'High-conversion copywriter and script architect.',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'emp_rohit_06',
-    name: 'Rohit Gupta',
-    email: 'rohit@digiexplode.ai',
-    phone: '+91 98144 11223',
-    role: 'employee',
-    designation: 'Account Manager',
-    department: 'Operations',
-    joiningDate: '2024-03-15',
-    status: 'Active',
-    skills: ['Client Communication', 'Workload Distribution', 'Quality QA'],
-    notes: 'Client account manager for enterprise accounts.',
-    createdAt: new Date().toISOString(),
-  },
-];
+const INITIAL_DEMO_EMPLOYEES: Employee[] = [];
 
 const inputCls = 'w-full bg-[#F7F8FC] dark:bg-[#171E31] border border-[#D7DEE9] dark:border-[#293248] rounded-xl px-3.5 py-2.5 text-xs font-semibold text-[#101828] dark:text-[#F7F8FC] placeholder-[#7A8496] outline-none focus:border-[#5B4BFF] dark:focus:border-[#806CFF] transition-all';
 

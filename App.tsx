@@ -55,7 +55,10 @@ if (typeof window !== 'undefined') {
       'digi_clients_cache',
       'digi_attendance_cache',
       'digi_work_log_cache',
-      'digi_approvals_cache'
+      'digi_approvals_cache',
+      'digi_client_tasks',
+      'digi_pending_approvals',
+      'digi_reports_history',
     ];
     keysToPurge.forEach(k => {
       try { localStorage.removeItem(k); } catch (e) {}
@@ -121,6 +124,32 @@ const LayoutContainer: React.FC<{ children: React.ReactNode }> = ({ children }) 
 };
 
 const App: React.FC = () => {
+  useEffect(() => {
+    const FS_PURGE_KEY = 'digi_firestore_clean_slate_v3';
+    if (!localStorage.getItem(FS_PURGE_KEY)) {
+      const wipeFirestore = async () => {
+        try {
+          const collections = ['employees', 'clients', 'tasks', 'video_production', 'approvals', 'work_logs', 'attendance', 'calendar_items'];
+          for (const c of collections) {
+            try {
+              const snap = await getDocs(collection(db, c));
+              for (const d of snap.docs) {
+                // Keep permanent super admin
+                const data = d.data();
+                if (c === 'employees' && (d.id === 'emp_superadmin' || data.role === 'superAdmin' || data.name?.includes('Super Admin'))) {
+                  continue;
+                }
+                await deleteDoc(d.ref).catch(() => {});
+              }
+            } catch (err) {}
+          }
+          localStorage.setItem(FS_PURGE_KEY, 'true');
+        } catch (e) {}
+      };
+      wipeFirestore();
+    }
+  }, []);
+
   return (
     <ThemeProvider>
       <AuthProvider>

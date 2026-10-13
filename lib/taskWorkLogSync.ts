@@ -1,6 +1,7 @@
 import { collection, query, where, getDocs, setDoc, updateDoc, doc, addDoc } from 'firebase/firestore';
 import { db, sanitizeFirestorePayload } from './firebase';
 import { ensureActiveFirebaseAuth } from './calendarStorage';
+import { cfCreateWorkLog, cfUpdateWorkLog } from './cloudflareApi';
 
 export interface TaskSyncData {
   taskId: string;
@@ -29,7 +30,7 @@ export interface SyncResult {
 /**
  * Idempotently syncs a completed task into the Work Log collection.
  * Uses canonical schema supporting both snake_case and camelCase fields.
- * Uses deterministic document ID 'worklog_task_{taskId}' for absolute Firestore idempotency.
+ * Updates local cache and UI instantly (0ms), then persists to Cloudflare D1 & Firestore.
  */
 export async function syncTaskCompletionToWorkLog(
   task: TaskSyncData,
@@ -37,8 +38,6 @@ export async function syncTaskCompletionToWorkLog(
   userId?: string
 ): Promise<SyncResult> {
   if (!task.taskId) return { success: false, error: 'Missing taskId' };
-  
-  await ensureActiveFirebaseAuth().catch(console.warn);
 
   const todayStr = new Date().toISOString().split('T')[0];
   const nowIso = new Date().toISOString();
@@ -88,9 +87,7 @@ export async function syncTaskCompletionToWorkLog(
     videoProductionId: videoProdId,
   };
 
-  const sanitized = sanitizeFirestorePayload(canonicalPayload);
-
-  // 1. Update local cache immediately
+  // 1. INSTANT LOCAL UPDATE & BROADCAST (0ms latency, zero waiting)
   try {
     const cachedLogsRaw = localStorage.getItem('digi_persisted_worklogs_v2');
     const cachedLogs = cachedLogsRaw ? JSON.parse(cachedLogsRaw) : [];
@@ -107,31 +104,37 @@ export async function syncTaskCompletionToWorkLog(
     console.warn('Local workLog cache notice:', e);
   }
 
-  // 2. Persist to Firestore with merge & auto-retry
-  try {
-    await setDoc(doc(db, 'workLogs', docId), sanitized, { merge: true });
-  } catch (err: any) {
-    console.warn('Retrying workLog setDoc with auth refresh:', err);
-    try {
-      await ensureActiveFirebaseAuth();
-      await setDoc(doc(db, 'workLogs', docId), sanitized, { merge: true });
-    } catch (retryErr) {
-      console.warn('WorkLog Firestore retry notice (saved in cache):', retryErr);
-    }
-  }
+  // 2. Persist to Cloudflare D1 immediately
+  cfCreateWorkLog(canonicalPayload).catch(e => console.warn('Cloudflare workLog save notice:', e));
 
-  // 3. Write activity log
-  try {
-    await addDoc(collection(db, 'activityLogs'), {
-      userId: userId || fallbackEmpId,
-      userName: fallbackEmpName,
-      action: `completed deliverable: "${task.title}" (Work Log synced)`,
-      details: `Client: ${task.clientName || 'Direct'} · ID: ${task.taskId}${videoProdId ? ` · Video: ${videoProdId}` : ''}`,
-      createdAt: nowIso,
-    });
-  } catch (e) {
-    // Optional
-  }
+  // 3. Persist to Firestore in background without blocking
+  (async () => {
+    try {
+      const sanitized = sanitizeFirestorePayload(canonicalPayload);
+      await setDoc(doc(db, 'workLogs', docId), sanitized, { merge: true });
+    } catch (err: any) {
+      try {
+        await ensureActiveFirebaseAuth();
+        const sanitized = sanitizeFirestorePayload(canonicalPayload);
+        await setDoc(doc(db, 'workLogs', docId), sanitized, { merge: true });
+      } catch (retryErr) {
+        // Safe: already in local cache and Cloudflare D1
+      }
+    }
+  })().catch(console.warn);
+
+  // 4. Write activity log in background
+  (async () => {
+    try {
+      await addDoc(collection(db, 'activityLogs'), {
+        userId: userId || fallbackEmpId,
+        userName: fallbackEmpName,
+        action: `completed deliverable: "${task.title}" (Work Log synced)`,
+        details: `Client: ${task.clientName || 'Direct'} · ID: ${task.taskId}${videoProdId ? ` · Video: ${videoProdId}` : ''}`,
+        createdAt: nowIso,
+      });
+    } catch (e) {}
+  })().catch(() => {});
 
   return { success: true, id: docId, action: 'created' };
 }
@@ -159,7 +162,10 @@ export async function syncTaskReopenedState(taskId: string): Promise<void> {
     }
   } catch (e) {}
 
-  // 2. Update Firestore
+  // 2. Update Cloudflare D1
+  cfUpdateWorkLog(docId, { task_reopened: true }).catch(() => {});
+
+  // 3. Update Firestore
   try {
     await updateDoc(doc(db, 'workLogs', docId), {
       taskReopened: true,

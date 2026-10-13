@@ -4,7 +4,7 @@ import {
   ClipboardList, Plus, Search, Filter, Calendar, User,
   Briefcase, Clock, CheckSquare, X, Loader2, Check,
   ChevronDown, Tag, FileText, Trash2, TrendingUp, CheckCircle2,
-  ExternalLink, Sparkles, AlertCircle, Layers, Download, Film
+  ExternalLink, Sparkles, AlertCircle, Layers, Download, Film, RotateCw
 } from 'lucide-react';
 import { db, sanitizeFirestorePayload } from '../../lib/firebase';
 import {
@@ -12,9 +12,9 @@ import {
   doc, orderBy, onSnapshot, Timestamp
 } from 'firebase/firestore';
 import { DEFAULT_CLIENTS_MASTER, ensureCentralClientsSeeded, getCachedClients, subscribeToCanonicalClients } from '../../lib/clientMaster';
-import { cfGetClients, cfGetEmployees } from '../../lib/cloudflareApi';
+import { cfGetClients, cfGetEmployees, cfGetWorkLogs, cfCreateWorkLog, cfDeleteWorkLog } from '../../lib/cloudflareApi';
 import { DEFAULT_EMPLOYEES_MASTER, getCachedEmployees, subscribeToCanonicalEmployees } from '../../lib/employeeMaster';
-import { persistNewTask } from '../../lib/taskStorage';
+import { persistNewTask, getCachedTasks, subscribeToCanonicalTasks } from '../../lib/taskStorage';
 
 // ─── Types ───────────────────────────────────────────────────────────
 export interface WorkLog {
@@ -187,20 +187,8 @@ export const WorkLogView: React.FC = () => {
       if (Array.isArray(cfList) && cfList.length > 0) setEmployees(cfList);
     }).catch(console.warn);
 
-    const unsubTasks = onSnapshot(collection(db, 'tasks'), snap => {
-      if (!snap.empty) {
-        setTasks(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      } else {
-        try {
-          const cachedTasksRaw = localStorage.getItem('digi_persisted_tasks_v2');
-          if (cachedTasksRaw) setTasks(JSON.parse(cachedTasksRaw));
-        } catch (e) {}
-      }
-    }, () => {
-      try {
-        const cachedTasksRaw = localStorage.getItem('digi_persisted_tasks_v2');
-        if (cachedTasksRaw) setTasks(JSON.parse(cachedTasksRaw));
-      } catch (e) {}
+    const unsubTasks = subscribeToCanonicalTasks((taskList) => {
+      setTasks(taskList);
     });
 
     return () => {
@@ -221,6 +209,7 @@ export const WorkLogView: React.FC = () => {
 
   // Real-time canonical logs listener with local cache sync & custom event listener
   useEffect(() => {
+    // 1. Instant event listener for zero-delay UI update when task completes
     const handleLogUpdate = (e: any) => {
       if (e?.detail) {
         const normalized = normalizeWorkLog(e.detail, e.detail.id || `evt_${Date.now()}`);
@@ -234,6 +223,33 @@ export const WorkLogView: React.FC = () => {
     };
     window.addEventListener('worklogs_updated', handleLogUpdate);
 
+    // 2. Cross-tab storage listener
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'digi_persisted_worklogs_v2') {
+        setLogs(getCachedWorkLogs());
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
+    // 3. Cloudflare D1 fetch
+    cfGetWorkLogs().then((cfList) => {
+      if (Array.isArray(cfList) && cfList.length > 0) {
+        const normalized = cfList.map(item => normalizeWorkLog(item, item.id));
+        setLogs(prev => {
+          const byId = new Map<string, WorkLog>();
+          prev.forEach(l => byId.set(l.id, l));
+          normalized.forEach(l => byId.set(l.id, l));
+          const merged = Array.from(byId.values());
+          merged.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+          try {
+            localStorage.setItem('digi_persisted_worklogs_v2', JSON.stringify(merged));
+          } catch (e) {}
+          return merged;
+        });
+      }
+    }).catch(console.warn);
+
+    // 4. Firestore snapshot listener
     const unsubLogs = onSnapshot(collection(db, 'workLogs'), snap => {
       if (!snap.empty) {
         const list = snap.docs.map(d => normalizeWorkLog(d.data(), d.id));
@@ -263,6 +279,7 @@ export const WorkLogView: React.FC = () => {
 
     return () => {
       window.removeEventListener('worklogs_updated', handleLogUpdate);
+      window.removeEventListener('storage', handleStorage);
       unsubLogs();
       unsubVideos();
     };
@@ -346,9 +363,62 @@ export const WorkLogView: React.FC = () => {
     }
   };
 
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleManualRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      // 1. Fetch live from Cloudflare D1
+      const cfList = await cfGetWorkLogs().catch(() => []);
+      let currentLogs = getCachedWorkLogs();
+      if (Array.isArray(cfList) && cfList.length > 0) {
+        const normalized = cfList.map(item => normalizeWorkLog(item, item.id));
+        const byId = new Map<string, WorkLog>();
+        currentLogs.forEach(l => byId.set(l.id, l));
+        normalized.forEach(l => byId.set(l.id, l));
+        currentLogs = Array.from(byId.values());
+      }
+
+      // 2. Scan cached tasks for any Done tasks missing from logs
+      const currentTasks = getCachedTasks();
+      const doneTasks = currentTasks.filter(t => ['done', 'completed', 'approved'].includes((t.status || '').toLowerCase().trim()));
+      const { syncTaskCompletionToWorkLog } = await import('../../lib/taskWorkLogSync');
+      let syncedCount = 0;
+      for (const t of doneTasks) {
+        const alreadyIn = currentLogs.some(l => l.taskId === t.id || l.task_id === t.id);
+        if (!alreadyIn) {
+          await syncTaskCompletionToWorkLog({
+            taskId: t.id,
+            title: t.title,
+            description: t.description,
+            clientId: t.clientId,
+            clientName: t.clientName,
+            assigneeId: t.assigneeId,
+            assigneeName: t.assigneeName,
+            category: t.category || 'Other',
+            quantity: 1,
+            completedAt: t.completedAt || new Date().toISOString(),
+          }, profile, user?.uid);
+          syncedCount++;
+        }
+      }
+
+      const refreshed = getCachedWorkLogs();
+      refreshed.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      setLogs(refreshed);
+      triggerToast(syncedCount > 0 ? `✓ Refreshed! Auto-synced ${syncedCount} completed task(s)` : '✓ Work logs are up to date');
+    } catch (e) {
+      console.warn('Manual refresh error:', e);
+      triggerToast('Refreshed local logs');
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [profile, user]);
+
   const handleDelete = useCallback(async (logId: string) => {
     if (!window.confirm('Delete this work log record?')) return;
     try {
+      cfDeleteWorkLog(logId).catch(() => {});
       await deleteDoc(doc(db, 'workLogs', logId));
       setLogs(prev => {
         const updated = prev.filter(l => l.id !== logId);
@@ -475,6 +545,15 @@ export const WorkLogView: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2.5">
+          <button
+            onClick={handleManualRefresh}
+            disabled={isRefreshing}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-[#475467] dark:text-[#BAC1D1] bg-[#F7F8FC] dark:bg-[#171E31] border border-[#D7DEE9] dark:border-[#293248] hover:bg-[#EEF1F6] dark:hover:bg-[#1C2439] hover:text-[#5B4BFF] dark:hover:text-[#806CFF] transition-all cursor-pointer disabled:opacity-50"
+            title="Refresh work logs from Cloudflare D1 and auto-sync completed tasks"
+          >
+            <RotateCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-[#5B4BFF]' : ''}`} />
+            <span>{isRefreshing ? 'Refreshing…' : 'Refresh'}</span>
+          </button>
           <button
             onClick={handleExportCSV}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-[#475467] dark:text-[#BAC1D1] bg-[#F7F8FC] dark:bg-[#171E31] border border-[#D7DEE9] dark:border-[#293248] hover:bg-[#EEF1F6] dark:hover:bg-[#1C2439] transition-all cursor-pointer"

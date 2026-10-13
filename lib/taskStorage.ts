@@ -631,7 +631,34 @@ export const persistNewTask = async (
       console.warn('WorkspaceEvent emission notice:', evtErr);
     }
 
-    // 4. Auto-sync to Approvals Queue if status is In Review
+    // 4. Auto-sync to Work Log if status is Done
+    if (newTask.status === 'Done') {
+      try {
+        const { syncTaskCompletionToWorkLog } = await import('./taskWorkLogSync');
+        syncTaskCompletionToWorkLog(
+          {
+            taskId: newTask.id,
+            title: newTask.title,
+            description: newTask.description,
+            clientId: newTask.clientId,
+            clientName: newTask.clientName,
+            assigneeId: newTask.assigneeId,
+            assigneeName: newTask.assigneeName,
+            category: newTask.category || 'Other',
+            quantity: 1,
+            completedAt: newTask.completedAt || nowIso,
+            source: 'task_completion',
+            videoProductionId: newTask.videoProductionId,
+          },
+          userProfile,
+          userProfile?.uid
+        ).catch(console.warn);
+      } catch (workLogErr) {
+        console.warn('Work Log auto-sync notice on task creation:', workLogErr);
+      }
+    }
+
+    // 5. Auto-sync to Approvals Queue if status is In Review
     if (newTask.status === 'In Review') {
       try {
         const { createOrUpdateApprovalFromSource } = await import('./approvalStorage');

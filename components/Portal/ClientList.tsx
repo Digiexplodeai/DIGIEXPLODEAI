@@ -270,40 +270,46 @@ export const ClientList: React.FC = () => {
     if (!profile) return;
     ensureCentralClientsSeeded().catch(e => console.warn("Seed non-fatal:", e));
     
-    // A. Listen to clients (Cloudflare D1 primary, Firestore fallback)
+    // A. Listen to clients (Cloudflare D1 primary, merge-safe)
     cfGetClients().then((cfList) => {
       if (Array.isArray(cfList) && cfList.length > 0) {
-        setCachedClients(cfList as any);
-        setClients(cfList);
+        setClients(prev => {
+          const map = new Map<string, ClientData>();
+          cfList.forEach(c => map.set(c.clientId, c));
+          prev.forEach(c => {
+            if (!map.has(c.clientId)) map.set(c.clientId, c);
+          });
+          const merged = Array.from(map.values());
+          setCachedClients(merged as any);
+          return merged;
+        });
         setLoading(false);
       }
     }).catch(e => console.warn("Cloudflare D1 clients load notice:", e));
 
     const clientsRef = collection(db, 'clients');
     const unsubscribeClients = onSnapshot(clientsRef, (snapshot) => {
-      const clientList: ClientData[] = [];
-      snapshot.forEach((doc) => {
-        clientList.push({ clientId: doc.id, ...doc.data() } as ClientData);
-      });
-      if (clientList.length > 0) {
-        // Cache so next refresh shows clients instantly
-        setCachedClients(clientList as any);
-        setClients(clientList);
-      } else {
-        // Firestore empty — use localStorage cache or Cloudflare list so UI stays populated
-        const cached = getCachedClients();
-        if (cached.length > 0) {
-          setClients(cached as ClientData[]);
+      if (!snapshot.empty) {
+        const clientList: ClientData[] = [];
+        snapshot.forEach((doc) => {
+          clientList.push({ clientId: doc.id, ...doc.data() } as ClientData);
+        });
+        if (clientList.length > 0) {
+          setClients(prev => {
+            const map = new Map<string, ClientData>();
+            clientList.forEach(c => map.set(c.clientId, c));
+            prev.forEach(c => {
+              if (!map.has(c.clientId)) map.set(c.clientId, c);
+            });
+            const merged = Array.from(map.values());
+            setCachedClients(merged as any);
+            return merged;
+          });
         }
       }
       setLoading(false);
     }, (error) => {
-      console.warn("Clients list listener notice:", error);
-      // On error, stay with cached data rather than wiping to empty
-      const cached = getCachedClients();
-      if (cached.length > 0) {
-        setClients(cached as ClientData[]);
-      }
+      console.warn("Clients list Firestore notice:", error);
       setLoading(false);
     });
 
@@ -589,17 +595,30 @@ export const ClientList: React.FC = () => {
 
   const handleDeleteClient = async (id: string) => {
     if (confirm("Are you sure you want to remove this client account? This will permanently delete the client record.")) {
+      // 1. Update UI state immediately
+      setClients(prev => prev.filter(c => c.clientId !== id));
+      // 2. Update localStorage cache immediately
+      const currentCached = getCachedClients();
+      setCachedClients(currentCached.filter(c => c.clientId !== id));
+      if (selectedClientId === id) {
+        setSelectedClientId(null);
+      }
+      if (previewClient?.clientId === id) {
+        setPreviewClient(null);
+      }
+
+      // 3. Delete from Cloudflare D1
       try {
-        cfDeleteClient(id).catch(e => console.warn("Cloudflare delete client notice:", e));
+        await cfDeleteClient(id);
+      } catch (e) {
+        console.warn("Cloudflare delete client notice:", e);
+      }
+
+      // 4. Delete from Firestore if connected
+      try {
         await deleteDoc(doc(db, 'clients', id));
-        if (selectedClientId === id) {
-          setSelectedClientId(null);
-        }
-        if (previewClient?.clientId === id) {
-          setPreviewClient(null);
-        }
       } catch (error) {
-        handleFirestoreError(error, OperationType.DELETE, `clients/${id}`);
+        console.warn("Firestore delete notice:", error);
       }
     }
   };
@@ -630,14 +649,34 @@ export const ClientList: React.FC = () => {
       updatedAt: new Date().toISOString()
     };
 
-    try {
-      cfSaveClient(payload).catch(e => console.warn("Cloudflare save client notice:", e));
-      await setDoc(doc(db, 'clients', targetId), payload);
-      // Cache immediately so it's available on next refresh
-      const updated = clients.filter(c => c.clientId !== targetId).concat(payload);
-      setCachedClients(updated as any);
+    // 1. Immediately update UI state so user sees it right away
+    setClients(prev => {
+      const idx = prev.findIndex(c => c.clientId === targetId);
+      if (idx >= 0) {
+        const cp = [...prev];
+        cp[idx] = payload;
+        return cp;
+      }
+      return [payload, ...prev];
+    });
 
-      // Auto-bridge client users matching email
+    // 2. Persist to localStorage cache immediately so refresh keeps it permanently
+    const currentCached = getCachedClients();
+    const updatedCache = currentCached.filter(c => c.clientId !== targetId).concat(payload as any);
+    setCachedClients(updatedCache);
+
+    setIsClientModalOpen(false);
+
+    // 3. Save to Cloudflare D1
+    try {
+      await cfSaveClient(payload);
+    } catch (e) {
+      console.warn("Cloudflare save client notice:", e);
+    }
+
+    // 4. Background sync to Firestore if connected
+    try {
+      await setDoc(doc(db, 'clients', targetId), payload);
       const usersRef = collection(db, 'users');
       const qUsers = query(usersRef, where('email', '==', email.trim().toLowerCase()));
       const userSnap = await getDocs(qUsers);
@@ -649,20 +688,8 @@ export const ClientList: React.FC = () => {
           });
         });
       }
-
-      setIsClientModalOpen(false);
     } catch (error) {
-      console.warn("Client save local fallback:", error);
-      setClients(prev => {
-        const idx = prev.findIndex(c => c.clientId === targetId);
-        if (idx >= 0) {
-          const cp = [...prev];
-          cp[idx] = payload;
-          return cp;
-        }
-        return [payload, ...prev];
-      });
-      setIsClientModalOpen(false);
+      console.warn("Firestore client background sync notice:", error);
     }
   };
 

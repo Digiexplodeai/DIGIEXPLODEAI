@@ -43,7 +43,8 @@ import {
 import { type ClientData } from './ClientList';
 import { type Employee } from './AttendanceView';
 import { ClientSelect } from './ClientSelect';
-import { DEFAULT_CLIENTS_MASTER } from '../../lib/clientMaster';
+import { DEFAULT_CLIENTS_MASTER, getCachedClients, subscribeToCanonicalClients } from '../../lib/clientMaster';
+import { cfGetClients } from '../../lib/cloudflareApi';
 import {
   subscribeToCanonicalEmployees,
   getCachedEmployees,
@@ -130,7 +131,7 @@ export const QuickWorkEntry: React.FC<QuickWorkEntryProps> = ({ onTaskCreated, s
   const { profile } = useAuth();
 
   // Database States
-  const [clients, setClients] = useState<ClientData[]>(DEFAULT_CLIENTS_MASTER);
+  const [clients, setClients] = useState<any[]>(() => getCachedClients());
   const [employees, setEmployees] = useState<MasterEmployee[]>(() => getCachedEmployees());
   const [calendarEntries, setCalendarEntries] = useState<CalendarEntry[]>(DEFAULT_CALENDAR_SEEDS);
   const [employeeLoadError, setEmployeeLoadError] = useState(false);
@@ -193,11 +194,12 @@ export const QuickWorkEntry: React.FC<QuickWorkEntryProps> = ({ onTaskCreated, s
 
   // Load clients and canonical employees
   useEffect(() => {
-    const unsubClients = onSnapshot(collection(db, 'clients'), (snap) => {
-      const list: ClientData[] = [];
-      snap.forEach(d => list.push({ clientId: d.id, ...d.data() } as ClientData));
-      if (list.length > 0) setClients(list);
+    const unsubClients = subscribeToCanonicalClients((list) => {
+      if (list && list.length > 0) setClients(list);
     });
+    cfGetClients().then((cfList) => {
+      if (Array.isArray(cfList) && cfList.length > 0) setClients(cfList);
+    }).catch(console.warn);
 
     const unsubEmployees = subscribeToCanonicalEmployees(
       (empList) => {

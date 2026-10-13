@@ -15,7 +15,8 @@ import {
   deleteDoc, doc, orderBy, Timestamp, onSnapshot
 } from 'firebase/firestore';
 import { useActiveEmployee } from '../../hooks/useActiveEmployee';
-import { DEFAULT_CLIENTS_MASTER, ensureCentralClientsSeeded } from '../../lib/clientMaster';
+import { DEFAULT_CLIENTS_MASTER, ensureCentralClientsSeeded, getCachedClients, subscribeToCanonicalClients } from '../../lib/clientMaster';
+import { cfGetClients } from '../../lib/cloudflareApi';
 import { isTaskAssignedToEmployee } from '../../lib/employeeMaster';
 import { AssignmentBoard } from './AssignmentBoard';
 import { TaskScheduleCalendar } from './TaskScheduleCalendar';
@@ -81,7 +82,7 @@ const priorityStyles: Record<string, { badge: string; text: string; dot: string 
 export const TasksView: React.FC = () => {
   const { profile, user } = useAuth();
   const [tasks, setTasks] = useState<Task[]>(() => getCachedTasks());
-  const [clients, setClients] = useState<any[]>([]);
+  const [clients, setClients] = useState<any[]>(() => getCachedClients());
   const [employees, setEmployees] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -164,17 +165,17 @@ export const TasksView: React.FC = () => {
   useEffect(() => {
     ensureCentralClientsSeeded();
 
-    const unsubClients = onSnapshot(collection(db, 'clients'), snap => {
-      if (!snap.empty) {
-        const loaded = snap.docs.map(d => ({ id: d.id, clientId: d.id, ...d.data() }));
+    const unsubClients = subscribeToCanonicalClients((loaded) => {
+      if (loaded && loaded.length > 0) {
         setClients(loaded);
-      } else {
-        setClients(DEFAULT_CLIENTS_MASTER);
       }
-    }, err => {
-      console.warn('Clients sync notice:', err);
-      setClients(DEFAULT_CLIENTS_MASTER);
     });
+
+    cfGetClients().then((cfList) => {
+      if (Array.isArray(cfList) && cfList.length > 0) {
+        setClients(cfList);
+      }
+    }).catch(console.warn);
 
     const unsubEmployees = onSnapshot(collection(db, 'employees'), snap => {
       if (!snap.empty) {

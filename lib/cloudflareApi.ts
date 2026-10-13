@@ -7,7 +7,7 @@
  *   VITE_WORKER_URL=https://digiexplodai.digiexplodeai.workers.dev
  */
 
-const BASE_URL = (import.meta.env?.VITE_WORKER_URL || 'https://digiexplodai.digiexplodeai.workers.dev').replace(/\/$/, '');
+const BASE_URL = ((import.meta as any).env?.VITE_WORKER_URL || 'https://digiexplodai.digiexplodeai.workers.dev').replace(/\/$/, '');
 
 async function apiFetch<T = any>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}/api${path}`, {

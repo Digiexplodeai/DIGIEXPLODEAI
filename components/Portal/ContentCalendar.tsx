@@ -51,8 +51,8 @@ import {
   CalendarDays,
   LayoutGrid
 } from 'lucide-react';
-import { type ClientData } from './ClientList';
-import { ensureCentralClientsSeeded, DEFAULT_CLIENTS_MASTER } from '../../lib/clientMaster';
+import { ensureCentralClientsSeeded, DEFAULT_CLIENTS_MASTER, getCachedClients, subscribeToCanonicalClients } from '../../lib/clientMaster';
+import { cfGetClients } from '../../lib/cloudflareApi';
 import { 
   getCachedEmployees, 
   subscribeToCanonicalEmployees, 
@@ -178,7 +178,7 @@ export const ContentCalendar: React.FC = () => {
   const [entries, setEntries] = useState<CalendarEntry[]>(() => getCachedCalendarEntries());
   const [canonicalTasks, setCanonicalTasks] = useState<Task[]>(() => getCachedTasks());
   const [videos, setVideos] = useState<any[]>([]);
-  const [clients, setClients] = useState<ClientData[]>(DEFAULT_CLIENTS_MASTER);
+  const [clients, setClients] = useState<any[]>(() => getCachedClients());
   const [employees, setEmployees] = useState<MasterEmployee[]>(() => getCachedEmployees());
 
   // Date Selection & Navigation
@@ -265,11 +265,12 @@ export const ContentCalendar: React.FC = () => {
       if (emps && emps.length > 0) setEmployees(emps);
     });
 
-    const unsubClients = onSnapshot(collection(db, 'clients'), (snap) => {
-      if (!snap.empty) {
-        setClients(snap.docs.map(d => ({ id: d.id, clientId: d.id, ...d.data() })));
-      }
-    }, () => setClients(DEFAULT_CLIENTS_MASTER));
+    const unsubClients = subscribeToCanonicalClients((list) => {
+      if (list && list.length > 0) setClients(list);
+    });
+    cfGetClients().then((cfList) => {
+      if (Array.isArray(cfList) && cfList.length > 0) setClients(cfList);
+    }).catch(console.warn);
 
     const unsubVideos = onSnapshot(collection(db, 'videoTracker'), (snap) => {
       if (!snap.empty) {

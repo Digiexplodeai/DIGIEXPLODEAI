@@ -43,8 +43,8 @@ import {
   ShieldAlert,
   UserCheck
 } from 'lucide-react';
-import { type ClientData } from './ClientList';
-import { DEFAULT_CLIENTS_MASTER } from '../../lib/clientMaster';
+import { DEFAULT_CLIENTS_MASTER, getCachedClients, subscribeToCanonicalClients } from '../../lib/clientMaster';
+import { cfGetClients } from '../../lib/cloudflareApi';
 import { 
   subscribeToCanonicalEmployees, 
   getCachedEmployees, 
@@ -255,7 +255,7 @@ const DEFAULT_INITIAL_VIDEOS: VideoProductionEntry[] = [];
 export const VideoTrackerView: React.FC = () => {
   const { profile, user } = useAuth();
   const [videos, setVideos] = useState<VideoProductionEntry[]>([]);
-  const [clients, setClients] = useState<ClientData[]>([]);
+  const [clients, setClients] = useState<any[]>(() => getCachedClients());
   const [employees, setEmployees] = useState<MasterEmployee[]>(() => getCachedEmployees());
   const [loading, setLoading] = useState(true);
 
@@ -380,15 +380,16 @@ export const VideoTrackerView: React.FC = () => {
       setLoading(false);
     });
 
-    const unsubClients = onSnapshot(collection(db, 'clients'), (snapshot) => {
-      const clientList: ClientData[] = [];
-      snapshot.forEach((d) => {
-        clientList.push({ clientId: d.id, ...d.data() } as ClientData);
-      });
-      if (clientList.length > 0) {
-        setClients(clientList);
+    const unsubClients = subscribeToCanonicalClients((cList) => {
+      if (cList && cList.length > 0) {
+        setClients(cList);
       }
     });
+    cfGetClients().then((cfList) => {
+      if (Array.isArray(cfList) && cfList.length > 0) {
+        setClients(cfList);
+      }
+    }).catch(console.warn);
 
     const unsubEmployees = subscribeToCanonicalEmployees((empList) => {
       if (empList.length > 0) {

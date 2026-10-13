@@ -523,11 +523,13 @@ export function subscribeToCanonicalClients(
   onUpdate: (clients: CentralClient[]) => void,
   onError?: (err: any) => void
 ): () => void {
-  onUpdate(DEFAULT_CLIENTS_MASTER);
+  const cached = getCachedClients();
+  onUpdate(cached.length > 0 ? cached : DEFAULT_CLIENTS_MASTER);
 
   cfGetClients().then((cfList) => {
     if (Array.isArray(cfList) && cfList.length > 0) {
       const list = cfList.map(c => ({ id: c.clientId, slug: c.clientId, ...c } as CentralClient));
+      setCachedClients(list);
       onUpdate(list);
     }
   }).catch(console.warn);
@@ -538,13 +540,11 @@ export function subscribeToCanonicalClients(
     const unsub = onSnapshot(collection(db, 'clients'), (snapshot) => {
       if (!snapshot.empty) {
         const list = snapshot.docs.map(d => ({ id: d.id, clientId: d.id, ...d.data() } as CentralClient));
-        onUpdate(list.length > 0 ? list : DEFAULT_CLIENTS_MASTER);
-      } else {
-        onUpdate(DEFAULT_CLIENTS_MASTER);
+        setCachedClients(list);
+        onUpdate(list);
       }
     }, (err) => {
       console.warn('Clients snapshot notice (using local fallback):', err);
-      onUpdate(DEFAULT_CLIENTS_MASTER);
       if (onError) onError(err);
     });
     return unsub;

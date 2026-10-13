@@ -13,7 +13,8 @@ import {
   collection, query, where, getDocs, addDoc, updateDoc, deleteDoc,
   doc, orderBy, limit, Timestamp, onSnapshot, setDoc
 } from 'firebase/firestore';
-import { DEFAULT_CLIENTS_MASTER } from '../../lib/clientMaster';
+import { DEFAULT_CLIENTS_MASTER, getCachedClients, subscribeToCanonicalClients } from '../../lib/clientMaster';
+import { cfGetClients } from '../../lib/cloudflareApi';
 import { isTaskAssignedToEmployee, EMPLOYEE_ID_ALIASES } from '../../lib/employeeMaster';
 import { SuggestiveCombobox, type SuggestiveOption } from './SuggestiveCombobox';
 import { ensureActiveFirebaseAuth } from '../../lib/calendarStorage';
@@ -153,7 +154,7 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
 
   // Canonical Tasks from Central Repository
   const [allTasks, setAllTasks] = useState<Task[]>(() => getCachedTasks());
-  const [clients, setClients] = useState<any[]>(DEFAULT_CLIENTS_MASTER);
+  const [clients, setClients] = useState<any[]>(() => getCachedClients());
 
   // Tab & View Selection
   const [activeTaskTab, setActiveTaskTab] = useState<'today' | 'overdue' | 'upcoming' | 'completed'>('today');
@@ -236,11 +237,12 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
 
   // ─── 2. Clients Subscription ──────────────────────────────────────────
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'clients'), snap => {
-      if (!snap.empty) {
-        setClients(snap.docs.map(d => ({ id: d.id, clientId: d.id, ...d.data() })));
-      }
-    }, () => setClients(DEFAULT_CLIENTS_MASTER));
+    const unsub = subscribeToCanonicalClients(list => {
+      if (list && list.length > 0) setClients(list);
+    });
+    cfGetClients().then(cfList => {
+      if (Array.isArray(cfList) && cfList.length > 0) setClients(cfList);
+    }).catch(console.warn);
     return () => unsub();
   }, []);
 

@@ -11,7 +11,8 @@ import {
   collection, query, where, getDocs, addDoc, setDoc, deleteDoc,
   doc, orderBy, onSnapshot, Timestamp
 } from 'firebase/firestore';
-import { DEFAULT_CLIENTS_MASTER, ensureCentralClientsSeeded } from '../../lib/clientMaster';
+import { DEFAULT_CLIENTS_MASTER, ensureCentralClientsSeeded, getCachedClients, subscribeToCanonicalClients } from '../../lib/clientMaster';
+import { cfGetClients } from '../../lib/cloudflareApi';
 import { DEFAULT_EMPLOYEES_LIST } from './TasksView';
 import { persistNewTask } from '../../lib/taskStorage';
 
@@ -149,7 +150,7 @@ export const WorkLogView: React.FC = () => {
   const { profile, user } = useAuth();
   const [logs, setLogs] = useState<WorkLog[]>(() => getCachedWorkLogs());
   const [tasks, setTasks] = useState<any[]>([]);
-  const [clients, setClients] = useState<any[]>(DEFAULT_CLIENTS_MASTER);
+  const [clients, setClients] = useState<any[]>(() => getCachedClients());
   const [employees, setEmployees] = useState<any[]>(DEFAULT_EMPLOYEES_LIST);
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -172,13 +173,12 @@ export const WorkLogView: React.FC = () => {
   useEffect(() => {
     ensureCentralClientsSeeded();
 
-    const unsubClients = onSnapshot(collection(db, 'clients'), snap => {
-      if (!snap.empty) {
-        setClients(snap.docs.map(d => ({ id: d.id, clientId: d.id, ...d.data() })));
-      } else {
-        setClients(DEFAULT_CLIENTS_MASTER);
-      }
-    }, () => setClients(DEFAULT_CLIENTS_MASTER));
+    const unsubClients = subscribeToCanonicalClients((list) => {
+      if (list && list.length > 0) setClients(list);
+    });
+    cfGetClients().then((cfList) => {
+      if (Array.isArray(cfList) && cfList.length > 0) setClients(cfList);
+    }).catch(console.warn);
 
     const unsubEmployees = onSnapshot(collection(db, 'employees'), snap => {
       if (!snap.empty) {

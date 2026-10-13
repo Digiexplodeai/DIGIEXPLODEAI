@@ -5,7 +5,7 @@ import {
 import { db } from '../../lib/firebase';
 import { useAuth, type UserProfile } from '../../context/AuthContext';
 import { type ClientData } from './ClientList';
-import { mergeWithSuperAdmin, PERMANENT_SUPER_ADMIN_MEMBER } from '../../lib/employeeMaster';
+import { mergeWithSuperAdmin, PERMANENT_SUPER_ADMIN_MEMBER, CENTRAL_EMPLOYEES_MASTER_LIST, getCachedEmployees } from '../../lib/employeeMaster';
 import {
   Users, Plus, Search, X, Loader2, Check, Edit2, UserCheck, UserX,
   Mail, Phone, Calendar, Shield, Briefcase, ChevronRight, Star,
@@ -89,7 +89,7 @@ export const AdminList: React.FC = () => {
 
     // Sync with Firestore if available
     try {
-      const empUnsub = onSnapshot(collection(db, 'employees'), snap => {
+      const empUnsub = onSnapshot(collection(db, 'employees'), async snap => {
         if (!snap.empty) {
           const firestoreList = snap.docs.map(d => {
             const data = d.data();
@@ -105,13 +105,32 @@ export const AdminList: React.FC = () => {
           // CRITICAL: merge Super Admin back in — Firestore snapshot must never strip it
           const merged = mergeWithSuperAdmin(firestoreList) as Employee[];
           setEmployees(merged);
-          // Only cache the non-SA employees (SA is always injected from code, not stored)
-          // But we store merged anyway — getCachedEmployees + mergeWithSuperAdmin in employeeMaster
-          // will re-inject if the cache entry is somehow missing
           localStorage.setItem('digi_local_employees', JSON.stringify(merged));
           console.debug('[AdminList] Firestore snap, merged[0]:', merged[0]?.id, 'total:', merged.length);
+        } else {
+          // Firestore collection is empty — seed it with the master employee list
+          console.debug('[AdminList] Firestore employees empty — seeding master list…');
+          const masterList = mergeWithSuperAdmin(CENTRAL_EMPLOYEES_MASTER_LIST) as Employee[];
+          setEmployees(masterList);
+          localStorage.setItem('digi_local_employees', JSON.stringify(masterList));
+          // Seed all master employees into Firestore so they persist
+          try {
+            await Promise.all(
+              CENTRAL_EMPLOYEES_MASTER_LIST.map(emp =>
+                setDoc(doc(db, 'employees', emp.employeeId), emp, { merge: true })
+              )
+            );
+            console.debug('[AdminList] Master employees seeded to Firestore.');
+          } catch (seedErr) {
+            console.warn('[AdminList] Could not seed employees to Firestore:', seedErr);
+          }
         }
-      }, err => console.warn('Employees Firestore listener fallback to local:', err));
+      }, err => {
+        console.warn('Employees Firestore listener fallback to local:', err);
+        // On error, fallback to cached/master data
+        const fallback = getCachedEmployees();
+        if (fallback.length > 0) setEmployees(fallback as Employee[]);
+      });
 
       const usersUnsub = onSnapshot(collection(db, 'users'), snap => {
         if (!snap.empty) {

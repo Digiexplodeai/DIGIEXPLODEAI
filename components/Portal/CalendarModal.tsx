@@ -38,6 +38,8 @@ import {
 } from '../../lib/calendarStorage';
 import { type ClientData } from './ClientList';
 import { ClientSelect } from './ClientSelect';
+import { SuggestiveInput, SuggestiveTextarea } from './SuggestiveInput';
+import { saveFormFieldHistory } from '../../lib/formHistoryStorage';
 import { persistNewTask, persistUpdateTask } from '../../lib/taskStorage';
 
 import { 
@@ -258,6 +260,12 @@ export const CalendarModal: React.FC<CalendarModalProps> = ({
       setModalFeedback("Please select a target Client Brand.");
       return;
     }
+
+    saveFormFieldHistory('calendar_title', topic.trim());
+    if (caption.trim()) saveFormFieldHistory('calendar_caption', caption.trim());
+    if (hashtags.trim()) saveFormFieldHistory('calendar_hashtags', hashtags.trim());
+    if (creativeLink.trim()) saveFormFieldHistory('creative_link', creativeLink.trim());
+    if (driveLink.trim()) saveFormFieldHistory('drive_link', driveLink.trim());
     if (!topic.trim()) {
       setModalFeedback("Please enter a deliverable topic or title.");
       return;
@@ -428,10 +436,10 @@ export const CalendarModal: React.FC<CalendarModalProps> = ({
             {/* Topic title */}
             <div className="space-y-1">
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Topic / Title *</label>
-              <input 
-                type="text" 
+              <SuggestiveInput 
+                fieldKey="calendar_title"
                 value={topic}
-                onChange={(e) => setTopic(e.target.value)}
+                onChange={(val) => setTopic(val)}
                 disabled={isClient}
                 placeholder="e.g. 5 Signs You Need customized marketing plans..."
                 className="w-full text-xs bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-2.5 outline-none font-medium text-slate-900 dark:text-slate-100"
@@ -555,9 +563,10 @@ export const CalendarModal: React.FC<CalendarModalProps> = ({
             {/* Caption editor */}
             <div className="space-y-1">
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Captions & Copy</label>
-              <textarea 
+              <SuggestiveTextarea 
+                fieldKey="calendar_caption"
                 value={caption}
-                onChange={(e) => setCaption(e.target.value)}
+                onChange={(val) => setCaption(val)}
                 disabled={isClient}
                 rows={3}
                 placeholder="Write caption details, engaging openers, hashtags, and calls to action..."
@@ -568,10 +577,10 @@ export const CalendarModal: React.FC<CalendarModalProps> = ({
             {/* Hashtags */}
             <div className="space-y-1">
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Hashtags</label>
-              <input 
-                type="text" 
+              <SuggestiveInput 
+                fieldKey="calendar_hashtags"
                 value={hashtags}
-                onChange={(e) => setHashtags(e.target.value)}
+                onChange={(val) => setHashtags(val)}
                 disabled={isClient}
                 placeholder="#marketing #branding #digitalagency..."
                 className="w-full text-xs bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-2.5 outline-none font-medium text-slate-900 dark:text-slate-100"
@@ -583,10 +592,10 @@ export const CalendarModal: React.FC<CalendarModalProps> = ({
               <div className="space-y-1">
                 <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Canva / Creative Link</label>
                 <div className="flex items-center gap-1.5">
-                  <input 
-                    type="text" 
+                  <SuggestiveInput 
+                    fieldKey="creative_link"
                     value={creativeLink}
-                    onChange={(e) => setCreativeLink(e.target.value)}
+                    onChange={(val) => setCreativeLink(val)}
                     disabled={isClient}
                     placeholder="https://canva.com/design/..."
                     className="w-full text-xs bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-2 outline-none font-medium"
@@ -600,10 +609,10 @@ export const CalendarModal: React.FC<CalendarModalProps> = ({
               <div className="space-y-1">
                 <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Drive / Raw Video Link</label>
                 <div className="flex items-center gap-1.5">
-                  <input 
-                    type="text" 
+                  <SuggestiveInput 
+                    fieldKey="drive_link"
                     value={driveLink}
-                    onChange={(e) => setDriveLink(e.target.value)}
+                    onChange={(val) => setDriveLink(val)}
                     disabled={isClient}
                     placeholder="https://drive.google.com/..."
                     className="w-full text-xs bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 p-2 outline-none font-medium"

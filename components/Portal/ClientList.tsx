@@ -64,6 +64,8 @@ import {
   Building2,
   PieChart
 } from 'lucide-react';
+import { SuggestiveInput, SuggestiveTextarea } from './SuggestiveInput';
+import { saveFormFieldHistory } from '../../lib/formHistoryStorage';
 
 // Interfaces based on blueprint and ClickUp system
 export interface ClientData {
@@ -632,6 +634,13 @@ export const ClientList: React.FC = () => {
 
     const targetId = editingClient ? editingClient.clientId : "client_" + Math.random().toString(36).substr(2, 9);
     
+    saveFormFieldHistory('client_name', clientName.trim());
+    saveFormFieldHistory('business_name', businessName.trim());
+    if (contactPerson.trim()) saveFormFieldHistory('contact_person', contactPerson.trim());
+    if (email.trim()) saveFormFieldHistory('client_email', email.trim());
+    if (phone.trim()) saveFormFieldHistory('client_phone', phone.trim());
+    if (notes.trim()) saveFormFieldHistory('client_notes', notes.trim());
+
     const payload: ClientData = {
       clientId: targetId,
       clientName: clientName.trim(),
@@ -790,6 +799,10 @@ export const ClientList: React.FC = () => {
     const taskId = editingTask ? (editingTask.taskId || (editingTask as any).id) : "task_" + Math.random().toString(36).substr(2, 9);
     const assignedUser = teamMembers.find(t => t.userId === taskAssigneeId);
     const targetClient = clients.find(c => c.clientId === targetClientId);
+
+    saveFormFieldHistory('task_title', taskTitle.trim());
+    if (taskDesc.trim()) saveFormFieldHistory('task_description', taskDesc.trim());
+    if (taskProject.trim()) saveFormFieldHistory('project_name', taskProject.trim());
 
     const payload: TaskData = {
       taskId,
@@ -2203,23 +2216,23 @@ export const ClientList: React.FC = () => {
                   <div className="space-y-3 animate-in fade-in">
                     <div>
                       <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Client / Doctor / Brand Name *</label>
-                      <input 
-                        type="text" 
+                      <SuggestiveInput 
+                        fieldKey="client_name"
                         required
                         placeholder="e.g. Dr. Anupam Jindal, Apollo Health, Brand X"
                         value={clientName}
-                        onChange={(e) => setClientName(e.target.value)}
+                        onChange={(val) => setClientName(val)}
                         className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs font-bold outline-none focus:border-blue-500"
                       />
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Business / Clinic / Company Name *</label>
-                      <input 
-                        type="text" 
+                      <SuggestiveInput 
+                        fieldKey="business_name"
                         required
                         placeholder="e.g. Jindal Neurosurgery & Spine Center"
                         value={businessName}
-                        onChange={(e) => setBusinessName(e.target.value)}
+                        onChange={(val) => setBusinessName(val)}
                         className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs font-bold outline-none focus:border-blue-500"
                       />
                     </div>
@@ -2306,44 +2319,46 @@ export const ClientList: React.FC = () => {
                   <div className="space-y-3 animate-in fade-in">
                     <div>
                       <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Contact Person Name</label>
-                      <input 
-                        type="text" 
+                      <SuggestiveInput 
+                        fieldKey="contact_person"
                         placeholder="e.g. Dr. Anupam Jindal / Coordinator"
                         value={contactPerson}
-                        onChange={(e) => setContactPerson(e.target.value)}
+                        onChange={(val) => setContactPerson(val)}
                         className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs font-bold outline-none focus:border-blue-500"
                       />
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
                         <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Email (For Client Login) *</label>
-                        <input 
+                        <SuggestiveInput 
+                          fieldKey="client_email"
                           type="email" 
                           required
                           placeholder="client@brand.com"
                           value={email}
-                          onChange={(e) => setEmail(e.target.value)}
+                          onChange={(val) => setEmail(val)}
                           className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs font-bold outline-none focus:border-blue-500"
                         />
                       </div>
                       <div>
                         <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Phone Number</label>
-                        <input 
-                          type="text" 
+                        <SuggestiveInput 
+                          fieldKey="client_phone"
                           placeholder="+91 98000 00000"
                           value={phone}
-                          onChange={(e) => setPhone(e.target.value)}
+                          onChange={(val) => setPhone(val)}
                           className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs font-bold outline-none focus:border-blue-500"
                         />
                       </div>
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Scope & Internal Notes</label>
-                      <textarea 
+                      <SuggestiveTextarea 
                         rows={2}
+                        fieldKey="client_notes"
                         placeholder="Content targets, key deliverables, social handles..."
                         value={notes}
-                        onChange={(e) => setNotes(e.target.value)}
+                        onChange={(val) => setNotes(val)}
                         className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs font-medium outline-none focus:border-blue-500 resize-none"
                       />
                     </div>
@@ -3449,10 +3464,10 @@ export const ClientList: React.FC = () => {
             <form onSubmit={handleSubmitTask} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Task Title *</label>
-                <input 
-                  type="text" 
+                <SuggestiveInput 
+                  fieldKey="task_title"
                   value={taskTitle}
-                  onChange={(e) => setTaskTitle(e.target.value)}
+                  onChange={(val) => setTaskTitle(val)}
                   placeholder="e.g., Design July Reels layout"
                   className="w-full text-sm bg-slate-50 dark:bg-slate-900 border border-slate-200 p-2.5 rounded-xl outline-none"
                   required
@@ -3461,10 +3476,10 @@ export const ClientList: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">ClickUp Folder / Project Name</label>
-                <input 
-                  type="text" 
+                <SuggestiveInput 
+                  fieldKey="project_name"
                   value={taskProject}
-                  onChange={(e) => setTaskProject(e.target.value)}
+                  onChange={(val) => setTaskProject(val)}
                   placeholder="e.g., Project 1, Website Launch, Marketing Campaign"
                   className="w-full text-sm bg-slate-50 dark:bg-slate-900 border border-slate-200 p-2.5 rounded-xl outline-none"
                 />
@@ -3494,9 +3509,10 @@ export const ClientList: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Description / Spec details</label>
-                <textarea 
+                <SuggestiveTextarea 
+                  fieldKey="task_description"
                   value={taskDesc}
-                  onChange={(e) => setTaskDesc(e.target.value)}
+                  onChange={(val) => setTaskDesc(val)}
                   placeholder="Add specific rules, text copies, or checklists..."
                   rows={3}
                   className="w-full text-sm bg-slate-50 dark:bg-slate-900 border border-slate-200 p-2.5 rounded-xl outline-none"

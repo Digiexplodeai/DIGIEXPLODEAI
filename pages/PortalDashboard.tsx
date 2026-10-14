@@ -42,10 +42,20 @@ const getDefaultTab = (role: string): string => {
 };
 
 const PortalDashboard: React.FC<PortalDashboardProps> = ({ defaultTab }) => {
-  const { user, profile, loading, signOutUser } = useAuth();
+  const { user, profile, loading, signOutUser, loginAsDemoRole } = useAuth();
   const [activeTab, setActiveTab] = useState<string>(defaultTab || 'attendance');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isCommandOpen, setIsCommandOpen] = useState(false);
+  const [showSlowLoadFallback, setShowSlowLoadFallback] = useState(false);
+
+  useEffect(() => {
+    if (loading) {
+      const t = setTimeout(() => setShowSlowLoadFallback(true), 1500);
+      return () => clearTimeout(t);
+    } else {
+      setShowSlowLoadFallback(false);
+    }
+  }, [loading]);
 
   // Set role-based default tab once profile loads
   useEffect(() => {
@@ -85,6 +95,23 @@ const PortalDashboard: React.FC<PortalDashboardProps> = ({ defaultTab }) => {
           </p>
           <p className="text-[10px] mt-1" style={{ color: 'rgba(255,255,255,0.25)' }}>DigiexplodeAI · Command Center</p>
         </div>
+
+        {showSlowLoadFallback && (
+          <div className="mt-4 flex flex-col items-center gap-2 animate-in fade-in">
+            <button
+              onClick={() => loginAsDemoRole('superAdmin')}
+              className="px-5 py-2.5 rounded-xl bg-[#3557FF] hover:bg-[#2545E0] text-white text-xs font-bold shadow-lg transition-all cursor-pointer"
+            >
+              Open Dashboard (Super Admin)
+            </button>
+            <button
+              onClick={() => signOutUser()}
+              className="text-[11px] text-slate-400 hover:text-white underline cursor-pointer"
+            >
+              Go to Login Page
+            </button>
+          </div>
+        )}
       </div>
     );
   }

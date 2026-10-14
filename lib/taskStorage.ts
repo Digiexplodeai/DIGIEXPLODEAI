@@ -4,6 +4,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { WorkspaceEventService } from './controlPlane/WorkspaceEventService';
+import { cfGetTasks, cfCreateTask, cfUpdateTask, cfDeleteTask } from './cloudflareApi';
 
 export interface Task {
   id: string;
@@ -570,6 +571,9 @@ export const persistNewTask = async (
   const updatedCache = [newTask, ...currentCached.filter(t => t.id !== taskId)];
   setCachedTasks(updatedCache);
 
+  // Sync to Cloudflare D1
+  cfCreateTask(newTask).catch(e => console.warn('Cloudflare D1 task create sync note:', e));
+
   // 2. Persist to Firestore
   try {
     await setDoc(doc(db, 'tasks', taskId), newTask, { merge: true });
@@ -710,6 +714,9 @@ export const persistUpdateTask = async (
   const updatedList = currentCached.map(t => t.id === taskId ? updatedTask : t);
   if (!target) updatedList.unshift(updatedTask);
   setCachedTasks(updatedList);
+
+  // Sync to Cloudflare D1
+  cfUpdateTask(taskId, updatedTask).catch(e => console.warn('Cloudflare D1 task update sync note:', e));
 
   // 2. Persist to Firestore
   try {
@@ -933,6 +940,9 @@ export const persistDeleteTask = async (
   const updatedList = currentCached.filter(t => t.id !== taskId);
   setCachedTasks(updatedList);
 
+  // Sync delete to Cloudflare D1
+  cfDeleteTask(taskId).catch(e => console.warn('Cloudflare D1 task delete sync note:', e));
+
   const nowIso = new Date().toISOString();
   const actorName = userProfile?.name || 'User';
   const actorId = userProfile?.uid || 'admin';
@@ -1043,6 +1053,15 @@ export const subscribeToCanonicalTasks = (
   evaluateTaskRollovers(initialTasks).then(({ updatedTasks, rolledOverCount }) => {
     if (rolledOverCount > 0) {
       onUpdate(updatedTasks);
+    }
+  }).catch(console.warn);
+
+  // Live Sync from Cloudflare D1 database
+  cfGetTasks().then((cfList) => {
+    if (Array.isArray(cfList) && cfList.length > 0) {
+      const list = cfList.map(t => normalizeTaskDateModel(t));
+      setCachedTasks(list);
+      onUpdate(list);
     }
   }).catch(console.warn);
 

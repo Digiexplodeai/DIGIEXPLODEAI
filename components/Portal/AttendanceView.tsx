@@ -57,6 +57,8 @@ import {
   PieChart,
   CalendarDays,
 } from "lucide-react";
+import { SuggestiveInput, SuggestiveTextarea } from "./SuggestiveInput";
+import { saveFormFieldHistory } from "../../lib/formHistoryStorage";
 
 // ── Types ─────────────────────────────────────────────────────────────
 export interface Employee {
@@ -1267,6 +1269,9 @@ export const AttendanceView: React.FC = () => {
     }
 
     const empId = editingEmployee ? editingEmployee.employeeId : `emp_${Date.now()}`;
+    saveFormFieldHistory('employee_name', empForm.name.trim());
+    if (empForm.role.trim()) saveFormFieldHistory('employee_designation', empForm.role.trim());
+    if (empForm.department.trim()) saveFormFieldHistory('employee_department', empForm.department.trim());
     const payload: Employee = {
       employeeId: empId,
       name: empForm.name,
@@ -1379,6 +1384,8 @@ export const AttendanceView: React.FC = () => {
       return;
     }
     const dateYear = new Date(holidayForm.date).getFullYear() || 2026;
+    saveFormFieldHistory('holiday_name', holidayForm.title.trim());
+    if (holidayForm.description.trim()) saveFormFieldHistory('holiday_notes', holidayForm.description.trim());
     const newHoliday: Holiday = {
       holidayId: `hol_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       title: holidayForm.title.trim(),
@@ -3198,11 +3205,11 @@ export const AttendanceView: React.FC = () => {
             <form onSubmit={handleSaveEmployee} className="space-y-3">
               <div>
                 <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Full Name *</label>
-                <input
-                  type="text"
+                <SuggestiveInput
+                  fieldKey="employee_name"
                   required
                   value={empForm.name}
-                  onChange={(e) => setEmpForm({ ...empForm, name: e.target.value })}
+                  onChange={(val) => setEmpForm({ ...empForm, name: val })}
                   className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs font-bold outline-none focus:border-blue-500"
                 />
               </div>
@@ -3232,19 +3239,19 @@ export const AttendanceView: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Designation / Role</label>
-                  <input
-                    type="text"
+                  <SuggestiveInput
+                    fieldKey="employee_designation"
                     value={empForm.role}
-                    onChange={(e) => setEmpForm({ ...empForm, role: e.target.value })}
+                    onChange={(val) => setEmpForm({ ...empForm, role: val })}
                     className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs font-bold outline-none focus:border-blue-500"
                   />
                 </div>
                 <div>
                   <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Department</label>
-                  <input
-                    type="text"
+                  <SuggestiveInput
+                    fieldKey="employee_department"
                     value={empForm.department}
-                    onChange={(e) => setEmpForm({ ...empForm, department: e.target.value })}
+                    onChange={(val) => setEmpForm({ ...empForm, department: val })}
                     className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs font-bold outline-none focus:border-blue-500"
                   />
                 </div>
@@ -3399,12 +3406,12 @@ export const AttendanceView: React.FC = () => {
             <form onSubmit={handleSaveHoliday} className="space-y-3">
               <div>
                 <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Holiday Title / Name *</label>
-                <input
-                  type="text"
+                <SuggestiveInput
+                  fieldKey="holiday_name"
                   required
                   placeholder="e.g. Diwali, Holi, Republic Day..."
                   value={holidayForm.title}
-                  onChange={(e) => setHolidayForm({ ...holidayForm, title: e.target.value })}
+                  onChange={(val) => setHolidayForm({ ...holidayForm, title: val })}
                   className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs font-bold outline-none focus:border-blue-500"
                 />
               </div>
@@ -3438,11 +3445,12 @@ export const AttendanceView: React.FC = () => {
 
               <div>
                 <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Description / Notes</label>
-                <textarea
+                <SuggestiveTextarea
                   rows={2}
+                  fieldKey="holiday_notes"
                   placeholder="Additional notes about agency closure or celebrations..."
                   value={holidayForm.description}
-                  onChange={(e) => setHolidayForm({ ...holidayForm, description: e.target.value })}
+                  onChange={(val) => setHolidayForm({ ...holidayForm, description: val })}
                   className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-white text-xs font-medium outline-none focus:border-blue-500 resize-none"
                 />
               </div>

@@ -15,6 +15,8 @@ import { DEFAULT_CLIENTS_MASTER, ensureCentralClientsSeeded, getCachedClients, s
 import { cfGetClients, cfGetEmployees, cfGetWorkLogs, cfCreateWorkLog, cfDeleteWorkLog } from '../../lib/cloudflareApi';
 import { DEFAULT_EMPLOYEES_MASTER, getCachedEmployees, subscribeToCanonicalEmployees } from '../../lib/employeeMaster';
 import { persistNewTask, getCachedTasks, subscribeToCanonicalTasks } from '../../lib/taskStorage';
+import { SuggestiveInput, SuggestiveTextarea } from './SuggestiveInput';
+import { saveFormFieldHistory } from '../../lib/formHistoryStorage';
 
 // ─── Types ───────────────────────────────────────────────────────────
 export interface WorkLog {
@@ -958,6 +960,9 @@ const CreateLogModal: React.FC<{
       window.dispatchEvent(new CustomEvent('worklogs_updated', { detail: logWithId }));
       window.dispatchEvent(new Event('worklogs_updated'));
 
+      saveFormFieldHistory('work_title', workDone.trim());
+      if (workDetails.trim()) saveFormFieldHistory('work_notes', workDetails.trim());
+
       // 3. Persist to Firestore
       try {
         await setDoc(doc(db, 'workLogs', logId), sanitized, { merge: true });
@@ -1005,11 +1010,11 @@ const CreateLogModal: React.FC<{
             <label className="block text-[11px] font-bold text-[#101828] dark:text-[#F7F8FC] mb-1">
               Work Done / Deliverable Title *
             </label>
-            <input
-              type="text"
+            <SuggestiveInput
+              fieldKey="work_title"
               required
               value={workDone}
-              onChange={e => setWorkDone(e.target.value)}
+              onChange={val => setWorkDone(val)}
               placeholder="e.g. Designed 3 Instagram story flyers for Monsoon Promo"
               className={inputCls}
             />
@@ -1091,10 +1096,11 @@ const CreateLogModal: React.FC<{
             <label className="block text-[11px] font-bold text-[#101828] dark:text-[#F7F8FC] mb-1">
               Deliverable Notes / Drive Link (Optional)
             </label>
-            <textarea
+            <SuggestiveTextarea
               rows={2}
+              fieldKey="work_notes"
               value={workDetails}
-              onChange={e => setWorkDetails(e.target.value)}
+              onChange={val => setWorkDetails(val)}
               placeholder="Paste Google Drive asset link, revisions, or proof notes..."
               className={inputCls}
             />

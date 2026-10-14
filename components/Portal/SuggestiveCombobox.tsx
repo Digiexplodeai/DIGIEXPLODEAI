@@ -127,7 +127,11 @@ export const SuggestiveCombobox: React.FC<SuggestiveComboboxProps> = ({
   };
 
   return (
-    <div ref={containerRef} className={`relative font-sans ${className}`}>
+    <div 
+      ref={containerRef} 
+      className={`relative font-sans ${isOpen ? 'z-[100]' : 'z-auto'} ${className}`}
+      style={{ zIndex: isOpen ? 9999 : undefined }}
+    >
       {/* Input / Trigger Control */}
       <div
         onClick={() => {
@@ -208,7 +212,10 @@ export const SuggestiveCombobox: React.FC<SuggestiveComboboxProps> = ({
 
       {/* Floating Suggestive Results Menu */}
       {isOpen && (
-        <div className="absolute left-0 right-0 top-full mt-1.5 z-70 bg-white dark:bg-[#111728] border border-[#D8DEE9] dark:border-white/10 rounded-2xl shadow-2xl overflow-hidden py-1.5 max-h-60 overflow-y-auto animate-in fade-in zoom-in-95">
+        <div 
+          style={{ zIndex: 10000 }}
+          className="absolute left-0 right-0 top-full mt-1.5 z-[100] bg-white dark:bg-[#111728] border border-[#D8DEE9] dark:border-white/10 rounded-2xl shadow-2xl overflow-hidden py-1.5 max-h-60 overflow-y-auto animate-in fade-in zoom-in-95"
+        >
           {/* Header indicator when filtering */}
           {searchQuery.trim() && (
             <div className="px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-[#7A8496] border-b border-[#D8DEE9]/60 dark:border-white/10 flex items-center justify-between">

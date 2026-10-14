@@ -359,7 +359,7 @@ export async function generateMonthlyPDFReport(params: GenerateReportParams): Pr
     { label: 'LIVE / PUBLISHED', value: String(totalPublished), color: [16, 185, 129], bg: [236, 253, 245] },
     { label: 'CLIENT APPROVED', value: String(totalApproved), color: [6, 182, 212], bg: [236, 254, 255] },
     { label: 'ACTIVE CHANNELS', value: String(platformCounts['Instagram'] + platformCounts['Facebook'] + platformCounts['YouTube'] > 0 ? Object.values(platformCounts).filter(c => c > 0).length : 1), color: [245, 158, 11], bg: [254, 243, 199] },
-    { label: 'TASKS COMPLETED', value: String(tasks.filter((t: any) => t.status === 'Done' || t.status === 'Completed').length), color: [59, 130, 246], bg: [239, 246, 255] },
+    { label: 'CREATIVE REELS', value: String(reelsCount), color: [59, 130, 246], bg: [239, 246, 255] },
     { label: 'DELIVERY RATIO', value: `${completionRate}%`, color: [139, 92, 246], bg: [243, 232, 255] }
   ];
 
@@ -421,7 +421,7 @@ export async function generateMonthlyPDFReport(params: GenerateReportParams): Pr
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10.5);
   doc.setTextColor(15, 23, 42);
-  doc.text('Key Operational Highlights & Wins', 28, progressY + 30);
+  doc.text('Key Delivery Highlights & Campaign Wins', 28, progressY + 30);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
@@ -613,185 +613,7 @@ export async function generateMonthlyPDFReport(params: GenerateReportParams): Pr
   });
 
   // ==========================================
-  // PAGE 6: OPERATIONS & VIDEO PRODUCTION
-  // ==========================================
-  if (tasks.length > 0 || videos.length > 0) {
-    doc.addPage();
-    addHeaderDecoration('Operational Deliverables & Video Studio', 'Task completion velocity, studio shoots, and operational tracking');
-
-    let currentOpY = 40;
-
-    if (tasks.length > 0) {
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.setTextColor(15, 23, 42);
-      doc.text(`Agency Operational Tasks (${tasks.length})`, 20, currentOpY);
-
-      autoTable(doc, {
-        startY: currentOpY + 4,
-        head: [['Task Title', 'Category', 'Assignee', 'Due Date', 'Status']],
-        body: tasks.slice(0, 8).map(t => [
-          t.title || t.name || 'Task',
-          t.category || 'Operations',
-          t.assigneeName || 'Assigned Specialist',
-          t.dueDate || 'Current Cycle',
-          t.status || 'In Progress'
-        ]),
-        theme: 'grid',
-        headStyles: {
-          fillColor: [59, 130, 246],
-          textColor: [255, 255, 255],
-          fontStyle: 'bold',
-          fontSize: 8
-        },
-        bodyStyles: {
-          fontSize: 7.5,
-          textColor: [30, 41, 59]
-        },
-        margin: { left: 20, right: 20 }
-      });
-
-      currentOpY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 12 : currentOpY + 60;
-    }
-
-    if (videos.length > 0 && currentOpY < pageHeight - 60) {
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.setTextColor(15, 23, 42);
-      doc.text(`Video Studio Production Pipeline (${videos.length})`, 20, currentOpY);
-
-      autoTable(doc, {
-        startY: currentOpY + 4,
-        head: [['Video Deliverable', 'Shoot Date', 'Editor / Lead', 'Stage', 'Status']],
-        body: videos.slice(0, 6).map(v => [
-          v.title || v.topic || 'Video Deliverable',
-          v.shotDate || v.date || 'Scheduled',
-          v.editorName || v.assigneeName || 'Video Editor',
-          v.stage || v.status || 'Production',
-          v.status === 'Completed' || v.status === 'Ready to Post' ? 'Finished' : (v.status || 'In Progress')
-        ]),
-        theme: 'grid',
-        headStyles: {
-          fillColor: [139, 92, 246],
-          textColor: [255, 255, 255],
-          fontStyle: 'bold',
-          fontSize: 8
-        },
-        bodyStyles: {
-          fontSize: 7.5,
-          textColor: [30, 41, 59]
-        },
-        margin: { left: 20, right: 20 }
-      });
-    }
-  }
-
-  // ==========================================
-  // PAGE: TEAM DELIVERY CONTRIBUTION
-  // ==========================================
-  if (teamContributions.length > 0) {
-    doc.addPage();
-    addHeaderDecoration('Team Delivery Contribution', `Specialist contribution summary for ${clientDisplayName}`);
-
-    autoTable(doc, {
-      startY: 42,
-      head: [['Employee Specialist', 'Agency Role / Department', 'Deliverables Handled', 'Work Hours Logged']],
-      body: teamContributions.map(tc => [
-        tc.employeeName,
-        tc.role || 'Creative & Operations Specialist',
-        `${tc.deliverablesCount} deliverables`,
-        `${tc.hoursLogged} hrs`
-      ]),
-      theme: 'grid',
-      headStyles: {
-        fillColor: [16, 185, 129],
-        textColor: [255, 255, 255],
-        fontStyle: 'bold',
-        fontSize: 8.5
-      },
-      bodyStyles: {
-        fontSize: 8,
-        textColor: [30, 41, 59]
-      },
-      alternateRowStyles: {
-        fillColor: [248, 250, 252]
-      },
-      margin: { left: 20, right: 20 }
-    });
-
-    const teamTableY = (doc as any).lastAutoTable.finalY || 100;
-    doc.setFillColor(248, 250, 252);
-    doc.roundedRect(20, teamTableY + 12, pageWidth - 40, 36, 4, 4, 'F');
-    doc.setDrawColor(226, 232, 240);
-    doc.roundedRect(20, teamTableY + 12, pageWidth - 40, 36, 4, 4, 'S');
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9.5);
-    doc.setTextColor(15, 23, 42);
-    doc.text('Operational Attribution Protocol', 28, teamTableY + 22);
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8.5);
-    doc.setTextColor(71, 85, 105);
-    doc.text('All logged hours and deliverables reflect verified client workflow items recorded inside Digiexplode Agency OS.', 28, teamTableY + 30);
-  }
-
-  // ==========================================
-  // PAGE 7: TOP PERFORMING CONTENT
-  // ==========================================
-  doc.addPage();
-  addHeaderDecoration('Top Performing Content', 'Highlighting benchmark creative deliverables from this period');
-
-  // Top published entries (take up to 5)
-  const topItems = publishedEntries.length > 0 ? publishedEntries.slice(0, 5) : clientEntries.slice(0, 5);
-
-  if (topItems.length === 0) {
-    doc.setFont('helvetica', 'italic');
-    doc.setFontSize(10);
-    doc.setTextColor(148, 163, 184);
-    doc.text('No content pieces available to highlight for this cycle.', 20, 50);
-  } else {
-    let cardTopY = 42;
-    topItems.forEach((item, idx) => {
-      doc.setFillColor(248, 250, 252);
-      doc.roundedRect(20, cardTopY, pageWidth - 40, 26, 3, 3, 'F');
-      doc.setDrawColor(226, 232, 240);
-      doc.roundedRect(20, cardTopY, pageWidth - 40, 26, 3, 3, 'S');
-
-      // Rank Badge
-      doc.setFillColor(124, 58, 237);
-      doc.circle(30, cardTopY + 13, 5, 'F');
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.setTextColor(255, 255, 255);
-      doc.text(String(idx + 1), 30, cardTopY + 16, { align: 'center' });
-
-      // Title & Details
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.setTextColor(15, 23, 42);
-      doc.text(item.topic.length > 48 ? item.topic.substring(0, 48) + '...' : item.topic, 42, cardTopY + 10);
-
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-      doc.setTextColor(100, 116, 139);
-      doc.text(`${item.platform} • ${item.contentType} • Date: ${item.date || 'Scheduled'}`, 42, cardTopY + 16);
-      doc.text(`Status: ${item.status}`, 42, cardTopY + 22);
-
-      // Link indicator on right
-      if (item.creativeLink || (item as any).published_post_url) {
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(8);
-        doc.setTextColor(6, 182, 212);
-        doc.text('Live Post Verified', pageWidth - 25, cardTopY + 14, { align: 'right' });
-      }
-
-      cardTopY += 31;
-    });
-  }
-
-  // ==========================================
-  // PAGE 8: MONTHLY ACHIEVEMENTS
+  // PAGE 6: MONTHLY ACHIEVEMENTS
   // ==========================================
   doc.addPage();
   addHeaderDecoration('Monthly Achievements', 'Strategic agency milestones, campaign wins, and brand growth highlights');
@@ -828,7 +650,7 @@ export async function generateMonthlyPDFReport(params: GenerateReportParams): Pr
   });
 
   // ==========================================
-  // PAGE 9: PENDING & NEXT MONTH PLAN
+  // PAGE 7: PENDING & NEXT MONTH PLAN
   // ==========================================
   doc.addPage();
   addHeaderDecoration('Pending & Next Month Roadmap', 'Forward-looking pipeline, content themes, and strategic opportunities');
@@ -900,7 +722,7 @@ export async function generateMonthlyPDFReport(params: GenerateReportParams): Pr
   });
 
   // ==========================================
-  // PAGE 10: THANK YOU & AGENCY SIGN OFF
+  // PAGE 8: THANK YOU & AGENCY SIGN OFF
   // ==========================================
   doc.addPage();
   // Deep elegant slate background

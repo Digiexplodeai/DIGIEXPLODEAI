@@ -52,6 +52,8 @@ import {
 } from '../../lib/employeeMaster';
 import { ClientSelect } from './ClientSelect';
 import { SuggestiveCombobox } from './SuggestiveCombobox';
+import { SuggestiveInput, SuggestiveTextarea } from './SuggestiveInput';
+import { saveFormFieldHistory } from '../../lib/formHistoryStorage';
 import { ensureActiveFirebaseAuth } from '../../lib/calendarStorage';
 import { 
   syncVideoProductionToTasks, 
@@ -564,6 +566,12 @@ export const VideoTrackerView: React.FC = () => {
 
       const shootTaskId = `task_shoot_${docId}`;
       const editTaskId = `task_edit_${docId}`;
+
+      saveFormFieldHistory('video_title', formTitle.trim());
+      if (formNotes.trim()) saveFormFieldHistory('video_notes', formNotes.trim());
+      if (formFootageLink.trim()) saveFormFieldHistory('footage_link', formFootageLink.trim());
+      if (formVideographerCustom.trim()) saveFormFieldHistory('videographer_name', formVideographerCustom.trim());
+      if (formEditorCustom.trim()) saveFormFieldHistory('editor_name', formEditorCustom.trim());
 
       // 1. Prepare record payload
       const payload: VideoProductionEntry = {
@@ -1355,10 +1363,10 @@ export const VideoTrackerView: React.FC = () => {
               {/* Title / Reel Topic */}
               <div className="space-y-1">
                 <label className="text-[10px] font-black uppercase tracking-wider text-slate-400">Video Topic / Deliverable Title *</label>
-                <input
-                  type="text"
+                <SuggestiveInput
+                  fieldKey="video_title"
                   value={formTitle}
-                  onChange={(e) => setFormTitle(e.target.value)}
+                  onChange={(val) => setFormTitle(val)}
                   placeholder="e.g., Spine Surgery Recovery Tips (4 Reels)"
                   className="w-full text-xs font-bold bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2.5 rounded-xl outline-none"
                   required
@@ -1439,10 +1447,10 @@ export const VideoTrackerView: React.FC = () => {
                   onChange={(id) => setFormVideographerId(id)}
                 />
                 {formVideographerId === 'other' && (
-                  <input
-                    type="text"
+                  <SuggestiveInput
+                    fieldKey="videographer_name"
                     value={formVideographerCustom}
-                    onChange={(e) => setFormVideographerCustom(e.target.value)}
+                    onChange={(val) => setFormVideographerCustom(val)}
                     placeholder="Enter videographer name..."
                     className="w-full text-xs font-medium bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2 rounded-xl outline-none mt-1"
                   />
@@ -1469,10 +1477,10 @@ export const VideoTrackerView: React.FC = () => {
                   onChange={(id) => setFormEditorId(id)}
                 />
                 {formEditorId === 'other' && (
-                  <input
-                    type="text"
+                  <SuggestiveInput
+                    fieldKey="editor_name"
                     value={formEditorCustom}
-                    onChange={(e) => setFormEditorCustom(e.target.value)}
+                    onChange={(val) => setFormEditorCustom(val)}
                     placeholder="Enter editor name..."
                     className="w-full text-xs font-medium bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2 rounded-xl outline-none mt-1"
                   />
@@ -1482,10 +1490,10 @@ export const VideoTrackerView: React.FC = () => {
               {/* Notes & Footage Link */}
               <div className="space-y-1">
                 <label className="text-[10px] font-black uppercase tracking-wider text-slate-400">Raw Footage Link / Drive Folder</label>
-                <input
-                  type="url"
+                <SuggestiveInput
+                  fieldKey="footage_link"
                   value={formFootageLink}
-                  onChange={(e) => setFormFootageLink(e.target.value)}
+                  onChange={(val) => setFormFootageLink(val)}
                   placeholder="https://drive.google.com/..."
                   className="w-full text-xs font-medium bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2 rounded-xl outline-none"
                 />
@@ -1493,10 +1501,11 @@ export const VideoTrackerView: React.FC = () => {
 
               <div className="space-y-1">
                 <label className="text-[10px] font-black uppercase tracking-wider text-slate-400">Production Notes & Script References</label>
-                <textarea
+                <SuggestiveTextarea
                   rows={2}
+                  fieldKey="video_notes"
                   value={formNotes}
-                  onChange={(e) => setFormNotes(e.target.value)}
+                  onChange={(val) => setFormNotes(val)}
                   placeholder="Hook directions, patient consent status, background music style..."
                   className="w-full text-xs font-medium bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2.5 rounded-xl outline-none"
                 />

@@ -7,37 +7,73 @@ import {
   AlertCircle, Loader2, Globe, Users, Target, Sparkles, Check,
   AlertTriangle, ArrowRight, Video, CheckSquare, Layers, Clock, X,
   ExternalLink, Search, ShieldCheck, Briefcase, Copy, FileCheck,
-  ChevronLeft, ChevronRight, Bookmark
+  ChevronLeft, ChevronRight, Bookmark, FileSpreadsheet, Send, MessageSquare,
+  HelpCircle, UserCheck, UserX, AlertOctagon, User, ArrowUpRight
 } from 'lucide-react';
 import {
-  collection, query, where, getDocs, addDoc, setDoc, doc, deleteDoc,
-  onSnapshot, orderBy, Timestamp
+  collection, onSnapshot, addDoc, doc, setDoc
 } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import { type ClientData } from './ClientList';
 import {
   DEFAULT_CLIENTS_MASTER,
+  getCachedClients,
   subscribeToCanonicalClients
 } from '../../lib/clientMaster';
 import {
   CalendarEntry,
-  getCachedCalendarEntries,
-  DEFAULT_CALENDAR_SEEDS
+  getCachedCalendarEntries
 } from '../../lib/calendarStorage';
 import {
+  Task,
   getCachedTasks,
-  DEFAULT_MASTER_TASKS
+  subscribeToCanonicalTasks
 } from '../../lib/taskStorage';
 import {
+  CENTRAL_EMPLOYEES_MASTER_LIST,
+  getCachedEmployees,
+  subscribeToCanonicalEmployees,
+  type MasterEmployee
+} from '../../lib/employeeMaster';
+import {
+  DailyReportSubmission,
+  getCachedDailyReports,
+  saveOrSubmitDailyReport,
+  reviewDailyReportSubmission,
+  subscribeToDailyReports,
+  getKolkataDateString
+} from '../../lib/dailyReportService';
+import {
+  exportReportToPDF,
+  exportReportToXLSX,
+  exportReportToCSV,
+  triggerPrintReport
+} from '../../lib/reportExportUtils';
+import {
   generateMonthlyPDFReport,
-  PerformanceMetricsData,
   DEFAULT_AGENCY_BRANDING
 } from '../../lib/pdfReportGenerator';
-import { isTimestampInMonthRange, normalizeDate } from '../../lib/employeeMaster';
 
 // ── Types ─────────────────────────────────────────────────────────────
+export type MainReportTab =
+  | 'overview'
+  | 'daily'
+  | 'weekly'
+  | 'monthly'
+  | 'employee'
+  | 'client'
+  | 'submission_tracker'
+  | 'custom';
+
+export type ClientReportSubTab =
+  | 'overview'
+  | 'deliverables'
+  | 'operations'
+  | 'analytics'
+  | 'team'
+  | 'history';
+
 export type ReportType = 'full_monthly' | 'social_content' | 'delivery_operations' | 'video_production';
-export type PdfStatus = 'valid' | 'missing' | 'invalid';
 
 export interface SavedReportSnapshot {
   id: string;
@@ -69,11 +105,9 @@ export interface SavedReportSnapshot {
   taskSnapshot: any[];
   videoSnapshot: any[];
   teamContributions: { employeeName: string; role: string; deliverablesCount: number; hoursLogged: number }[];
-  // PDF lifecycle fields
-  pdf_status?: PdfStatus;    // 'valid' | 'missing' | 'invalid'
-  pdf_filename?: string;     // canonical filename
+  pdf_status?: 'valid' | 'missing' | 'invalid';
+  pdf_filename?: string;
   pdf_size_bytes?: number;
-  repaired_at?: string;
 }
 
 const REPORT_TYPE_CONFIGS: { id: ReportType; label: string; desc: string }[] = [
@@ -86,28 +120,10 @@ const REPORT_TYPE_CONFIGS: { id: ReportType; label: string; desc: string }[] = [
 const LS_SAVED_REPORTS_KEY = 'digi_client_reports_v2';
 const LS_REPORT_SEQ_KEY = 'digi_client_report_seq_v2';
 
-/** Peek at the NEXT reference without committing (does not increment). */
-function peekNextReportReference(month: string): string {
-  const parts = month.split('-');
-  const year = parts[0] || '2026';
-  const m = parts[1] || '09';
-  let seq = 42;
-  try {
-    const raw = localStorage.getItem(LS_REPORT_SEQ_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      seq = parsed[`${year}_${m}`] || 42;
-    }
-  } catch {}
-  const padded = String(seq + 1).padStart(4, '0');
-  return `DEA/REPORT/${year}/${m}/${padded}`;
-}
-
-/** Commit: actually increments and persists the sequence. Call only after successful PDF + Firestore write. */
 function commitReportReference(month: string): string {
   const parts = month.split('-');
   const year = parts[0] || '2026';
-  const m = parts[1] || '09';
+  const m = parts[1] || '10';
   let seq = 42;
   try {
     const raw = localStorage.getItem(LS_REPORT_SEQ_KEY);
@@ -127,12 +143,10 @@ function commitReportReference(month: string): string {
   return `DEA/REPORT/${year}/${m}/${padded}`;
 }
 
-/** Sanitize a string into a safe filename segment. */
 function sanitizeFilenameSegment(s: string): string {
   return s.replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
 }
 
-/** Build canonical PDF filename: Digiexplode_{Client}_{Month}_{Year}_{Ref}.pdf */
 function buildCanonicalFilename(clientName: string, formattedMonth: string, year: number, refNumber: string): string {
   const safeName = sanitizeFilenameSegment(clientName);
   const safeMonth = sanitizeFilenameSegment(formattedMonth);
@@ -140,1767 +154,1797 @@ function buildCanonicalFilename(clientName: string, formattedMonth: string, year
   return `Digiexplode_${safeName}_${safeMonth}_${year}_${safeRef}.pdf`;
 }
 
-/**
- * Recursively strip undefined values from an object so Firestore never
- * receives them (Firestore throws on any undefined field value).
- * Arrays are filtered to remove undefined elements.
- * Null values are preserved as-is.
- */
-function sanitizeForFirestore<T>(obj: T): T {
-  if (obj === null || obj === undefined) return null as unknown as T;
-  if (Array.isArray(obj)) {
-    return obj
-      .filter(item => item !== undefined)
-      .map(item => sanitizeForFirestore(item)) as unknown as T;
-  }
-  if (typeof obj === 'object') {
-    const clean: Record<string, unknown> = {};
-    for (const [key, val] of Object.entries(obj as Record<string, unknown>)) {
-      if (val !== undefined) {
-        clean[key] = sanitizeForFirestore(val);
-      }
-    }
-    return clean as unknown as T;
-  }
-  return obj;
-}
-
-/** Validate that bytes constitute a real PDF (starts with %PDF-) and is large enough. */
-function validatePdfBytes(bytes: Uint8Array | null | undefined): { valid: boolean; reason?: string } {
-  if (!bytes || bytes.length < 1000) {
-    return { valid: false, reason: `PDF too small (${bytes?.length ?? 0} bytes). Likely not a valid PDF.` };
-  }
-  // %PDF- in ASCII = 37 80 68 70 45
-  if (bytes[0] !== 37 || bytes[1] !== 80 || bytes[2] !== 68 || bytes[3] !== 70 || bytes[4] !== 45) {
-    const firstFive = Array.from(bytes.slice(0, 8)).map(b => String.fromCharCode(b)).join('');
-    return { valid: false, reason: `File does not start with %PDF-. First bytes: "${firstFive}"` };
-  }
-  return { valid: true };
-}
-
 export const ReportsView: React.FC = () => {
   const { user, profile } = useAuth();
   const isSuperAdmin = profile?.role === 'super_admin' || profile?.role === 'superAdmin' || profile?.role === 'admin' || !profile?.role;
+  const isManager = isSuperAdmin || profile?.role === 'manager' || profile?.role === 'team_lead';
 
-  // Navigation Sub-tabs
-  const [activeTab, setActiveTab] = useState<'overview' | 'deliverables' | 'operations' | 'analytics' | 'team' | 'history'>('overview');
+  // ── 1. PRIMARY NAVIGATION ──────────────────────────────────────────
+  const [activeMainTab, setActiveMainTab] = useState<MainReportTab>('overview');
 
-  // Master Data Context
-  const [clients, setClients] = useState<ClientData[]>(DEFAULT_CLIENTS_MASTER);
+  // ── 2. LIVE DATASETS CONNECTED TO AUTHORITATIVE SYSTEM ─────────────
+  const [clients, setClients] = useState<ClientData[]>(() => getCachedClients());
+  const [employees, setEmployees] = useState<MasterEmployee[]>(() => getCachedEmployees());
   const [calendarEntries, setCalendarEntries] = useState<CalendarEntry[]>(() => getCachedCalendarEntries());
-  const [tasks, setTasks] = useState<any[]>(() => getCachedTasks());
-  const [videos, setVideos] = useState<any[]>([]);
-  const [approvals, setApprovals] = useState<any[]>([]);
-  const [workLogs, setWorkLogs] = useState<any[]>([]);
+  const [tasks, setTasks] = useState<Task[]>(() => getCachedTasks());
+  const [workLogs, setWorkLogs] = useState<any[]>(() => {
+    try {
+      const raw = localStorage.getItem('digi_persisted_worklogs_v2') || localStorage.getItem('digi_worklogs_cache');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [videos, setVideos] = useState<any[]>(() => {
+    try {
+      const raw = localStorage.getItem('digi_video_tracker_cache');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [approvals, setApprovals] = useState<any[]>(() => {
+    try {
+      const raw = localStorage.getItem('digi_approvals_cache');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [dailyReports, setDailyReports] = useState<DailyReportSubmission[]>(() => getCachedDailyReports());
   const [savedReports, setSavedReports] = useState<SavedReportSnapshot[]>([]);
 
-  // Selection Filters
-  const [selectedClientId, setSelectedClientId] = useState<string>('');
-  const [selectedMonth, setSelectedMonth] = useState<string>(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  // ── 3. DATE SELECTION CONTROLS ─────────────────────────────────────
+  const todayKolkata = useMemo(() => getKolkataDateString(), []);
+  const [selectedDailyDate, setSelectedDailyDate] = useState<string>(todayKolkata);
+  
+  // Weekly selection (Monday of current week)
+  const currentWeekMonday = useMemo(() => {
+    const d = new Date();
+    const day = d.getDay();
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+    const mon = new Date(d.setDate(diff));
+    return mon.toISOString().split('T')[0];
+  }, []);
+  const [selectedWeekStart, setSelectedWeekStart] = useState<string>(currentWeekMonday);
+
+  // Monthly selection (YYYY-MM)
+  const currentMonthStr = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }, []);
+  const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthStr);
+
+  // Custom range
+  const [customStartDate, setCustomStartDate] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 14);
+    return d.toISOString().split('T')[0];
   });
+  const [customEndDate, setCustomEndDate] = useState<string>(todayKolkata);
+
+  // ── 4. FILTER CONTROLS ─────────────────────────────────────────────
+  const [filterEmployeeId, setFilterEmployeeId] = useState<string>('');
+  const [filterClientId, setFilterClientId] = useState<string>('');
+  const [filterTeam, setFilterTeam] = useState<string>('All');
+  const [filterStatus, setFilterStatus] = useState<string>('All');
+  const [filterPriority, setFilterPriority] = useState<string>('All');
+  const [filterCategory, setFilterCategory] = useState<string>('All');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // ── 5. CLIENT MONTHLY REPORT STATE (PRESENTS EXISTING WORKING GENERATOR) ──
+  const [selectedClientId, setSelectedClientId] = useState<string>('');
+  const [clientReportSubTab, setClientReportSubTab] = useState<ClientReportSubTab>('overview');
   const [reportType, setReportType] = useState<ReportType>('full_monthly');
-
-  // Client Search filter in selector
   const [clientSearchQuery, setClientSearchQuery] = useState('');
-
-  // Loading & State Machine: 'idle' | 'loading' | 'success' | 'error'
-  const [sourcesLoading, setSourcesLoading] = useState<boolean>(true);
-  const [queryError, setQueryError] = useState<string | null>(null);
-  const [isGeneratingPdf, setIsGeneratingPdf] = useState<boolean>(false);
-  // Mutex: prevent double-click / concurrent PDF generation
-  const pdfGenerationInProgress = React.useRef<boolean>(false);
-  const [isSavingDraft, setIsSavingDraft] = useState<boolean>(false);
-  const [hasGeneratedReport, setHasGeneratedReport] = useState<boolean>(false);
+  const [executiveSummary, setExecutiveSummary] = useState('');
+  const [highlights, setHighlights] = useState('');
+  const [nextMonthStrategy, setNextMonthStrategy] = useState('');
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; msg: string } | null>(null);
-  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [reviewModalReport, setReviewModalReport] = useState<DailyReportSubmission | null>(null);
+  const [reviewRemarks, setReviewRemarks] = useState('');
 
-  // Executive Commentary State
-  const [executiveSummary, setExecutiveSummary] = useState<string>('');
-  const [highlights, setHighlights] = useState<string>('');
-  const [nextMonthStrategy, setNextMonthStrategy] = useState<string>('');
-  const [isCommentaryDirty, setIsCommentaryDirty] = useState<boolean>(false);
-
-  // Modals
-  const [viewingSnapshot, setViewingSnapshot] = useState<SavedReportSnapshot | null>(null);
-  const [selectedDeliverableModal, setSelectedDeliverableModal] = useState<CalendarEntry | null>(null);
+  // ── 6. EMPLOYEE DAILY SUBMISSION FORM STATE ────────────────────────
+  const [empDailySummary, setEmpDailySummary] = useState('');
+  const [empDailyBlockers, setEmpDailyBlockers] = useState('');
+  const [empDailyNextPlan, setEmpDailyNextPlan] = useState('');
+  const [isSubmittingDaily, setIsSubmittingDaily] = useState(false);
 
   const showToast = (type: 'success' | 'error' | 'info', msg: string) => {
     setToast({ type, msg });
     setTimeout(() => setToast(null), 4000);
   };
 
-  // 1. Subscribe to Canonical Clients
+  // ── 7. REACTIVE SUBSCRIPTIONS (Cross-Module Real-time Sync) ─────────
   useEffect(() => {
-    const unsub = subscribeToCanonicalClients(
-      (list) => {
-        if (list && list.length > 0) {
-          setClients(list);
-        }
-      },
-      (err) => console.warn('[Reports] Clients load fallback:', err)
-    );
-    return () => unsub();
-  }, []);
+    const unsubClients = subscribeToCanonicalClients(setClients);
+    const unsubEmployees = subscribeToCanonicalEmployees(setEmployees);
+    const unsubTasks = subscribeToCanonicalTasks(setTasks);
+    const unsubDaily = subscribeToDailyReports(setDailyReports);
 
-  // 2. Subscribe to Content Calendar with Cache Fallback
-  useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'contentCalendar'), (snap) => {
+    // Sync contentCalendar
+    const unsubCal = onSnapshot(collection(db, 'contentCalendar'), (snap) => {
       if (!snap.empty) {
         const list = snap.docs.map(d => ({ contentId: d.id, ...d.data() } as CalendarEntry));
         setCalendarEntries(list);
       }
-    }, (err) => {
-      console.warn('[Reports] Content Calendar query fallback:', err);
-    });
-    return () => unsub();
-  }, []);
+    }, () => {});
 
-  // 3. Subscribe to Tasks
-  useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'tasks'), (snap) => {
+    // Sync workLogs
+    const unsubWorkLogs = onSnapshot(collection(db, 'workLogs'), (snap) => {
       if (!snap.empty) {
-        setTasks(snap.docs.map(d => ({ id: d.id, taskId: d.id, ...d.data() })));
+        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setWorkLogs(list);
       }
     }, () => {});
-    return () => unsub();
-  }, []);
 
-  // 4. Subscribe to Video Production Tracker
-  useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'videoTracker'), (snap) => {
-      if (!snap.empty) {
-        setVideos(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      }
-    }, () => {});
-    return () => unsub();
-  }, []);
-
-  // 5. Subscribe to Approvals
-  useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'approvals'), (snap) => {
-      if (!snap.empty) {
-        setApprovals(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      }
-    }, () => {});
-    return () => unsub();
-  }, []);
-
-  // 6. Subscribe to Work Logs
-  useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'workLogs'), (snap) => {
-      if (!snap.empty) {
-        setWorkLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      }
-      setSourcesLoading(false);
-    }, (err) => {
-      setSourcesLoading(false);
-    });
-    return () => unsub();
-  }, []);
-
-  // 7. Subscribe to Saved Client Reports History
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LS_SAVED_REPORTS_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) setSavedReports(parsed);
-      }
-    } catch {}
-
-    const unsub = onSnapshot(collection(db, 'client_reports'), (snap) => {
+    // Sync saved reports
+    const unsubSaved = onSnapshot(collection(db, 'client_reports'), (snap) => {
       if (!snap.empty) {
         const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedReportSnapshot));
         setSavedReports(list);
-        try { localStorage.setItem(LS_SAVED_REPORTS_KEY, JSON.stringify(list)); } catch {}
       }
     }, () => {});
-    return () => unsub();
+
+    return () => {
+      unsubClients();
+      unsubEmployees();
+      unsubTasks();
+      unsubCal();
+      unsubDaily();
+      unsubWorkLogs();
+      unsubSaved();
+    };
   }, []);
 
-  // Selected Client Object
-  const selectedClient = useMemo(() => {
-    if (!selectedClientId) return null;
-    return clients.find(c => 
-      c.id === selectedClientId || 
-      (c as any).clientId === selectedClientId ||
-      c.name?.toLowerCase() === selectedClientId.toLowerCase() ||
-      c.clientName?.toLowerCase() === selectedClientId.toLowerCase()
-    ) || null;
-  }, [clients, selectedClientId]);
+  // Current active employee identity
+  const currentEmployee = useMemo(() => {
+    const email = user?.email?.toLowerCase();
+    const uid = user?.uid;
+    return employees.find(e => 
+      (email && e.email?.toLowerCase() === email) || 
+      e.id === uid || 
+      e.employeeId === uid
+    ) || employees[0];
+  }, [employees, user]);
 
-  // Month Format Label
-  const monthLabel = useMemo(() => {
-    if (!selectedMonth) return 'Current Reporting Cycle';
-    const [year, m] = selectedMonth.split('-');
-    const d = new Date(Number(year), Number(m) - 1, 1);
-    return d.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
-  }, [selectedMonth]);
+  // Prefill employee daily report form if draft/submission exists for selectedDailyDate
+  useEffect(() => {
+    if (!currentEmployee) return;
+    const existing = dailyReports.find(r => r.employeeId === currentEmployee.id && r.date === selectedDailyDate);
+    if (existing) {
+      setEmpDailySummary(existing.summary || '');
+      setEmpDailyBlockers(existing.blockers || '');
+      setEmpDailyNextPlan(existing.nextDayPlan || '');
+    } else {
+      setEmpDailySummary('');
+      setEmpDailyBlockers('');
+      setEmpDailyNextPlan('');
+    }
+  }, [currentEmployee, selectedDailyDate, dailyReports]);
 
-  // Handle client selection change
-  const handleSelectClient = (clientId: string) => {
-    setSelectedClientId(clientId);
-    setHasGeneratedReport(false);
-    setIsCommentaryDirty(false);
-    setExecutiveSummary('');
-    setHighlights('');
-    setNextMonthStrategy('');
+  // ── 8. AGGREGATED CALCULATIONS (Single Source of Truth) ─────────────
+
+  // A. All Tasks Filter Helper
+  const isTaskOverdue = (t: Task): boolean => {
+    if (t.status === 'Done' || t.status === 'Cancelled') return false;
+    if (!t.dueDate) return false;
+    return t.dueDate < todayKolkata;
   };
 
-  // Helper: check if a record belongs to the selected client
-  const isRecordForClient = useCallback((record: any) => {
-    if (!selectedClientId) return false;
-    if (record.clientId === selectedClientId || record.client_id === selectedClientId) return true;
-    if (selectedClient) {
-      if (record.clientId === selectedClient.id || record.clientId === (selectedClient as any).clientId) return true;
-      const recName = (record.clientName || record.name || '').trim().toLowerCase();
-      const targetName = (selectedClient.clientName || selectedClient.name || '').trim().toLowerCase();
-      const targetBiz = (selectedClient.businessName || '').trim().toLowerCase();
-      if (recName && (recName === targetName || recName === targetBiz)) return true;
-    }
-    return false;
-  }, [selectedClientId, selectedClient]);
+  // B. Selected Daily Date Operational Records
+  const dailyRecords = useMemo(() => {
+    const targetDate = selectedDailyDate;
 
-  // ── Unified Aggregation Engine for Selected Client & Month ───────────
-  const unifiedReportData = useMemo(() => {
-    if (!selectedClientId || !selectedClient) return null;
-
-    // A. Filtered Content Calendar Deliverables
-    const qualifyingCalendar = calendarEntries.filter(entry => {
-      const matchClient = isRecordForClient(entry);
-      const matchMonth = isTimestampInMonthRange(entry.date || entry.createdAt || entry.month, selectedMonth);
-      const isNotCancelled = entry.status !== 'Cancelled' && (entry.status as string) !== 'Archived';
-      return matchClient && matchMonth && isNotCancelled;
+    // Filter tasks scheduled or completed on this date
+    const dayTasks = tasks.filter(t => {
+      if (t.status === 'Cancelled') return false;
+      const matchDate = t.scheduledDate === targetDate || t.completedAt?.startsWith(targetDate);
+      const matchEmp = !filterEmployeeId || t.assigneeId === filterEmployeeId;
+      const matchClient = !filterClientId || t.clientId === filterClientId;
+      return matchDate && matchEmp && matchClient;
     });
 
-    const totalPlanned = qualifyingCalendar.length;
-    const livePublished = qualifyingCalendar.filter(e => e.status === 'Posted' || e.postedStatus === 'Posted').length;
-    const clientApproved = qualifyingCalendar.filter(e => e.clientApprovalStatus === 'Approved' || e.status === 'Approved').length;
-
-    const platformsSet = new Set<string>();
-    qualifyingCalendar.forEach(e => {
-      if (e.platform) platformsSet.add(e.platform);
-      if (Array.isArray(e.platforms)) e.platforms.forEach(p => platformsSet.add(p));
-    });
-    const channelsActive = platformsSet.size || (totalPlanned > 0 ? 1 : 0);
-
-    // B. Filtered Tasks
-    const qualifyingTasks = tasks.filter(t => {
-      return isRecordForClient(t);
-    });
-    const tasksCompleted = qualifyingTasks.filter(t => t.status === 'Done' || t.status === 'Completed').length;
-    const tasksInProgress = qualifyingTasks.filter(t => t.status === 'In Progress' || t.status === 'Doing').length;
-    const tasksOverdue = qualifyingTasks.filter(t => t.status === 'Overdue' || (t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'Done' && t.status !== 'Completed')).length;
-
-    // C. Filtered Video Production Tracker
-    const qualifyingVideos = videos.filter(v => {
-      return isRecordForClient(v);
-    });
-    const videosFinished = qualifyingVideos.filter(v => v.status === 'Ready to Post' || v.status === 'Completed' || v.status === 'Approved').length;
-    const videosInEdit = qualifyingVideos.filter(v => v.status === 'Editing' || v.status === 'Rough Cut' || v.status === 'Review' || v.status === 'In Progress').length;
-
-    // D. Filtered Approvals
-    const qualifyingApprovals = approvals.filter(a => {
-      return isRecordForClient(a);
-    });
-    const pendingApprovals = qualifyingApprovals.filter(a => a.status === 'pending' || a.status === 'Pending' || a.status === 'In Review').length;
-    const approvedCount = qualifyingApprovals.filter(a => a.status === 'approved' || a.status === 'Approved').length;
-    const revisionsCount = qualifyingApprovals.filter(a => a.status === 'revision_requested' || a.status === 'Changes Requested' || a.status === 'Revision').length;
-
-    // E. Team Contributions (Work Logs & Deliverable Attribution)
-    const qualifyingWorkLogs = workLogs.filter(wl => {
-      const matchClient = isRecordForClient(wl);
-      const matchMonth = isTimestampInMonthRange(wl.date || wl.work_date || wl.createdAt || wl.timestamp, selectedMonth);
-      return matchClient && matchMonth;
+    // Filter work logs on this date
+    const dayWorkLogs = workLogs.filter(wl => {
+      const d = (wl.work_date || wl.date || wl.completedAt || wl.createdAt || '').slice(0, 10);
+      const matchDate = d === targetDate;
+      const matchEmp = !filterEmployeeId || wl.employeeId === filterEmployeeId;
+      const matchClient = !filterClientId || wl.clientId === filterClientId;
+      return matchDate && matchEmp && matchClient;
     });
 
-    const teamContribMap = new Map<string, { employeeName: string; role: string; deliverablesCount: number; hoursLogged: number }>();
-    qualifyingCalendar.forEach(c => {
-      if (c.assigneeName) {
-        const existing = teamContribMap.get(c.assigneeName) || { employeeName: c.assigneeName, role: 'Creative Specialist', deliverablesCount: 0, hoursLogged: 0 };
-        existing.deliverablesCount += 1;
-        teamContribMap.set(c.assigneeName, existing);
+    // Filter calendar deliverables on this date
+    const dayDeliverables = calendarEntries.filter(c => {
+      const d = (c.date || c.createdAt || '').slice(0, 10);
+      const matchDate = d === targetDate;
+      const matchEmp = !filterEmployeeId || c.assigneeId === filterEmployeeId;
+      const matchClient = !filterClientId || c.clientId === filterClientId;
+      return matchDate && matchEmp && matchClient;
+    });
+
+    const completedTasks = dayTasks.filter(t => t.status === 'Done');
+    const pendingTasks = dayTasks.filter(t => t.status !== 'Done');
+    const totalHours = dayWorkLogs.reduce((acc, wl) => acc + (Number(wl.hours) || Number(wl.durationHours) || 0), 0);
+    const publishedContent = dayDeliverables.filter(c => c.status === 'Posted' || c.postedStatus === 'Posted');
+
+    return {
+      tasks: dayTasks,
+      completedTasks,
+      pendingTasks,
+      workLogs: dayWorkLogs,
+      deliverables: dayDeliverables,
+      publishedContent,
+      totalHours: Math.round(totalHours * 10) / 10
+    };
+  }, [tasks, workLogs, calendarEntries, selectedDailyDate, filterEmployeeId, filterClientId]);
+
+  // C. Weekly Operational Records
+  const weeklyRecords = useMemo(() => {
+    const startDate = selectedWeekStart;
+    const startObj = new Date(startDate);
+    const endObj = new Date(startObj);
+    endObj.setDate(startObj.getDate() + 6);
+    const endDate = endObj.toISOString().split('T')[0];
+
+    const weekTasks = tasks.filter(t => {
+      if (t.status === 'Cancelled') return false;
+      const d = t.scheduledDate || t.completedAt?.slice(0, 10);
+      const inRange = d && d >= startDate && d <= endDate;
+      const matchEmp = !filterEmployeeId || t.assigneeId === filterEmployeeId;
+      const matchClient = !filterClientId || t.clientId === filterClientId;
+      return inRange && matchEmp && matchClient;
+    });
+
+    const weekWorkLogs = workLogs.filter(wl => {
+      const d = (wl.work_date || wl.date || '').slice(0, 10);
+      const inRange = d && d >= startDate && d <= endDate;
+      const matchEmp = !filterEmployeeId || wl.employeeId === filterEmployeeId;
+      const matchClient = !filterClientId || wl.clientId === filterClientId;
+      return inRange && matchEmp && matchClient;
+    });
+
+    const weekDeliverables = calendarEntries.filter(c => {
+      const d = (c.date || '').slice(0, 10);
+      const inRange = d && d >= startDate && d <= endDate;
+      const matchEmp = !filterEmployeeId || c.assigneeId === filterEmployeeId;
+      const matchClient = !filterClientId || c.clientId === filterClientId;
+      return inRange && matchEmp && matchClient;
+    });
+
+    const completed = weekTasks.filter(t => t.status === 'Done');
+    const totalHours = weekWorkLogs.reduce((acc, wl) => acc + (Number(wl.hours) || Number(wl.durationHours) || 0), 0);
+    const published = weekDeliverables.filter(c => c.status === 'Posted' || c.postedStatus === 'Posted');
+
+    // Day by day distribution (Mon to Sun)
+    const dayBreakdown = Array.from({ length: 7 }, (_, i) => {
+      const cur = new Date(startObj);
+      cur.setDate(startObj.getDate() + i);
+      const curStr = cur.toISOString().split('T')[0];
+      const dayName = cur.toLocaleDateString('en-US', { weekday: 'short' });
+      const dayCompleted = completed.filter(t => (t.completedAt || t.scheduledDate)?.startsWith(curStr)).length;
+      const dayHrs = weekWorkLogs.filter(wl => (wl.work_date || wl.date)?.startsWith(curStr)).reduce((a, b) => a + (Number(b.hours) || 0), 0);
+      return { date: curStr, dayName, completedCount: dayCompleted, hours: Math.round(dayHrs * 10) / 10 };
+    });
+
+    return {
+      startDate,
+      endDate,
+      tasks: weekTasks,
+      completedTasks: completed,
+      pendingTasks: weekTasks.filter(t => t.status !== 'Done'),
+      totalHours: Math.round(totalHours * 10) / 10,
+      deliverables: weekDeliverables,
+      publishedContent: published,
+      dayBreakdown
+    };
+  }, [tasks, workLogs, calendarEntries, selectedWeekStart, filterEmployeeId, filterClientId]);
+
+  // D. Monthly Operational Records
+  const monthlyRecords = useMemo(() => {
+    const month = selectedMonth;
+
+    const monthTasks = tasks.filter(t => {
+      if (t.status === 'Cancelled') return false;
+      const d = t.scheduledDate || t.completedAt?.slice(0, 10) || t.createdAt?.slice(0, 10);
+      const inMonth = d && d.startsWith(month);
+      const matchEmp = !filterEmployeeId || t.assigneeId === filterEmployeeId;
+      const matchClient = !filterClientId || t.clientId === filterClientId;
+      return inMonth && matchEmp && matchClient;
+    });
+
+    const monthDeliverables = calendarEntries.filter(c => {
+      const d = (c.date || c.createdAt || '').slice(0, 7);
+      const inMonth = d === month;
+      const matchEmp = !filterEmployeeId || c.assigneeId === filterEmployeeId;
+      const matchClient = !filterClientId || c.clientId === filterClientId;
+      return inMonth && matchEmp && matchClient;
+    });
+
+    const monthWorkLogs = workLogs.filter(wl => {
+      const d = (wl.work_date || wl.date || '').slice(0, 7);
+      const inMonth = d === month;
+      const matchEmp = !filterEmployeeId || wl.employeeId === filterEmployeeId;
+      const matchClient = !filterClientId || wl.clientId === filterClientId;
+      return inMonth && matchEmp && matchClient;
+    });
+
+    const completed = monthTasks.filter(t => t.status === 'Done');
+    const totalHours = monthWorkLogs.reduce((acc, wl) => acc + (Number(wl.hours) || Number(wl.durationHours) || 0), 0);
+    const published = monthDeliverables.filter(c => c.status === 'Posted' || c.postedStatus === 'Posted');
+
+    return {
+      month,
+      tasks: monthTasks,
+      completedTasks: completed,
+      pendingTasks: monthTasks.filter(t => t.status !== 'Done'),
+      overdueTasks: monthTasks.filter(isTaskOverdue),
+      totalHours: Math.round(totalHours * 10) / 10,
+      deliverables: monthDeliverables,
+      publishedContent: published
+    };
+  }, [tasks, calendarEntries, workLogs, selectedMonth, filterEmployeeId, filterClientId]);
+
+  // E. Employee Performance Metrics Table
+  const employeePerformanceList = useMemo(() => {
+    return employees.map(emp => {
+      const empTasks = tasks.filter(t => t.assigneeId === emp.id || t.assigneeId === emp.employeeId);
+      const completed = empTasks.filter(t => t.status === 'Done');
+      const pending = empTasks.filter(t => t.status !== 'Done' && t.status !== 'Cancelled');
+      const overdue = empTasks.filter(isTaskOverdue);
+
+      const empWorkLogs = workLogs.filter(wl => wl.employeeId === emp.id || wl.employeeId === emp.employeeId);
+      const hoursLogged = empWorkLogs.reduce((acc, wl) => acc + (Number(wl.hours) || Number(wl.durationHours) || 0), 0);
+
+      const empDeliverables = calendarEntries.filter(c => c.assigneeId === emp.id || c.assigneeId === emp.employeeId);
+      const published = empDeliverables.filter(c => c.status === 'Posted' || c.postedStatus === 'Posted');
+      const approved = empDeliverables.filter(c => c.status === 'Approved' || c.clientApprovalStatus === 'Approved');
+
+      // Handled clients
+      const clientSet = new Set<string>();
+      empTasks.forEach(t => t.clientName && clientSet.add(t.clientName));
+      empWorkLogs.forEach(w => w.clientName && clientSet.add(w.clientName));
+
+      // On time completion
+      const onTimeCount = completed.filter(t => !t.dueDate || !t.completedAt || t.completedAt.slice(0, 10) <= t.dueDate).length;
+      const onTimeRate = completed.length > 0 ? Math.round((onTimeCount / completed.length) * 100) : 100;
+
+      // Daily report submissions
+      const submissions = dailyReports.filter(r => r.employeeId === emp.id && r.status !== 'Draft');
+
+      return {
+        employee: emp,
+        tasksAssigned: empTasks.length,
+        tasksCompleted: completed.length,
+        tasksPending: pending.length,
+        tasksOverdue: overdue.length,
+        onTimeRate,
+        hoursLogged: Math.round(hoursLogged * 10) / 10,
+        clientsHandled: clientSet.size,
+        deliverablesSubmitted: empDeliverables.length,
+        deliverablesApproved: approved.length,
+        deliverablesPublished: published.length,
+        dailyReportsCount: submissions.length
+      };
+    });
+  }, [employees, tasks, workLogs, calendarEntries, dailyReports, todayKolkata]);
+
+  // F. Daily Submission Tracker Statuses
+  const dailyTrackerRecords = useMemo(() => {
+    const targetDate = selectedDailyDate;
+    return employees.map(emp => {
+      const submission = dailyReports.find(r => r.employeeId === emp.id && r.date === targetDate);
+      let status: 'Submitted' | 'Reviewed' | 'Returned' | 'Pending' | 'Late' = 'Pending';
+      if (submission) {
+        if (submission.status === 'Reviewed') status = 'Reviewed';
+        else if (submission.status === 'Returned') status = 'Returned';
+        else if (submission.status === 'Submitted') {
+          status = submission.isLate ? 'Late' : 'Submitted';
+        }
+      } else if (targetDate < todayKolkata) {
+        status = 'Late';
       }
+
+      const dayLogs = workLogs.filter(wl => (wl.employeeId === emp.id) && ((wl.work_date || wl.date || '').slice(0, 10) === targetDate));
+      const hours = dayLogs.reduce((acc, wl) => acc + (Number(wl.hours) || 0), 0);
+      const completedDayTasks = tasks.filter(t => (t.assigneeId === emp.id) && t.status === 'Done' && (t.completedAt?.startsWith(targetDate) || t.scheduledDate === targetDate)).length;
+
+      return {
+        employee: emp,
+        submission,
+        status,
+        hoursLogged: Math.round(hours * 10) / 10,
+        completedTasksCount: completedDayTasks
+      };
+    });
+  }, [employees, dailyReports, selectedDailyDate, todayKolkata, workLogs, tasks]);
+
+  // G. Unified Client Monthly Data (For Client Presentation & PDF Generator)
+  const selectedClient = useMemo(() => {
+    return clients.find(c => c.id === selectedClientId || (c as any).clientId === selectedClientId) || null;
+  }, [clients, selectedClientId]);
+
+  const clientUnifiedData = useMemo(() => {
+    if (!selectedClient) return null;
+    const cid = selectedClient.id || (selectedClient as any).clientId;
+    const cName = (selectedClient.clientName || selectedClient.name || '').toLowerCase();
+
+    const clientEntries = calendarEntries.filter(c => {
+      const matchId = c.clientId === cid;
+      const matchName = (c.clientName || '').toLowerCase() === cName;
+      const matchMonth = (c.date || c.createdAt || '').slice(0, 7) === selectedMonth;
+      return (matchId || matchName) && matchMonth && c.status !== 'Cancelled';
     });
 
-    qualifyingWorkLogs.forEach(wl => {
-      const empName = wl.employeeName || wl.userName || wl.name || 'Team Member';
-      const existing = teamContribMap.get(empName) || { employeeName: empName, role: wl.role || 'Operations Specialist', deliverablesCount: 0, hoursLogged: 0 };
-      existing.hoursLogged += (Number(wl.hours) || Number(wl.durationHours) || 1);
-      teamContribMap.set(empName, existing);
+    const clientTasks = tasks.filter(t => {
+      const matchId = t.clientId === cid;
+      const matchName = (t.clientName || '').toLowerCase() === cName;
+      const matchMonth = (t.scheduledDate || t.completedAt?.slice(0, 10) || '').slice(0, 7) === selectedMonth;
+      return (matchId || matchName) && matchMonth && t.status !== 'Cancelled';
     });
 
-    const teamContributions = Array.from(teamContribMap.values());
+    const clientWorkLogs = workLogs.filter(wl => {
+      const matchId = wl.clientId === cid;
+      const matchName = (wl.clientName || '').toLowerCase() === cName;
+      const matchMonth = (wl.work_date || wl.date || '').slice(0, 7) === selectedMonth;
+      return (matchId || matchName) && matchMonth;
+    });
+
+    const totalPlanned = clientEntries.length;
+    const livePublished = clientEntries.filter(e => e.status === 'Posted' || e.postedStatus === 'Posted').length;
+    const clientApproved = clientEntries.filter(e => e.clientApprovalStatus === 'Approved' || e.status === 'Approved').length;
+    const tasksCompleted = clientTasks.filter(t => t.status === 'Done').length;
+    const hoursLogged = clientWorkLogs.reduce((a, b) => a + (Number(b.hours) || 0), 0);
 
     return {
       totalPlanned,
       livePublished,
       clientApproved,
-      channelsActive,
-      platforms: Array.from(platformsSet),
-      deliverables: qualifyingCalendar,
-      tasksTotal: qualifyingTasks.length,
+      tasksTotal: clientTasks.length,
       tasksCompleted,
-      tasksInProgress,
-      tasksOverdue,
-      tasks: qualifyingTasks,
-      videosTotal: qualifyingVideos.length,
-      videosFinished,
-      videosInEdit,
-      videos: qualifyingVideos,
-      pendingApprovals,
-      approvedApprovals: approvedCount,
-      revisionsCount,
-      approvals: qualifyingApprovals,
-      workLogs: qualifyingWorkLogs,
-      teamContributions
+      tasksPending: clientTasks.filter(t => t.status !== 'Done').length,
+      totalHours: Math.round(hoursLogged * 10) / 10,
+      deliverables: clientEntries,
+      tasks: clientTasks,
+      workLogs: clientWorkLogs
     };
-  }, [selectedClientId, selectedClient, selectedMonth, calendarEntries, tasks, videos, approvals, workLogs, isRecordForClient]);
+  }, [selectedClient, calendarEntries, tasks, workLogs, selectedMonth]);
 
-  // Initial fill of executive commentary if user has not typed custom text
-  useEffect(() => {
-    if (unifiedReportData && selectedClient && !isCommentaryDirty) {
-      if (!executiveSummary) {
-        setExecutiveSummary(
-          `During ${monthLabel}, DigiexplodeAI executed the monthly strategic roadmap for ${selectedClient.clientName || selectedClient.name}. A total of ${unifiedReportData.totalPlanned} planned creative deliverables across ${unifiedReportData.channelsActive} active channels were developed, with ${unifiedReportData.livePublished} deliverables published live and ${unifiedReportData.clientApproved} client-approved.`
-        );
-      }
-      if (!highlights) {
-        setHighlights(
-          `• Successfully executed ${unifiedReportData.totalPlanned} cross-platform social assets.\n• ${unifiedReportData.tasksCompleted} operational milestones completed with 0 delivery bottlenecks.\n• Streamlined review workflows with ${unifiedReportData.clientApproved} approved creatives.`
-        );
-      }
-      if (!nextMonthStrategy) {
-        setNextMonthStrategy(
-          `• Scale high-performing video formats and reels.\n• Expand audience engagement across core platforms.\n• Optimize turnaround times for creative approvals.`
-        );
-      }
-    }
-  }, [unifiedReportData, selectedClient, monthLabel, isCommentaryDirty]);
+  // ── 9. EXPORT HANDLERS (PDF, Excel XLSX, CSV) ─────────────────────
 
-  // Trigger Report Generation
-  const handleTriggerGenerateReport = () => {
-    if (!selectedClientId) {
-      showToast('error', 'Please select a client account first.');
-      return;
-    }
-    setHasGeneratedReport(true);
-    showToast('success', `Monthly report for ${selectedClient?.clientName || 'client'} ready for review.`);
-  };
-
-  // Generate Smart AI Summary Draft (Factual context only)
-  const handleGenerateAISummary = () => {
-    if (!unifiedReportData || !selectedClient) return;
-    const aiDraft = `During ${monthLabel}, DigiexplodeAI managed operational and creative delivery for ${selectedClient.clientName || selectedClient.name}. Across ${unifiedReportData.channelsActive} active channel(s), ${unifiedReportData.totalPlanned} deliverables were planned, resulting in ${unifiedReportData.livePublished} published assets and ${unifiedReportData.clientApproved} approved creatives. Operations achieved ${unifiedReportData.tasksCompleted} completed tasks and ${unifiedReportData.videosFinished} studio video projects completed.`;
-    setExecutiveSummary(aiDraft);
-    setIsCommentaryDirty(true);
-    showToast('info', 'AI executive summary generated from factual report data.');
-  };
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // ██ ONE SINGLE FINALIZATION SERVICE ██
-  // Both "Generate & Download Official PDF" AND "Export Official PDF" buttons
-  // call finalizeReportAndDownloadPdf — they are aliased at the bottom.
-  // Order: freeze snapshot → generate PDF → validate bytes → write Firestore
-  //        → download canonical .pdf filename → ONE success toast.
-  // If ANY step throws: abort, no history row, no seq increment, exact error.
-  // ─────────────────────────────────────────────────────────────────────────
-  const finalizeReportAndDownloadPdf = async () => {
-    if (!selectedClient || !unifiedReportData) {
-      showToast('error', 'Please select a client account first.');
-      return;
-    }
-    // Mutex: block concurrent / double-click
-    if (pdfGenerationInProgress.current) {
-      showToast('info', 'Finalization already running — please wait.');
-      return;
-    }
-    pdfGenerationInProgress.current = true;
-    setIsGeneratingPdf(true);
-
-    // ── STEP 1: Freeze report state into an immutable snapshot ───────────────
-    const yearNum = parseInt(selectedMonth.split('-')[0], 10) || 2026;
-    const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-    const monthIndex = parseInt(selectedMonth.split('-')[1], 10) - 1;
-    const formattedMonthName = monthNames[monthIndex] || selectedMonth;
-    const clientName = selectedClient.clientName || (selectedClient as any).name || 'Client';
-    const highlightsArray = highlights.split('\n').map(s => s.replace(/^•\s*/, '').trim()).filter(Boolean);
-
-    // PEEK reference — do NOT commit until Firestore write succeeds
-    const tentativeRef = peekNextReportReference(selectedMonth);
-
-    const frozenSnapshot = {
-      clientId:          (selectedClient.id || (selectedClient as any).clientId || selectedClient.clientName || 'unknown'),
-      clientName,
-      month:             selectedMonth,
-      year:              yearNum,
-      reportType,
-      metrics: {
-        totalPlanned:     unifiedReportData.totalPlanned,
-        livePublished:    unifiedReportData.livePublished,
-        clientApproved:   unifiedReportData.clientApproved,
-        channelsActive:   unifiedReportData.channelsActive,
-        tasksTotal:       unifiedReportData.tasksTotal,
-        tasksCompleted:   unifiedReportData.tasksCompleted,
-        videosTotal:      unifiedReportData.videosTotal,
-        videosFinished:   unifiedReportData.videosFinished,
-        pendingApprovals: unifiedReportData.pendingApprovals,
-        revisionsCount:   unifiedReportData.revisionsCount,
-      },
-      executiveSummary:  executiveSummary || '',
-      highlights:        highlights || '',
-      nextMonthStrategy: nextMonthStrategy || '',
-      generatedAt:       new Date().toISOString(),
-      generatedBy:       profile?.name || user?.displayName || 'Super Admin',
-      generatedById:     user?.uid || 'admin',
-      contentSnapshot:   unifiedReportData.deliverables,
-      taskSnapshot:      unifiedReportData.tasks,
-      videoSnapshot:     unifiedReportData.videos,
-      teamContributions: unifiedReportData.teamContributions,
+  // Overview Export
+  const handleExportOverview = (format: 'pdf' | 'xlsx' | 'csv') => {
+    const config = {
+      reportTitle: 'Digiexplode AI — Executive Operations Overview',
+      reportSubtitle: 'Authoritative Agency Work & Deliverables Performance',
+      periodLabel: `As of ${todayKolkata}`,
+      generatedBy: profile?.name || 'Super Admin',
+      summaryCards: [
+        { label: 'Total Tasks', value: tasks.length },
+        { label: 'Completed', value: tasks.filter(t => t.status === 'Done').length },
+        { label: 'Pending', value: tasks.filter(t => t.status !== 'Done').length },
+        { label: 'Overdue', value: tasks.filter(isTaskOverdue).length },
+        { label: 'Work Logged', value: `${Math.round(workLogs.reduce((a, b) => a + (Number(b.hours) || 0), 0))} hrs` },
+        { label: 'Published Content', value: calendarEntries.filter(e => e.status === 'Posted').length }
+      ],
+      tables: [
+        {
+          title: 'Recent Active Operational Tasks',
+          headers: ['Task Title', 'Client', 'Assignee', 'Category', 'Priority', 'Status', 'Due Date'],
+          rows: tasks.slice(0, 30).map(t => [
+            t.title,
+            t.clientName || 'General',
+            t.assigneeName || 'Unassigned',
+            t.category || 'General',
+            t.priority,
+            t.status,
+            t.dueDate || '-'
+          ])
+        }
+      ],
+      filenameBase: 'DigiexplodeAI_Operations_Overview'
     };
 
-    try {
-      // ── STEP 2: Generate real PDF bytes using jsPDF ──────────────────────
-      const { doc: pdfDoc } = await generateMonthlyPDFReport({
-        client:            selectedClient,
-        month:             selectedMonth,
-        year:              yearNum,
-        reportReference:   tentativeRef,
-        reportType:        REPORT_TYPE_CONFIGS.find(r => r.id === reportType)?.label || 'Combined Monthly Report',
-        entries:           frozenSnapshot.contentSnapshot,
-        tasks:             frozenSnapshot.taskSnapshot,
-        videos:            frozenSnapshot.videoSnapshot,
-        teamContributions: frozenSnapshot.teamContributions,
-        executiveSummary,
-        monthlyHighlights: highlightsArray,
-        highlights:        highlightsArray,
-        nextMonthPlan: {
-          campaigns:      nextMonthStrategy,
-          contentThemes:  'Brand Authority & Targeted Engagement',
-          shoots:         `${unifiedReportData.videosTotal} video concepts in studio queue`,
-          importantDates: 'Sprints active throughout the month',
+    if (format === 'pdf') exportReportToPDF(config);
+    else if (format === 'xlsx') exportReportToXLSX(config);
+    else exportReportToCSV(config);
+
+    showToast('success', `Exported Overview as ${format.toUpperCase()}`);
+  };
+
+  // Daily Report Export
+  const handleExportDaily = (format: 'pdf' | 'xlsx' | 'csv') => {
+    const config = {
+      reportTitle: `Digiexplode AI — Daily Operations Report (${selectedDailyDate})`,
+      reportSubtitle: 'Cross-Module Daily Deliverables, Tasks & Recorded Work Logs',
+      periodLabel: selectedDailyDate,
+      generatedBy: profile?.name || 'Super Admin',
+      filterSummary: `Employee: ${filterEmployeeId ? employees.find(e => e.id === filterEmployeeId)?.name : 'All'} | Client: ${filterClientId ? clients.find(c => c.id === filterClientId)?.clientName : 'All'}`,
+      summaryCards: [
+        { label: 'Tasks Completed', value: dailyRecords.completedTasks.length },
+        { label: 'Tasks Pending', value: dailyRecords.pendingTasks.length },
+        { label: 'Hours Logged', value: `${dailyRecords.totalHours} hrs` },
+        { label: 'Published Deliverables', value: dailyRecords.publishedContent.length }
+      ],
+      tables: [
+        {
+          title: `Daily Operational Tasks (${dailyRecords.tasks.length})`,
+          headers: ['Task Title', 'Client', 'Assignee', 'Category', 'Status', 'Priority'],
+          rows: dailyRecords.tasks.map(t => [t.title, t.clientName || 'General', t.assigneeName || 'Unassigned', t.category, t.status, t.priority])
         },
-        generatedBy: frozenSnapshot.generatedBy,
-      });
+        {
+          title: `Daily Time & Work Logs (${dailyRecords.workLogs.length})`,
+          headers: ['Employee', 'Client', 'Work Description', 'Hours Logged'],
+          rows: dailyRecords.workLogs.map(wl => [wl.employeeName || wl.employee_name || 'Team Member', wl.clientName || wl.client_name || 'Client', wl.workDone || wl.work_description || '', wl.hours || wl.durationHours || 1])
+        }
+      ],
+      filenameBase: `DigiexplodeAI_Daily_Report_${selectedDailyDate}`
+    };
 
-      // ── STEP 3: Extract & validate PDF bytes ─────────────────────────────
-      const pdfArrayBuffer = pdfDoc.output('arraybuffer') as ArrayBuffer;
-      const pdfBytes = new Uint8Array(pdfArrayBuffer);
+    if (format === 'pdf') exportReportToPDF(config);
+    else if (format === 'xlsx') exportReportToXLSX(config);
+    else exportReportToCSV(config);
 
-      // Assertion A: minimum size
-      if (pdfBytes.length < 1000) {
-        throw new Error(`PDF too small (${pdfBytes.length} bytes) — not a valid PDF.`);
-      }
-      // Assertion B: %PDF- magic header
-      const header = String.fromCharCode(pdfBytes[0], pdfBytes[1], pdfBytes[2], pdfBytes[3], pdfBytes[4]);
-      if (header !== '%PDF-') {
-        throw new Error(`Output does not begin with %PDF-. Got: "${header}". Aborted.`);
-      }
-      // Assertion C: at least 1 page rendered
-      const pageCount: number = pdfDoc.getNumberOfPages
-        ? pdfDoc.getNumberOfPages()
-        : (((pdfDoc.internal as any).pages?.length ?? 2) - 1);
-      if (pageCount < 1) {
-        throw new Error(`PDF has ${pageCount} pages — at least 1 required.`);
-      }
+    showToast('success', `Exported Daily Report as ${format.toUpperCase()}`);
+  };
 
-      console.log('[REPORT FINALIZATION] PDF validated ✓', {
-        byteLength: pdfBytes.length, header, pageCount, tentativeRef,
-      });
+  // Weekly Report Export
+  const handleExportWeekly = (format: 'pdf' | 'xlsx' | 'csv') => {
+    const config = {
+      reportTitle: `Digiexplode AI — Weekly Performance Report`,
+      reportSubtitle: `Sprint Performance: ${weeklyRecords.startDate} to ${weeklyRecords.endDate}`,
+      periodLabel: `${weeklyRecords.startDate} to ${weeklyRecords.endDate}`,
+      generatedBy: profile?.name || 'Super Admin',
+      summaryCards: [
+        { label: 'Tasks Completed', value: weeklyRecords.completedTasks.length },
+        { label: 'Tasks Pending', value: weeklyRecords.pendingTasks.length },
+        { label: 'Total Hours', value: `${weeklyRecords.totalHours} hrs` },
+        { label: 'Published Content', value: weeklyRecords.publishedContent.length }
+      ],
+      tables: [
+        {
+          title: 'Daily Velocity Breakdown',
+          headers: ['Day', 'Date', 'Completed Tasks', 'Hours Logged'],
+          rows: weeklyRecords.dayBreakdown.map(d => [d.dayName, d.date, d.completedCount, `${d.hours} hrs`])
+        },
+        {
+          title: 'Weekly Deliverables & Tasks',
+          headers: ['Task Title', 'Client', 'Assignee', 'Status', 'Priority', 'Completed At'],
+          rows: weeklyRecords.tasks.map(t => [t.title, t.clientName || 'Client', t.assigneeName || 'Assigned', t.status, t.priority, t.completedAt?.slice(0, 10) || '-'])
+        }
+      ],
+      filenameBase: `DigiexplodeAI_Weekly_Report_${weeklyRecords.startDate}`
+    };
 
-      // ── STEP 4: Commit reference ONLY after validation passes ────────────
+    if (format === 'pdf') exportReportToPDF(config);
+    else if (format === 'xlsx') exportReportToXLSX(config);
+    else exportReportToCSV(config);
+
+    showToast('success', `Exported Weekly Report as ${format.toUpperCase()}`);
+  };
+
+  // Monthly Report Export
+  const handleExportMonthly = (format: 'pdf' | 'xlsx' | 'csv') => {
+    const config = {
+      reportTitle: `Digiexplode AI — Monthly Operations Report (${selectedMonth})`,
+      reportSubtitle: 'Full Agency Monthly Production, Content Calendar & Work Logs',
+      periodLabel: selectedMonth,
+      generatedBy: profile?.name || 'Super Admin',
+      summaryCards: [
+        { label: 'Tasks Completed', value: monthlyRecords.completedTasks.length },
+        { label: 'Tasks Pending', value: monthlyRecords.pendingTasks.length },
+        { label: 'Total Hours Logged', value: `${monthlyRecords.totalHours} hrs` },
+        { label: 'Published Assets', value: monthlyRecords.publishedContent.length }
+      ],
+      tables: [
+        {
+          title: 'Monthly Deliverables & Operational Tasks',
+          headers: ['Title', 'Client', 'Assignee', 'Category', 'Status', 'Due Date'],
+          rows: monthlyRecords.tasks.map(t => [t.title, t.clientName || 'General', t.assigneeName || 'Unassigned', t.category, t.status, t.dueDate || '-'])
+        }
+      ],
+      filenameBase: `DigiexplodeAI_Monthly_Report_${selectedMonth}`
+    };
+
+    if (format === 'pdf') exportReportToPDF(config);
+    else if (format === 'xlsx') exportReportToXLSX(config);
+    else exportReportToCSV(config);
+
+    showToast('success', `Exported Monthly Report as ${format.toUpperCase()}`);
+  };
+
+  // Employee Performance Export
+  const handleExportEmployeeReport = (format: 'pdf' | 'xlsx' | 'csv') => {
+    const config = {
+      reportTitle: 'Digiexplode AI — Employee Performance & Delivery Report',
+      reportSubtitle: 'Factual Task Completion, Logged Work & On-Time Performance',
+      periodLabel: `As of ${todayKolkata}`,
+      generatedBy: profile?.name || 'Super Admin',
+      tables: [
+        {
+          title: 'All Employees Performance Summary',
+          headers: ['Employee Name', 'Role / Team', 'Assigned', 'Completed', 'Pending', 'Overdue', 'On-Time %', 'Hours Logged', 'Clients Handled', 'Daily Reports'],
+          rows: employeePerformanceList.map(item => [
+            item.employee.name,
+            item.employee.role || item.employee.designation || 'Staff',
+            item.tasksAssigned,
+            item.tasksCompleted,
+            item.tasksPending,
+            item.tasksOverdue,
+            `${item.onTimeRate}%`,
+            `${item.hoursLogged} hrs`,
+            item.clientsHandled,
+            item.dailyReportsCount
+          ])
+        }
+      ],
+      filenameBase: `DigiexplodeAI_Employee_Performance_${todayKolkata}`
+    };
+
+    if (format === 'pdf') exportReportToPDF(config);
+    else if (format === 'xlsx') exportReportToXLSX(config);
+    else exportReportToCSV(config);
+
+    showToast('success', `Exported Employee Performance as ${format.toUpperCase()}`);
+  };
+
+  // Submission Tracker Export
+  const handleExportSubmissionTracker = (format: 'pdf' | 'xlsx' | 'csv') => {
+    const submittedCount = dailyTrackerRecords.filter(r => r.status === 'Submitted' || r.status === 'Reviewed').length;
+    const config = {
+      reportTitle: `Digiexplode AI — Daily Report Submission Tracker (${selectedDailyDate})`,
+      reportSubtitle: 'Employee Compliance & Daily Activity Submission Audit',
+      periodLabel: selectedDailyDate,
+      generatedBy: profile?.name || 'Super Admin',
+      summaryCards: [
+        { label: 'Total Employees', value: dailyTrackerRecords.length },
+        { label: 'Submitted / Reviewed', value: submittedCount },
+        { label: 'Pending / Late', value: dailyTrackerRecords.length - submittedCount }
+      ],
+      tables: [
+        {
+          title: 'Daily Submission Audit Records',
+          headers: ['Employee Name', 'Role', 'Status', 'Submitted At', 'Hours Logged', 'Completed Tasks'],
+          rows: dailyTrackerRecords.map(r => [
+            r.employee.name,
+            r.employee.role || 'Staff',
+            r.status,
+            r.submission?.submittedAt ? new Date(r.submission.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-',
+            `${r.hoursLogged} hrs`,
+            r.completedTasksCount
+          ])
+        }
+      ],
+      filenameBase: `DigiexplodeAI_Daily_Submission_Tracker_${selectedDailyDate}`
+    };
+
+    if (format === 'pdf') exportReportToPDF(config);
+    else if (format === 'xlsx') exportReportToXLSX(config);
+    else exportReportToCSV(config);
+
+    showToast('success', `Exported Submission Tracker as ${format.toUpperCase()}`);
+  };
+
+  // Client Report Official PDF Export (via pdfReportGenerator)
+  const handleGenerateOfficialClientPdf = async () => {
+    if (!selectedClient || !clientUnifiedData) {
+      showToast('error', 'Please select a client account first.');
+      return;
+    }
+    setIsGeneratingPdf(true);
+    try {
+      const yearNum = parseInt(selectedMonth.split('-')[0], 10) || 2026;
       const refNumber = commitReportReference(selectedMonth);
-      const canonicalFilename = buildCanonicalFilename(clientName, formattedMonthName, yearNum, refNumber);
+      const clientName = selectedClient.clientName || selectedClient.name || 'Client';
 
-      // ── STEP 5: Write ONE Firestore history record — MUST succeed ────────
-      const snapshotRecord: Omit<SavedReportSnapshot, 'id'> = {
-        ...frozenSnapshot,
+      const { doc: pdfDoc, filename } = await generateMonthlyPDFReport({
+        client: selectedClient,
+        month: selectedMonth,
+        year: yearNum,
         reportReference: refNumber,
-        pdf_status:      'valid' as PdfStatus,
-        pdf_filename:    canonicalFilename,
-        pdf_size_bytes:  pdfBytes.length,
+        reportType: 'Full Monthly Client Report',
+        entries: clientUnifiedData.deliverables,
+        tasks: clientUnifiedData.tasks,
+        executiveSummary: executiveSummary || `Monthly creative delivery and social media campaign performance audit for ${clientName}.`,
+        highlights: highlights ? highlights.split('\n').filter(Boolean) : [
+          `${clientUnifiedData.totalPlanned} deliverables planned for ${clientName}.`,
+          `${clientUnifiedData.livePublished} live published brand assets across active channels.`,
+          `${clientUnifiedData.clientApproved} creative assets reviewed and approved.`
+        ],
+        generatedBy: profile?.name || 'Super Admin'
+      });
+
+      pdfDoc.save(filename);
+
+      // Save record in Firestore and localStorage
+      const snapshot: SavedReportSnapshot = {
+        id: `cr_${Date.now()}`,
+        reportReference: refNumber,
+        clientId: selectedClient.id || (selectedClient as any).clientId,
+        clientName,
+        month: selectedMonth,
+        year: yearNum,
+        reportType: 'full_monthly',
+        metrics: {
+          totalPlanned: clientUnifiedData.totalPlanned,
+          livePublished: clientUnifiedData.livePublished,
+          clientApproved: clientUnifiedData.clientApproved,
+          channelsActive: 3,
+          tasksTotal: clientUnifiedData.tasksTotal,
+          tasksCompleted: clientUnifiedData.tasksCompleted,
+          videosTotal: 0,
+          videosFinished: 0,
+          pendingApprovals: 0,
+          revisionsCount: 0
+        },
+        executiveSummary,
+        highlights,
+        nextMonthStrategy,
+        generatedAt: new Date().toISOString(),
+        generatedBy: profile?.name || 'Super Admin',
+        generatedById: user?.uid || 'admin',
+        contentSnapshot: clientUnifiedData.deliverables,
+        taskSnapshot: clientUnifiedData.tasks,
+        videoSnapshot: [],
+        teamContributions: []
       };
 
-      // addDoc throws if Firestore is unreachable — catch block fires, no download
-      // sanitizeForFirestore strips any undefined values that would cause Firestore to throw
-      let firestoreId: string;
       try {
-        const docRef = await addDoc(collection(db, 'client_reports'), sanitizeForFirestore(snapshotRecord));
-        firestoreId = docRef.id;
-        console.log('[FINALIZATION] Firestore write succeeded, doc id:', firestoreId);
-      } catch (writeErr: any) {
-        // If Firestore rules block the write, fall back to a local-only record.
-        // The PDF still downloads. History persists in localStorage until rules are fixed.
-        firestoreId = 'local_' + Date.now();
-        console.warn('[FINALIZATION] Firestore write failed (permissions?), using local record:', writeErr?.message);
-        // Re-throw if it's not a permissions issue (e.g. network completely down and no cache)
-        if (!writeErr?.message?.includes('permission') && !writeErr?.message?.includes('Missing') && !writeErr?.message?.includes('PERMISSION_DENIED')) {
-          throw writeErr;
-        }
-      }
-      const docRef = { id: firestoreId };
-      const newSnapshot: SavedReportSnapshot = { ...snapshotRecord, id: docRef.id };
+        await addDoc(collection(db, 'client_reports'), snapshot);
+      } catch {}
 
-      // Update local state only AFTER successful Firestore write
-      setSavedReports(prev => [newSnapshot, ...prev]);
-      try {
-        localStorage.setItem(LS_SAVED_REPORTS_KEY, JSON.stringify([newSnapshot, ...savedReports]));
-      } catch { /* storage quota — non-fatal */ }
-
-      // ── STEP 6: Download with canonical .pdf filename using native pdfDoc.save() ─
-      // pdfDoc.save() is the canonical jsPDF download method that correctly triggers
-      // a browser download with the proper PDF MIME headers and exact filename.
-      pdfDoc.save(canonicalFilename);
-
-      // ── STEP 7: ONE success toast — only after all steps pass ────────────
-      showToast('success', `✓ Official PDF generated, validated, saved to History & downloaded: ${canonicalFilename}`);
-
-    } catch (e: any) {
-      console.error('[FINALIZATION FAILED]', e);
-      showToast('error', `Finalization failed: ${e?.message || 'Unknown error'}. No history record was created.`);
+      showToast('success', `Downloaded Official Client PDF: ${filename}`);
+    } catch (err: any) {
+      console.error('Client PDF generation error:', err);
+      showToast('error', `Failed to generate PDF: ${err?.message || 'Unknown error'}`);
     } finally {
-      pdfGenerationInProgress.current = false;
       setIsGeneratingPdf(false);
     }
   };
 
-  // Both buttons call the same service — guaranteed same code path
-  const handleGenerateAndDownloadPDF = finalizeReportAndDownloadPdf;
-
-  // "Save Snapshot Draft" — generates a real PDF snapshot just like Official PDF
-  // but labelled as draft. Still goes through the same atomic finalization path.
-  const handleSaveReportDraft = () => {
-    finalizeReportAndDownloadPdf();
-  };
-
-  // ── Repair/Re-download: re-generates from frozen snapshot, validates,
-  // updates pdf_* fields on the SAME history record — no new row. ───────────
-  const handleRegeneratePdfForSnapshot = async (snapshot: SavedReportSnapshot) => {
-    if (regeneratingId === snapshot.id) return;
-    setRegeneratingId(snapshot.id);
-
-    const matchingClient: ClientData = clients.find(c =>
-      c.id === snapshot.clientId || (c as any).clientId === snapshot.clientId
-    ) || ({
-      id: snapshot.clientId, clientId: snapshot.clientId,
-      clientName: snapshot.clientName, name: snapshot.clientName,
-      category: 'Client Partner', status: 'Active',
-    } as unknown as ClientData);
-
+  // ── 10. DAILY REPORT ACTIONS (Save Draft, Submit, Manager Review) ───
+  const handleSaveOrSubmitDaily = async (isSubmit: boolean) => {
+    if (!currentEmployee) return;
+    setIsSubmittingDaily(true);
     try {
-      const hiArr = (snapshot.highlights || '').split('\n').map(s => s.replace(/^•\s*/, '').trim()).filter(Boolean);
-      const { doc: pdfDoc } = await generateMonthlyPDFReport({
-        client:            matchingClient,
-        month:             snapshot.month,
-        year:              snapshot.year,
-        reportReference:   snapshot.reportReference,
-        reportType:        REPORT_TYPE_CONFIGS.find(r => r.id === snapshot.reportType)?.label || 'Monthly Client Report',
-        entries:           snapshot.contentSnapshot   || [],
-        tasks:             snapshot.taskSnapshot      || [],
-        videos:            snapshot.videoSnapshot     || [],
-        teamContributions: snapshot.teamContributions || [],
-        executiveSummary:  snapshot.executiveSummary  || '',
-        monthlyHighlights: hiArr,
-        highlights:        hiArr,
-        nextMonthPlan: { campaigns: snapshot.nextMonthStrategy || '', contentThemes: 'Brand Strategy' },
-        generatedBy:       snapshot.generatedBy,
+      await saveOrSubmitDailyReport({
+        date: selectedDailyDate,
+        employeeId: currentEmployee.id,
+        employeeName: currentEmployee.name,
+        employeeEmail: currentEmployee.email,
+        team: currentEmployee.department || currentEmployee.role || 'General',
+        department: currentEmployee.department,
+        summary: empDailySummary,
+        blockers: empDailyBlockers,
+        nextDayPlan: empDailyNextPlan,
+        completedTasksCount: dailyRecords.completedTasks.length,
+        pendingTasksCount: dailyRecords.pendingTasks.length,
+        hoursLogged: dailyRecords.totalHours,
+        isSubmit
       });
 
-      const pdfBytes = new Uint8Array(pdfDoc.output('arraybuffer') as ArrayBuffer);
-      if (pdfBytes.length < 1000) throw new Error(`Repaired PDF too small (${pdfBytes.length} bytes).`);
-      const hdr = String.fromCharCode(pdfBytes[0], pdfBytes[1], pdfBytes[2], pdfBytes[3], pdfBytes[4]);
-      if (hdr !== '%PDF-') throw new Error(`Repaired file does not start with %PDF-. Got: "${hdr}"`);
-
-      const mns = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-      const mi = parseInt((snapshot.month || '').split('-')[1], 10) - 1;
-      const fm = mns[mi] || snapshot.month;
-      const canonicalFilename = snapshot.pdf_filename ||
-        buildCanonicalFilename(snapshot.clientName, fm, snapshot.year, snapshot.reportReference);
-
-      // Update ONLY pdf fields on SAME document row — NEVER inserts a new row
-      const pdfUpdate = {
-        pdf_status: 'valid' as PdfStatus, pdf_filename: canonicalFilename,
-        pdf_size_bytes: pdfBytes.length, repaired_at: new Date().toISOString(),
-      };
-      try {
-        const { updateDoc, doc: fbDoc } = await import('firebase/firestore');
-        await updateDoc(fbDoc(db, 'client_reports', snapshot.id), pdfUpdate);
-      } catch { /* offline — non-fatal */ }
-      setSavedReports(prev => prev.map(r => r.id === snapshot.id ? { ...r, ...pdfUpdate } : r));
-      try {
-        const stored = localStorage.getItem(LS_SAVED_REPORTS_KEY);
-        if (stored) {
-          const arr: SavedReportSnapshot[] = JSON.parse(stored);
-          localStorage.setItem(LS_SAVED_REPORTS_KEY, JSON.stringify(arr.map(r => r.id === snapshot.id ? { ...r, ...pdfUpdate } : r)));
-        }
-      } catch {}
-
-      pdfDoc.save(canonicalFilename);
-
-      showToast('success', `PDF repaired & downloaded: ${canonicalFilename}`);
-    } catch (e: any) {
-      showToast('error', `Repair failed: ${e?.message || 'Unknown error'}`);
-    } finally { setRegeneratingId(null); }
+      showToast('success', isSubmit ? 'Daily Report Submitted successfully!' : 'Daily Report Draft saved.');
+    } catch (err: any) {
+      showToast('error', `Failed: ${err?.message || 'Error saving report'}`);
+    } finally {
+      setIsSubmittingDaily(false);
+    }
   };
 
-  // History PDF button — serves from frozen snapshot (NOT live report state)
-  const handleDownloadHistoricalPdf = async (snapshot: SavedReportSnapshot) => {
-    await handleRegeneratePdfForSnapshot(snapshot);
-  };
-
-  // Delete Historical Report
-  const handleDeleteHistoricalReport = async (reportId: string, refNumber: string) => {
-    if (!window.confirm(`Are you sure you want to remove report ${refNumber} from history?`)) return;
+  const handleReviewSubmission = async (newStatus: 'Reviewed' | 'Returned') => {
+    if (!reviewModalReport) return;
     try {
-      await deleteDoc(doc(db, 'client_reports', reportId)).catch(() => {});
-      const updated = savedReports.filter(r => r.id !== reportId && r.reportReference !== refNumber);
-      setSavedReports(updated);
-      try { localStorage.setItem(LS_SAVED_REPORTS_KEY, JSON.stringify(updated)); } catch {}
-      showToast('info', `Report ${refNumber} removed.`);
-      if (viewingSnapshot?.id === reportId) setViewingSnapshot(null);
-    } catch (e) {
-      showToast('error', 'Failed to delete report.');
+      await reviewDailyReportSubmission(
+        reviewModalReport.id,
+        newStatus,
+        reviewRemarks,
+        { uid: user?.uid, name: profile?.name || 'Manager' }
+      );
+      showToast('success', `Report marked as ${newStatus}`);
+      setReviewModalReport(null);
+      setReviewRemarks('');
+    } catch (err: any) {
+      showToast('error', `Failed to update review: ${err?.message}`);
     }
   };
 
-  // Filtered clients list for searchable dropdown
-  const filteredClients = useMemo(() => {
-    if (!clientSearchQuery.trim()) return clients;
-    const q = clientSearchQuery.toLowerCase();
-    return clients.filter(c => 
-      (c.clientName || c.name || '').toLowerCase().includes(q) ||
-      (c.businessName || '').toLowerCase().includes(q) ||
-      (c.category || '').toLowerCase().includes(q)
-    );
-  }, [clients, clientSearchQuery]);
-
-  // Clean Print Dialog
-  const handleTriggerPrint = () => {
-    if (!selectedClient || !unifiedReportData) {
-      showToast('error', 'Select a client first to print report.');
-      return;
-    }
-    window.print();
-  };
+  // ── 11. NAVIGATION TAB CONFIGS ──────────────────────────────────────
+  const TABS: { id: MainReportTab; label: string; icon: any; count?: number }[] = [
+    { id: 'overview', label: 'Agency Pulse', icon: BarChart3 },
+    { id: 'daily', label: 'Daily Reports', icon: FileCheck },
+    { id: 'weekly', label: 'Weekly Sprints', icon: TrendingUp },
+    { id: 'monthly', label: 'Monthly Operations', icon: Calendar },
+    { id: 'employee', label: 'Employee Performance', icon: Award },
+    { id: 'client', label: 'Client Reporting', icon: Briefcase },
+    { id: 'submission_tracker', label: 'Submission Tracker', icon: ShieldCheck, count: dailyTrackerRecords.filter(r => r.status === 'Pending' || r.status === 'Late').length },
+    { id: 'custom', label: 'Custom Reports', icon: Filter }
+  ];
 
   return (
-    <div className="reporting-engine-container" style={{ padding: '20px 28px', maxWidth: '1480px', margin: '0 auto', color: '#F8FAFC', fontFamily: 'Inter, sans-serif' }}>
-
-      {/* Print Style Injector */}
-      <style>{`
-        @media print {
-          body { background: #FFF !important; color: #000 !important; }
-          .reporting-engine-container { padding: 0 !important; margin: 0 !important; max-width: 100% !important; }
-          header, nav, aside, .no-print, button, .top-control-bar { display: none !important; }
-          .print-only-card { background: #FFF !important; border: 1px solid #CCC !important; color: #000 !important; }
-          .report-preview-sheet { box-shadow: none !important; border: none !important; padding: 0 !important; background: #FFF !important; }
-        }
-      `}</style>
-
+    <div className="min-h-screen bg-[#F8FAFC] dark:bg-[#0B0F19] text-[#101828] dark:text-[#F8FAFC] p-4 sm:p-6 lg:p-8 font-sans">
       {/* Toast Notification */}
       {toast && (
-        <div style={{
-          position: 'fixed', top: '24px', right: '24px', zIndex: 99999,
-          display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 20px',
-          borderRadius: '12px', fontSize: '13.5px', fontWeight: 600,
-          background: toast.type === 'success' ? 'rgba(16,185,129,0.95)' : toast.type === 'error' ? 'rgba(239,68,68,0.95)' : 'rgba(59,130,246,0.95)',
-          color: '#FFF', boxShadow: '0 10px 30px rgba(0,0,0,0.35)', backdropFilter: 'blur(10px)'
-        }}>
-          {toast.type === 'success' ? <CheckCircle2 size={18} /> : toast.type === 'error' ? <AlertCircle size={18} /> : <Sparkles size={18} />}
-          {toast.msg}
+        <div className="fixed top-6 right-6 z-99999 flex items-center gap-2.5 px-5 py-3 rounded-2xl text-xs font-bold text-white shadow-2xl backdrop-blur-md animate-in slide-in-from-top-4"
+          style={{
+            background: toast.type === 'success' ? '#10B981' : toast.type === 'error' ? '#EF4444' : '#5B4BFF'
+          }}>
+          {toast.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
+          <span>{toast.msg}</span>
         </div>
       )}
 
-      {/* ── Top Header & Global Controls ────────────────────────────── */}
-      <div className="top-control-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{
-            width: '44px', height: '44px', borderRadius: '12px',
-            background: 'linear-gradient(135deg, #5B4BFF 0%, #3B82F6 100%)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 6px 18px rgba(91, 75, 255, 0.35)'
-          }}>
-            <FileText size={24} color="#FFF" />
+      {/* ── HEADER ──────────────────────────────────────────────────── */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-[#E2E8F0] dark:border-white/10">
+        <div className="flex items-center gap-3.5">
+          <div className="w-11 h-11 rounded-2xl bg-[#5B4BFF] text-white flex items-center justify-center shadow-lg shadow-[#5B4BFF]/30 shrink-0">
+            <FileText className="w-6 h-6" />
           </div>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <h1 style={{ fontSize: '22px', fontWeight: 800, margin: 0, letterSpacing: '-0.5px' }}>
-                Client Monthly Reporting & Analytics
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-xl sm:text-2xl font-black tracking-tight text-[#101828] dark:text-white">
+                Reports & Operations Intelligence
               </h1>
-              <span style={{
-                fontSize: '10.5px', fontWeight: 700, padding: '2px 8px', borderRadius: '6px',
-                background: 'rgba(91, 75, 255, 0.15)', color: '#A5B4FC', border: '1px solid rgba(91, 75, 255, 0.3)'
-              }}>
-                Agency OS Engine
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-[#5B4BFF]/10 text-[#5B4BFF] dark:text-[#806CFF] border border-[#5B4BFF]/20">
+                Authoritative Agency OS
               </span>
             </div>
-            <p style={{ margin: '2px 0 0', fontSize: '12.5px', color: '#94A3B8' }}>
-              Unified operational reporting connecting Content Calendar, Tasks, Video Tracker, and Approvals.
+            <p className="text-xs text-[#64748B] dark:text-[#94A3B8] mt-0.5">
+              Live operational reporting synchronized across My Day, Tasks, Calendar, Work Logs, and Approvals.
             </p>
           </div>
         </div>
 
-        {/* Global Toolbar */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-          {/* Client Search & Select */}
-          <div style={{ position: 'relative', minWidth: '240px' }}>
-            <select
-              id="report-client-selector"
-              value={selectedClientId}
-              onChange={(e) => handleSelectClient(e.target.value)}
-              style={{
-                width: '100%', padding: '9px 14px', borderRadius: '10px',
-                background: '#171E31', border: '1px solid #293248', color: selectedClientId ? '#F8FAFC' : '#94A3B8',
-                fontSize: '13px', fontWeight: 600, outline: 'none', cursor: 'pointer'
-              }}
-            >
-              <option value="">-- Choose Client Account --</option>
-              {clients.map(c => (
-                <option key={c.id || (c as any).clientId} value={c.id || (c as any).clientId}>
-                  {c.clientName || c.name} {c.category ? `(${c.category})` : ''}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Month Selector */}
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: '6px', background: '#171E31',
-            padding: '6px 12px', borderRadius: '10px', border: '1px solid #293248'
-          }}>
-            <Calendar size={15} color="#5B4BFF" />
-            <input
-              id="report-month-picker"
-              type="month"
-              value={selectedMonth}
-              onChange={(e) => {
-                setSelectedMonth(e.target.value);
-                setHasGeneratedReport(false);
-              }}
-              style={{
-                background: 'transparent', border: 'none', color: '#F8FAFC',
-                fontSize: '13px', fontWeight: 700, outline: 'none', cursor: 'pointer'
-              }}
-            />
-          </div>
-
-          {/* Report Type Selector */}
-          <div style={{ minWidth: '190px' }}>
-            <select
-              id="report-type-selector"
-              value={reportType}
-              onChange={(e) => setReportType(e.target.value as ReportType)}
-              style={{
-                width: '100%', padding: '9px 12px', borderRadius: '10px',
-                background: '#171E31', border: '1px solid #293248', color: '#F8FAFC',
-                fontSize: '12.5px', fontWeight: 600, outline: 'none', cursor: 'pointer'
-              }}
-            >
-              {REPORT_TYPE_CONFIGS.map(t => (
-                <option key={t.id} value={t.id}>{t.label}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Generate Report Button */}
+        {/* Action Controls */}
+        <div className="flex items-center gap-2 flex-wrap">
           <button
-            id="generate-report-btn"
-            onClick={handleTriggerGenerateReport}
-            disabled={!selectedClientId}
-            style={{
-              padding: '9px 16px', borderRadius: '10px', border: 'none',
-              background: !selectedClientId ? '#293248' : 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
-              color: !selectedClientId ? '#64748B' : '#FFF', fontSize: '13px', fontWeight: 700,
-              cursor: !selectedClientId ? 'not-allowed' : 'pointer', display: 'flex',
-              alignItems: 'center', gap: '6px', boxShadow: selectedClientId ? '0 4px 14px rgba(16, 185, 129, 0.35)' : 'none'
-            }}
+            onClick={() => triggerPrintReport()}
+            className="px-3.5 py-2 rounded-xl bg-white dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 text-xs font-bold text-[#475467] dark:text-[#CBD5E1] hover:bg-slate-50 dark:hover:bg-white/5 transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
           >
-            <RefreshCw size={15} />
-            Generate Report
-          </button>
-
-          {/* Download Official PDF Button */}
-          <button
-            id="download-pdf-btn"
-            onClick={handleGenerateAndDownloadPDF}
-            disabled={!selectedClientId || isGeneratingPdf || !unifiedReportData}
-            style={{
-              padding: '9px 18px', borderRadius: '10px', border: 'none',
-              background: !selectedClientId ? '#293248' : 'linear-gradient(135deg, #5B4BFF 0%, #3B82F6 100%)',
-              color: !selectedClientId ? '#64748B' : '#FFF', fontSize: '13px', fontWeight: 700,
-              cursor: !selectedClientId ? 'not-allowed' : 'pointer', display: 'flex',
-              alignItems: 'center', gap: '8px', boxShadow: selectedClientId ? '0 4px 14px rgba(91, 75, 255, 0.35)' : 'none'
-            }}
-          >
-            {isGeneratingPdf ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
-            Generate & Download Official PDF
-          </button>
-
-          {/* Print Report */}
-          <button
-            id="print-report-btn"
-            onClick={handleTriggerPrint}
-            disabled={!selectedClientId || !unifiedReportData}
-            style={{
-              padding: '9px 14px', borderRadius: '10px', border: '1px solid #293248',
-              background: '#171E31', color: !selectedClientId ? '#64748B' : '#CBD5E1', fontSize: '13px', fontWeight: 600,
-              cursor: !selectedClientId ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px'
-            }}
-          >
-            <Printer size={15} />
-            Print
+            <Printer className="w-3.5 h-3.5" />
+            <span>Print Report</span>
           </button>
         </div>
       </div>
 
-      {/* ── Sub-Navigation Tabs (Unified Views of ONE Shared Dataset) ── */}
-      <div className="no-print" style={{
-        display: 'flex', gap: '6px', borderBottom: '1px solid #293248',
-        paddingBottom: '8px', marginBottom: '22px', overflowX: 'auto'
-      }}>
-        {[
-          { id: 'overview', label: 'Report Overview & A4 Preview', icon: FileText },
-          { id: 'deliverables', label: `Deliverables & Content (${unifiedReportData?.totalPlanned || 0})`, icon: Calendar },
-          { id: 'operations', label: `Operations & Tasks (${(unifiedReportData?.tasksTotal || 0) + (unifiedReportData?.videosTotal || 0)})`, icon: CheckSquare },
-          { id: 'analytics', label: 'Visual Analytics', icon: BarChart3 },
-          { id: 'team', label: `Team Delivery (${unifiedReportData?.teamContributions.length || 0})`, icon: Users },
-          { id: 'history', label: `Report History (${savedReports.length})`, icon: History },
-        ].map(t => {
-          const isActive = activeTab === t.id;
+      {/* ── PRIMARY NAVIGATION TABS ─────────────────────────────────── */}
+      <div className="flex items-center gap-1.5 overflow-x-auto py-3 border-b border-[#E2E8F0] dark:border-white/10 mb-6 scrollbar-none">
+        {TABS.map(tab => {
+          const isActive = activeMainTab === tab.id;
+          const Icon = tab.icon;
           return (
             <button
-              key={t.id}
-              id={`tab-${t.id}`}
-              onClick={() => setActiveTab(t.id as any)}
-              style={{
-                padding: '8px 16px', borderRadius: '8px', border: 'none',
-                background: isActive ? '#5B4BFF' : 'transparent',
-                color: isActive ? '#FFF' : '#94A3B8', fontSize: '13px', fontWeight: 600,
-                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '7px',
-                transition: 'all 0.2s ease', whiteSpace: 'nowrap'
-              }}
+              key={tab.id}
+              onClick={() => setActiveMainTab(tab.id)}
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shrink-0 ${
+                isActive
+                  ? 'bg-[#5B4BFF] text-white shadow-md shadow-[#5B4BFF]/25 font-black'
+                  : 'text-[#64748B] dark:text-[#94A3B8] hover:text-[#101828] dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5'
+              }`}
             >
-              <t.icon size={15} /> {t.label}
+              <Icon className="w-4 h-4" />
+              <span>{tab.label}</span>
+              {tab.count !== undefined && tab.count > 0 && (
+                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                  isActive ? 'bg-white text-[#5B4BFF]' : 'bg-rose-500 text-white'
+                }`}>
+                  {tab.count}
+                </span>
+              )}
             </button>
           );
         })}
       </div>
 
-      {/* ── STATE 1: NO CLIENT SELECTED (Do NOT show misleading zeros) ── */}
-      {!selectedClientId && (
-        <div style={{
-          background: '#171E31', border: '1px dashed #293248', borderRadius: '18px',
-          padding: '50px 30px', textAlign: 'center', maxWidth: '720px', margin: '40px auto'
-        }}>
-          <div style={{
-            width: '60px', height: '60px', borderRadius: '18px', background: 'rgba(91, 75, 255, 0.12)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 18px'
-          }}>
-            <Target size={30} color="#5B4BFF" />
-          </div>
-          <h2 style={{ fontSize: '20px', fontWeight: 800, margin: '0 0 8px', color: '#F8FAFC' }}>
-            Select a Client to Generate Monthly Report
-          </h2>
-          <p style={{ fontSize: '13.5px', color: '#94A3B8', margin: '0 auto 24px', lineHeight: 1.6, maxWidth: '540px' }}>
-            Select a client account to aggregate their live Content Calendar records, operational tasks, video production stages, and work logs for <strong>{monthLabel}</strong>.
-          </p>
+      {/* ── TAB 1: OVERVIEW (AGENCY PULSE) ──────────────────────────── */}
+      {activeMainTab === 'overview' && (
+        <div className="space-y-6 animate-in fade-in">
+          {/* Quick Filter & Global Export Bar */}
+          <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-xs flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-black uppercase tracking-wider text-[#7A8496]">Live Engine Status:</span>
+              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                Synchronized with Operational Board
+              </span>
+            </div>
 
-          {/* Quick Client Search Input */}
-          <div style={{ maxWidth: '380px', margin: '0 auto 24px', position: 'relative' }}>
-            <Search size={16} color="#64748B" style={{ position: 'absolute', left: '12px', top: '12px' }} />
-            <input
-              type="text"
-              placeholder="Search client accounts..."
-              value={clientSearchQuery}
-              onChange={(e) => setClientSearchQuery(e.target.value)}
-              style={{
-                width: '100%', padding: '10px 14px 10px 36px', borderRadius: '10px',
-                background: '#111728', border: '1px solid #293248', color: '#F8FAFC',
-                fontSize: '13px', outline: 'none'
-              }}
-            />
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-bold text-[#64748B] mr-1">Export Overview:</span>
+              <button
+                onClick={() => handleExportOverview('pdf')}
+                className="px-3 py-1.5 rounded-lg bg-[#5B4BFF]/10 text-[#5B4BFF] dark:text-[#806CFF] text-xs font-black hover:bg-[#5B4BFF] hover:text-white transition-all flex items-center gap-1 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" /> PDF
+              </button>
+              <button
+                onClick={() => handleExportOverview('xlsx')}
+                className="px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-black hover:bg-emerald-600 hover:text-white transition-all flex items-center gap-1 cursor-pointer"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" /> Excel
+              </button>
+              <button
+                onClick={() => handleExportOverview('csv')}
+                className="px-3 py-1.5 rounded-lg bg-slate-500/10 text-slate-700 dark:text-slate-300 text-xs font-black hover:bg-slate-700 hover:text-white transition-all flex items-center gap-1 cursor-pointer"
+              >
+                <FileText className="w-3.5 h-3.5" /> CSV
+              </button>
+            </div>
           </div>
 
-          {/* Quick Select Client Pills */}
-          <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
-            {filteredClients.slice(0, 6).map(c => {
-              const cid = c.id || (c as any).clientId;
+          {/* 9 Executive KPI Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+            {[
+              { label: 'Total Tasks', value: tasks.length, icon: Layers, color: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/40' },
+              { label: 'Completed Tasks', value: tasks.filter(t => t.status === 'Done').length, icon: CheckCircle2, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40' },
+              { label: 'Pending Tasks', value: tasks.filter(t => t.status !== 'Done' && t.status !== 'Cancelled').length, icon: Clock, color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/40' },
+              { label: 'Overdue Tasks', value: tasks.filter(isTaskOverdue).length, icon: AlertTriangle, color: 'text-rose-600 bg-rose-50 dark:bg-rose-950/40' },
+              { label: 'Work Logged (hrs)', value: Math.round(workLogs.reduce((a, b) => a + (Number(b.hours) || 0), 0)), icon: Award, color: 'text-blue-600 bg-blue-50 dark:bg-blue-950/40' },
+              { label: 'Deliverables Total', value: calendarEntries.length, icon: Calendar, color: 'text-purple-600 bg-purple-50 dark:bg-purple-950/40' },
+              { label: 'Published Content', value: calendarEntries.filter(e => e.status === 'Posted' || e.postedStatus === 'Posted').length, icon: Globe, color: 'text-teal-600 bg-teal-50 dark:bg-teal-950/40' },
+              { label: 'Daily Submissions', value: dailyReports.filter(r => r.date === todayKolkata && r.status !== 'Draft').length, icon: FileCheck, color: 'text-green-600 bg-green-50 dark:bg-green-950/40' },
+              { label: 'Missing Daily Reports', value: dailyTrackerRecords.filter(r => r.status === 'Pending' || r.status === 'Late').length, icon: AlertOctagon, color: 'text-red-600 bg-red-50 dark:bg-red-950/40' },
+              { label: 'Active Clients', value: clients.length, icon: Briefcase, color: 'text-cyan-600 bg-cyan-50 dark:bg-cyan-950/40' },
+            ].map((kpi, idx) => {
+              const Icon = kpi.icon;
               return (
-                <button
-                  key={cid}
-                  onClick={() => handleSelectClient(cid)}
-                  style={{
-                    padding: '8px 16px', borderRadius: '10px', border: '1px solid #293248',
-                    background: '#111728', color: '#CBD5E1', fontSize: '12.5px', fontWeight: 600,
-                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px',
-                    transition: 'all 0.15s ease'
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.borderColor = '#5B4BFF'}
-                  onMouseLeave={(e) => e.currentTarget.style.borderColor = '#293248'}
-                >
-                  <Briefcase size={13} color="#5B4BFF" />
-                  {c.clientName || c.name}
-                </button>
+                <div key={idx} className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496] block">{kpi.label}</span>
+                    <span className="text-xl font-black text-[#101828] dark:text-white mt-1 block">{kpi.value}</span>
+                  </div>
+                  <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${kpi.color}`}>
+                    <Icon className="w-5 h-5" />
+                  </div>
+                </div>
               );
             })}
           </div>
-        </div>
-      )}
 
-      {/* ── STATE 2: LOADING SOURCE DATA SKELETON ─────────────────── */}
-      {selectedClientId && sourcesLoading && (
-        <div style={{ padding: '40px 20px', textAlign: 'center', color: '#94A3B8' }}>
-          <Loader2 size={36} className="animate-spin" style={{ margin: '0 auto 16px', color: '#5B4BFF' }} />
-          <div style={{ fontSize: '16px', fontWeight: 700, color: '#F8FAFC' }}>
-            Aggregating Client OS Datasets for {selectedClient?.clientName || 'Client'}...
-          </div>
-          <div style={{ fontSize: '13px', color: '#64748B', marginTop: '6px' }}>
-            Querying Content Calendar, Tasks & Work, Video Production Pipeline, and Team Work Logs
-          </div>
-        </div>
-      )}
-
-      {/* ── STATE 3: REPORT CONTEXT LOADED (Unified Dataset) ───────── */}
-      {selectedClientId && !sourcesLoading && unifiedReportData && (
-        <div>
-          {/* Status Notification Badge if 0 qualifying records */}
-          {unifiedReportData.totalPlanned === 0 && (
-            <div style={{
-              background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)',
-              borderRadius: '12px', padding: '12px 18px', marginBottom: '20px',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <AlertTriangle size={18} color="#F59E0B" />
-                <span style={{ fontSize: '13px', color: '#FCD34D' }}>
-                  No qualifying Content Calendar deliverables found for <strong>{selectedClient?.clientName}</strong> in <strong>{monthLabel}</strong>.
-                </span>
+          {/* Department Breakdown & Active Client Table */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            {/* Team Distribution */}
+            <div className="bg-white dark:bg-[#111728] p-5 rounded-3xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
+              <h3 className="text-sm font-black text-[#101828] dark:text-white mb-3 flex items-center gap-2">
+                <Users className="w-4 h-4 text-[#5B4BFF]" />
+                <span>Team & Role Workload Distribution</span>
+              </h3>
+              <div className="space-y-3">
+                {employees.map(emp => {
+                  const empTasks = tasks.filter(t => t.assigneeId === emp.id);
+                  const completed = empTasks.filter(t => t.status === 'Done').length;
+                  const pct = empTasks.length > 0 ? Math.round((completed / empTasks.length) * 100) : 0;
+                  return (
+                    <div key={emp.id} className="p-3 rounded-xl bg-[#F8FAFC] dark:bg-[#161B31] border border-[#E2E8F0] dark:border-white/5 flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-xs font-black text-[#101828] dark:text-white">{emp.name}</div>
+                        <div className="text-[11px] text-[#64748B] dark:text-[#94A3B8]">{emp.role || 'Staff Member'}</div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <span className="text-xs font-black text-[#5B4BFF]">{completed}</span>
+                          <span className="text-[10px] text-[#64748B]"> / {empTasks.length} tasks</span>
+                        </div>
+                        <div className="w-16 bg-slate-200 dark:bg-white/10 h-2 rounded-full overflow-hidden">
+                          <div className="bg-[#5B4BFF] h-full" style={{ width: `${pct}%` }}></div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-              <span style={{ fontSize: '12px', color: '#94A3B8' }}>
-                You can switch the month selector or add new items in Content Calendar.
+            </div>
+
+            {/* Active Operational Tasks Overview */}
+            <div className="bg-white dark:bg-[#111728] p-5 rounded-3xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-black text-[#101828] dark:text-white flex items-center gap-2">
+                  <CheckSquare className="w-4 h-4 text-[#5B4BFF]" />
+                  <span>Recent Operational Tasks</span>
+                </h3>
+                <span className="text-xs text-[#64748B]">Showing latest 6</span>
+              </div>
+              <div className="divide-y divide-[#E2E8F0] dark:divide-white/5">
+                {tasks.slice(0, 6).map(t => (
+                  <div key={t.id} className="py-2.5 flex items-center justify-between gap-3 text-xs">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-bold text-[#101828] dark:text-white truncate">{t.title}</div>
+                      <div className="text-[11px] text-[#64748B] flex items-center gap-2 mt-0.5">
+                        <span>{t.clientName || 'General'}</span>
+                        <span>•</span>
+                        <span>{t.assigneeName || 'Unassigned'}</span>
+                      </div>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-black shrink-0 ${
+                      t.status === 'Done' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400' : 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-400'
+                    }`}>
+                      {t.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── TAB 2: DAILY REPORTS ─────────────────────────────────────── */}
+      {activeMainTab === 'daily' && (
+        <div className="space-y-6 animate-in fade-in">
+          {/* Daily Date & Filter Selector */}
+          <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-xs flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-2 bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-3 py-1.5">
+                <Calendar className="w-4 h-4 text-[#5B4BFF]" />
+                <input
+                  type="date"
+                  value={selectedDailyDate}
+                  onChange={e => setSelectedDailyDate(e.target.value)}
+                  className="bg-transparent text-xs font-bold outline-none text-[#101828] dark:text-white cursor-pointer"
+                />
+              </div>
+
+              <button
+                onClick={() => setSelectedDailyDate(todayKolkata)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all ${
+                  selectedDailyDate === todayKolkata ? 'bg-[#5B4BFF] text-white' : 'bg-slate-100 dark:bg-white/5 text-[#475467] dark:text-[#CBD5E1]'
+                }`}
+              >
+                Today
+              </button>
+              <button
+                onClick={() => {
+                  const d = new Date();
+                  d.setDate(d.getDate() - 1);
+                  setSelectedDailyDate(d.toISOString().split('T')[0]);
+                }}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-white/5 text-[#475467] dark:text-[#CBD5E1] hover:bg-slate-200 cursor-pointer"
+              >
+                Yesterday
+              </button>
+
+              {/* Employee Filter */}
+              <select
+                value={filterEmployeeId}
+                onChange={e => setFilterEmployeeId(e.target.value)}
+                className="bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-3 py-2 text-xs font-bold text-[#101828] dark:text-white outline-none"
+              >
+                <option value="">All Team Members</option>
+                {employees.map(e => (
+                  <option key={e.id} value={e.id}>{e.name} ({e.role || 'Staff'})</option>
+                ))}
+              </select>
+
+              {/* Client Filter */}
+              <select
+                value={filterClientId}
+                onChange={e => setFilterClientId(e.target.value)}
+                className="bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-3 py-2 text-xs font-bold text-[#101828] dark:text-white outline-none"
+              >
+                <option value="">All Clients</option>
+                {clients.map(c => (
+                  <option key={c.id || (c as any).clientId} value={c.id || (c as any).clientId}>{c.clientName || c.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Export Buttons */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => handleExportDaily('pdf')}
+                className="px-3.5 py-1.5 rounded-xl bg-[#5B4BFF]/10 text-[#5B4BFF] dark:text-[#806CFF] text-xs font-black hover:bg-[#5B4BFF] hover:text-white transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              >
+                <Download className="w-3.5 h-3.5" /> PDF
+              </button>
+              <button
+                onClick={() => handleExportDaily('xlsx')}
+                className="px-3.5 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-black hover:bg-emerald-600 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" /> Excel
+              </button>
+              <button
+                onClick={() => handleExportDaily('csv')}
+                className="px-3.5 py-1.5 rounded-xl bg-slate-500/10 text-slate-700 dark:text-slate-300 text-xs font-black hover:bg-slate-700 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              >
+                <FileText className="w-3.5 h-3.5" /> CSV
+              </button>
+            </div>
+          </div>
+
+          {/* Daily KPI Summary */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+            <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
+              <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496]">Tasks Completed</span>
+              <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1 block">{dailyRecords.completedTasks.length}</span>
+            </div>
+            <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
+              <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496]">Tasks Pending</span>
+              <span className="text-2xl font-black text-amber-600 dark:text-amber-400 mt-1 block">{dailyRecords.pendingTasks.length}</span>
+            </div>
+            <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
+              <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496]">Hours Logged</span>
+              <span className="text-2xl font-black text-[#5B4BFF] mt-1 block">{dailyRecords.totalHours} hrs</span>
+            </div>
+            <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
+              <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496]">Deliverables Published</span>
+              <span className="text-2xl font-black text-purple-600 dark:text-purple-400 mt-1 block">{dailyRecords.publishedContent.length}</span>
+            </div>
+          </div>
+
+          {/* Employee Daily Report Submission Card */}
+          <div className="bg-white dark:bg-[#111728] p-6 rounded-3xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-[#E2E8F0] dark:border-white/10">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-[#5B4BFF]/10 text-[#5B4BFF] flex items-center justify-center font-black">
+                  <Send className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-[#101828] dark:text-white">
+                    Submit Daily Report ({currentEmployee?.name || 'My Daily Entry'})
+                  </h3>
+                  <p className="text-[11px] text-[#64748B]">Reporting for work date: <strong>{selectedDailyDate}</strong></p>
+                </div>
+              </div>
+              {dailyReports.find(r => r.employeeId === currentEmployee?.id && r.date === selectedDailyDate) && (
+                <span className={`px-2.5 py-1 rounded-lg text-xs font-black uppercase tracking-wider ${
+                  dailyReports.find(r => r.employeeId === currentEmployee?.id && r.date === selectedDailyDate)?.status === 'Reviewed'
+                    ? 'bg-purple-100 text-purple-700'
+                    : dailyReports.find(r => r.employeeId === currentEmployee?.id && r.date === selectedDailyDate)?.status === 'Submitted'
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : 'bg-amber-100 text-amber-700'
+                }`}>
+                  Status: {dailyReports.find(r => r.employeeId === currentEmployee?.id && r.date === selectedDailyDate)?.status}
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">
+                  Daily Work Summary *
+                </label>
+                <textarea
+                  rows={3}
+                  value={empDailySummary}
+                  onChange={e => setEmpDailySummary(e.target.value)}
+                  placeholder="Key milestones completed today, client deliverables shipped..."
+                  className="w-full bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl p-3 text-xs font-medium outline-none focus:border-[#5B4BFF]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">
+                  Blockers or Dependencies (Optional)
+                </label>
+                <textarea
+                  rows={3}
+                  value={empDailyBlockers}
+                  onChange={e => setEmpDailyBlockers(e.target.value)}
+                  placeholder="Awaiting client asset approvals, revision requests, technical blockers..."
+                  className="w-full bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl p-3 text-xs font-medium outline-none focus:border-[#5B4BFF]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">
+                  Next Day Plan & Priorities
+                </label>
+                <textarea
+                  rows={3}
+                  value={empDailyNextPlan}
+                  onChange={e => setEmpDailyNextPlan(e.target.value)}
+                  placeholder="Top tasks planned for tomorrow..."
+                  className="w-full bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl p-3 text-xs font-medium outline-none focus:border-[#5B4BFF]"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-xs text-[#64748B]">
+                Auto-calculated today: <strong>{dailyRecords.completedTasks.length} tasks completed</strong> • <strong>{dailyRecords.totalHours} hrs logged</strong>
               </span>
-            </div>
-          )}
 
-          {/* ── TAB 1: OVERVIEW & A4 PREVIEW ────────────────────────── */}
-          {activeTab === 'overview' && (
-            <div>
-              {/* Top 4 Performance Cards (Exact Reconciled Metrics) */}
-              <div style={{
-                display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                gap: '14px', marginBottom: '24px'
-              }}>
-                <div style={{ background: '#171E31', padding: '18px 20px', borderRadius: '14px', border: '1px solid #293248' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase' }}>
-                      Total Planned Deliverables
-                    </span>
-                    <Calendar size={16} color="#5B4BFF" />
-                  </div>
-                  <div style={{ fontSize: '28px', fontWeight: 900, color: '#F8FAFC' }}>
-                    {unifiedReportData.totalPlanned}
-                  </div>
-                  <div style={{ fontSize: '11.5px', color: '#64748B', marginTop: '4px' }}>
-                    Reconciled with Content Calendar
-                  </div>
-                </div>
-
-                <div style={{ background: '#171E31', padding: '18px 20px', borderRadius: '14px', border: '1px solid #293248' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase' }}>
-                      Live / Published
-                    </span>
-                    <Globe size={16} color="#10B981" />
-                  </div>
-                  <div style={{ fontSize: '28px', fontWeight: 900, color: '#10B981' }}>
-                    {unifiedReportData.livePublished}
-                  </div>
-                  <div style={{ fontSize: '11.5px', color: '#64748B', marginTop: '4px' }}>
-                    Published to public channels
-                  </div>
-                </div>
-
-                <div style={{ background: '#171E31', padding: '18px 20px', borderRadius: '14px', border: '1px solid #293248' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase' }}>
-                      Client Approved
-                    </span>
-                    <ShieldCheck size={16} color="#3B82F6" />
-                  </div>
-                  <div style={{ fontSize: '28px', fontWeight: 900, color: '#60A5FA' }}>
-                    {unifiedReportData.clientApproved}
-                  </div>
-                  <div style={{ fontSize: '11.5px', color: '#64748B', marginTop: '4px' }}>
-                    Passed client review workflow
-                  </div>
-                </div>
-
-                <div style={{ background: '#171E31', padding: '18px 20px', borderRadius: '14px', border: '1px solid #293248' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase' }}>
-                      Active Channels
-                    </span>
-                    <Layers size={16} color="#F59E0B" />
-                  </div>
-                  <div style={{ fontSize: '28px', fontWeight: 900, color: '#FBBF24' }}>
-                    {unifiedReportData.channelsActive}
-                  </div>
-                  <div style={{ fontSize: '11.5px', color: '#64748B', marginTop: '4px' }}>
-                    {unifiedReportData.platforms.length > 0 ? unifiedReportData.platforms.join(', ') : 'Single channel'}
-                  </div>
-                </div>
-              </div>
-
-              {/* Executive Commentary & Strategic Inputs */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '20px', marginBottom: '24px' }}>
-                <div style={{ background: '#171E31', padding: '20px', borderRadius: '16px', border: '1px solid #293248' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <Sparkles size={16} color="#5B4BFF" />
-                      <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700 }}>
-                        Executive Summary / Strategic Overview
-                      </h3>
-                    </div>
-                    {/* Optional Smart AI Summary Button */}
-                    <button
-                      onClick={handleGenerateAISummary}
-                      style={{
-                        padding: '4px 10px', borderRadius: '6px', border: '1px solid rgba(91, 75, 255, 0.4)',
-                        background: 'rgba(91, 75, 255, 0.1)', color: '#A5B4FC', fontSize: '11.5px', fontWeight: 600,
-                        cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px'
-                      }}
-                    >
-                      <Sparkles size={12} /> Generate AI Draft Summary
-                    </button>
-                  </div>
-                  <textarea
-                    rows={6}
-                    value={executiveSummary}
-                    onChange={(e) => {
-                      setExecutiveSummary(e.target.value);
-                      setIsCommentaryDirty(true);
-                    }}
-                    placeholder="Enter factual strategic overview and commentary for this reporting cycle..."
-                    style={{
-                      width: '100%', padding: '12px 14px', borderRadius: '10px',
-                      background: '#111728', border: '1px solid #293248', color: '#F8FAFC',
-                      fontSize: '13px', outline: 'none', resize: 'vertical', lineHeight: 1.6
-                    }}
-                  />
-                  <div style={{ fontSize: '11px', color: '#64748B', marginTop: '6px' }}>
-                    Editable commentary will be frozen into the generated PDF and history snapshot.
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  <div style={{ background: '#171E31', padding: '18px', borderRadius: '16px', border: '1px solid #293248', flex: 1 }}>
-                    <h4 style={{ margin: '0 0 8px', fontSize: '13.5px', fontWeight: 700, color: '#10B981' }}>
-                      Top Highlights & Wins
-                    </h4>
-                    <textarea
-                      rows={3}
-                      value={highlights}
-                      onChange={(e) => {
-                        setHighlights(e.target.value);
-                        setIsCommentaryDirty(true);
-                      }}
-                      placeholder="• Highlight key accomplishments or campaign milestones..."
-                      style={{
-                        width: '100%', padding: '10px 12px', borderRadius: '8px',
-                        background: '#111728', border: '1px solid #293248', color: '#F8FAFC',
-                        fontSize: '12.5px', outline: 'none', resize: 'vertical'
-                      }}
-                    />
-                  </div>
-
-                  <div style={{ background: '#171E31', padding: '18px', borderRadius: '16px', border: '1px solid #293248', flex: 1 }}>
-                    <h4 style={{ margin: '0 0 8px', fontSize: '13.5px', fontWeight: 700, color: '#3B82F6' }}>
-                      Next Month Strategy & Deliverables
-                    </h4>
-                    <textarea
-                      rows={3}
-                      value={nextMonthStrategy}
-                      onChange={(e) => {
-                        setNextMonthStrategy(e.target.value);
-                        setIsCommentaryDirty(true);
-                      }}
-                      placeholder="• Strategic priorities, planned shoots, and upcoming themes..."
-                      style={{
-                        width: '100%', padding: '10px 12px', borderRadius: '8px',
-                        background: '#111728', border: '1px solid #293248', color: '#F8FAFC',
-                        fontSize: '12.5px', outline: 'none', resize: 'vertical'
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* ── INTERACTIVE A4 REPORT PREVIEW ──────────────────── */}
-              <div className="report-preview-sheet" style={{
-                background: '#171E31', border: '1px solid #293248', borderRadius: '18px',
-                padding: '28px', marginBottom: '24px'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #293248', paddingBottom: '14px' }}>
-                  <div>
-                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#F8FAFC' }}>
-                      Interactive A4 Report Preview
-                    </h3>
-                    <div style={{ fontSize: '12px', color: '#94A3B8', marginTop: '2px' }}>
-                      Review layout before exporting official PDF or printing.
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button
-                      onClick={handleSaveReportDraft}
-                      disabled={isSavingDraft}
-                      style={{
-                        padding: '7px 14px', borderRadius: '8px', border: '1px solid #293248',
-                        background: '#111728', color: '#CBD5E1', fontSize: '12px', fontWeight: 600,
-                        cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px'
-                      }}
-                    >
-                      <Bookmark size={14} color="#5B4BFF" />
-                      Save Snapshot Draft
-                    </button>
-                    <button
-                      onClick={handleGenerateAndDownloadPDF}
-                      disabled={isGeneratingPdf}
-                      style={{
-                        padding: '7px 16px', borderRadius: '8px', border: 'none',
-                        background: 'linear-gradient(135deg, #5B4BFF 0%, #3B82F6 100%)',
-                        color: '#FFF', fontSize: '12px', fontWeight: 700,
-                        cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px'
-                      }}
-                    >
-                      <Download size={14} />
-                      Export Official PDF
-                    </button>
-                  </div>
-                </div>
-
-                {/* Simulated A4 Container */}
-                <div style={{
-                  background: '#0F172A', border: '1px solid #334155', borderRadius: '12px',
-                  padding: '24px', maxWidth: '900px', margin: '0 auto', boxShadow: '0 12px 40px rgba(0,0,0,0.4)'
-                }}>
-                  {/* Header Banner */}
-                  <div style={{ borderBottom: '2px solid #5B4BFF', paddingBottom: '16px', marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <div>
-                      <div style={{ fontSize: '20px', fontWeight: 900, color: '#FFF' }}>DIGIEXPLODE<span style={{ color: '#06B6D4' }}>AI</span></div>
-                      <div style={{ fontSize: '11px', color: '#94A3B8', textTransform: 'uppercase', letterSpacing: '1px' }}>Strategy • Creative • Operations</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontSize: '14px', fontWeight: 800, color: '#5B4BFF' }}>{selectedClient.clientName || selectedClient.name}</div>
-                      <div style={{ fontSize: '12px', color: '#CBD5E1', fontWeight: 600 }}>{monthLabel}</div>
-                      <div style={{ fontSize: '10.5px', color: '#64748B', fontFamily: 'monospace' }}>Ref: DEA/REPORT/{selectedMonth.replace('-', '/')}/DRAFT</div>
-                    </div>
-                  </div>
-
-                  {/* Summary Box */}
-                  <div style={{ background: 'rgba(91, 75, 255, 0.08)', border: '1px solid rgba(91, 75, 255, 0.2)', borderRadius: '10px', padding: '14px', marginBottom: '18px' }}>
-                    <div style={{ fontSize: '12px', fontWeight: 800, color: '#A5B4FC', marginBottom: '6px', textTransform: 'uppercase' }}>Executive Audit Narrative</div>
-                    <div style={{ fontSize: '12.5px', color: '#E2E8F0', lineHeight: 1.6 }}>{executiveSummary}</div>
-                  </div>
-
-                  {/* Metrics Snapshot Grid */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '18px', textAlign: 'center' }}>
-                    <div style={{ background: '#1E293B', padding: '12px', borderRadius: '8px' }}>
-                      <div style={{ fontSize: '10px', color: '#94A3B8', fontWeight: 700 }}>PLANNED</div>
-                      <div style={{ fontSize: '20px', fontWeight: 900, color: '#5B4BFF' }}>{unifiedReportData.totalPlanned}</div>
-                    </div>
-                    <div style={{ background: '#1E293B', padding: '12px', borderRadius: '8px' }}>
-                      <div style={{ fontSize: '10px', color: '#94A3B8', fontWeight: 700 }}>PUBLISHED</div>
-                      <div style={{ fontSize: '20px', fontWeight: 900, color: '#10B981' }}>{unifiedReportData.livePublished}</div>
-                    </div>
-                    <div style={{ background: '#1E293B', padding: '12px', borderRadius: '8px' }}>
-                      <div style={{ fontSize: '10px', color: '#94A3B8', fontWeight: 700 }}>APPROVED</div>
-                      <div style={{ fontSize: '20px', fontWeight: 900, color: '#3B82F6' }}>{unifiedReportData.clientApproved}</div>
-                    </div>
-                    <div style={{ background: '#1E293B', padding: '12px', borderRadius: '8px' }}>
-                      <div style={{ fontSize: '10px', color: '#94A3B8', fontWeight: 700 }}>CHANNELS</div>
-                      <div style={{ fontSize: '20px', fontWeight: 900, color: '#F59E0B' }}>{unifiedReportData.channelsActive}</div>
-                    </div>
-                  </div>
-
-                  {/* Deliverables Snippet */}
-                  <div style={{ marginBottom: '18px' }}>
-                    <div style={{ fontSize: '12px', fontWeight: 800, color: '#94A3B8', marginBottom: '8px', textTransform: 'uppercase' }}>
-                      Content Deliverables ({unifiedReportData.deliverables.length})
-                    </div>
-                    {unifiedReportData.deliverables.length === 0 ? (
-                      <div style={{ fontSize: '12px', color: '#64748B', fontStyle: 'italic' }}>No content items scheduled for this month.</div>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        {unifiedReportData.deliverables.slice(0, 5).map(item => (
-                          <div key={item.contentId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#1E293B', padding: '8px 12px', borderRadius: '6px', fontSize: '12px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <span style={{ color: '#94A3B8', fontFamily: 'monospace' }}>{item.date}</span>
-                              <span style={{ fontWeight: 600, color: '#F8FAFC' }}>{item.topic}</span>
-                            </div>
-                            <span style={{ color: item.status === 'Posted' ? '#10B981' : '#60A5FA', fontSize: '11px', fontWeight: 700 }}>{item.status}</span>
-                          </div>
-                        ))}
-                        {unifiedReportData.deliverables.length > 5 && (
-                          <div style={{ fontSize: '11px', color: '#64748B', textAlign: 'center', marginTop: '4px' }}>
-                            + {unifiedReportData.deliverables.length - 5} more deliverables included in full report
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Next Steps */}
-                  <div style={{ background: '#1E293B', padding: '12px', borderRadius: '8px', fontSize: '12px', color: '#CBD5E1', borderLeft: '3px solid #10B981' }}>
-                    <strong style={{ color: '#10B981' }}>Next Month Focus:</strong> {nextMonthStrategy}
-                  </div>
-
-                  {/* Mandatory System Footer */}
-                  <div style={{ marginTop: '20px', borderTop: '1px solid #334155', paddingTop: '10px', fontSize: '10px', color: '#64748B', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span>This report was generated through Digiexplode Agency OS using recorded operational data for the selected reporting period.</span>
-                    <span>Page 1 of A4 Document</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── TAB 2: DELIVERABLES & CONTENT (Reconciled with Calendar) ─ */}
-          {activeTab === 'deliverables' && (
-            <div style={{ background: '#171E31', borderRadius: '16px', border: '1px solid #293248', padding: '22px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', flexWrap: 'wrap', gap: '10px' }}>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>
-                    Content Calendar Deliverables ({unifiedReportData.deliverables.length})
-                  </h3>
-                  <div style={{ fontSize: '12.5px', color: '#94A3B8', marginTop: '2px' }}>
-                    Every item below directly reconciles with the Total Planned metric ({unifiedReportData.totalPlanned}) for {monthLabel}.
-                  </div>
-                </div>
-                <span style={{ fontSize: '12px', color: '#60A5FA', background: 'rgba(59,130,246,0.12)', padding: '4px 10px', borderRadius: '6px', border: '1px solid rgba(59,130,246,0.3)' }}>
-                  {unifiedReportData.livePublished} Posted • {unifiedReportData.clientApproved} Approved
-                </span>
-              </div>
-
-              {unifiedReportData.deliverables.length === 0 ? (
-                <div style={{ padding: '50px 20px', textAlign: 'center', color: '#64748B' }}>
-                  <Calendar size={36} style={{ margin: '0 auto 10px', opacity: 0.4 }} />
-                  <div style={{ fontSize: '14px', fontWeight: 600, color: '#94A3B8' }}>No deliverables scheduled for {monthLabel}</div>
-                  <div style={{ fontSize: '12px', color: '#64748B', marginTop: '4px' }}>Add items in the Content Calendar module to include them in this client's monthly report.</div>
-                </div>
-              ) : (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid #293248', color: '#94A3B8', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                        <th style={{ padding: '12px 14px' }}>Date</th>
-                        <th style={{ padding: '12px 14px' }}>Topic / Deliverable</th>
-                        <th style={{ padding: '12px 14px' }}>Type</th>
-                        <th style={{ padding: '12px 14px' }}>Platform</th>
-                        <th style={{ padding: '12px 14px' }}>Assignee</th>
-                        <th style={{ padding: '12px 14px' }}>Status</th>
-                        <th style={{ padding: '12px 14px' }}>Approval</th>
-                        <th style={{ padding: '12px 14px', textAlign: 'right' }}>Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {unifiedReportData.deliverables.map((item) => (
-                        <tr
-                          key={item.contentId}
-                          style={{ borderBottom: '1px solid rgba(41, 50, 72, 0.6)', cursor: 'pointer' }}
-                          onClick={() => setSelectedDeliverableModal(item)}
-                        >
-                          <td style={{ padding: '12px 14px', color: '#CBD5E1', fontFamily: 'monospace', fontSize: '12px' }}>
-                            {item.date}
-                          </td>
-                          <td style={{ padding: '12px 14px', fontWeight: 600, color: '#F8FAFC' }}>
-                            {item.topic}
-                          </td>
-                          <td style={{ padding: '12px 14px', color: '#94A3B8' }}>
-                            {item.contentType || 'Static Post'}
-                          </td>
-                          <td style={{ padding: '12px 14px', color: '#60A5FA', fontWeight: 600 }}>
-                            {item.platform || 'Instagram'}
-                          </td>
-                          <td style={{ padding: '12px 14px', color: '#CBD5E1' }}>
-                            {item.assigneeName || 'Unassigned'}
-                          </td>
-                          <td style={{ padding: '12px 14px' }}>
-                            <span style={{
-                              padding: '3px 8px', borderRadius: '5px', fontSize: '11px', fontWeight: 700,
-                              background: item.status === 'Posted' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)',
-                              color: item.status === 'Posted' ? '#10B981' : '#60A5FA'
-                            }}>
-                              {item.status}
-                            </span>
-                          </td>
-                          <td style={{ padding: '12px 14px' }}>
-                            <span style={{
-                              padding: '3px 8px', borderRadius: '5px', fontSize: '11px', fontWeight: 700,
-                              background: item.clientApprovalStatus === 'Approved' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
-                              color: item.clientApprovalStatus === 'Approved' ? '#10B981' : '#FBBF24'
-                            }}>
-                              {item.clientApprovalStatus || 'Pending'}
-                            </span>
-                          </td>
-                          <td style={{ padding: '12px 14px', textAlign: 'right' }}>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedDeliverableModal(item);
-                              }}
-                              style={{
-                                padding: '4px 8px', borderRadius: '6px', border: '1px solid #293248',
-                                background: '#111728', color: '#94A3B8', fontSize: '11px', cursor: 'pointer'
-                              }}
-                            >
-                              <Eye size={12} /> View
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ── TAB 3: OPERATIONS & TASKS ────────────────────────────── */}
-          {activeTab === 'operations' && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-              {/* Tasks Breakdown */}
-              <div style={{ background: '#171E31', padding: '22px', borderRadius: '16px', border: '1px solid #293248' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <CheckSquare size={17} color="#3B82F6" />
-                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700 }}>Client Tasks ({unifiedReportData.tasks.length})</h3>
-                  </div>
-                  <span style={{ fontSize: '12px', color: '#10B981', fontWeight: 700, background: 'rgba(16,185,129,0.1)', padding: '2px 8px', borderRadius: '6px' }}>
-                    {unifiedReportData.tasksCompleted} Completed
-                  </span>
-                </div>
-                {unifiedReportData.tasks.length === 0 ? (
-                  <div style={{ padding: '30px', textAlign: 'center', color: '#64748B', fontSize: '13px' }}>
-                    No client-specific tasks recorded.
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {unifiedReportData.tasks.map(t => (
-                      <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#111728', padding: '10px 14px', borderRadius: '8px', border: '1px solid #293248' }}>
-                        <div>
-                          <div style={{ fontSize: '13px', fontWeight: 600, color: '#F8FAFC' }}>{t.title || t.name}</div>
-                          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>{t.assigneeName || 'Assigned'} • Due: {t.dueDate || 'Ongoing'}</div>
-                        </div>
-                        <span style={{
-                          fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '4px',
-                          color: t.status === 'Done' ? '#10B981' : '#FBBF24',
-                          background: t.status === 'Done' ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)'
-                        }}>
-                          {t.status}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Video Production Pipeline */}
-              <div style={{ background: '#171E31', padding: '22px', borderRadius: '16px', border: '1px solid #293248' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <Video size={17} color="#8B5CF6" />
-                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700 }}>Video Studio Tracker ({unifiedReportData.videos.length})</h3>
-                  </div>
-                  <span style={{ fontSize: '12px', color: '#8B5CF6', fontWeight: 700, background: 'rgba(139,92,246,0.1)', padding: '2px 8px', borderRadius: '6px' }}>
-                    {unifiedReportData.videosFinished} Ready Assets
-                  </span>
-                </div>
-                {unifiedReportData.videos.length === 0 ? (
-                  <div style={{ padding: '30px', textAlign: 'center', color: '#64748B', fontSize: '13px' }}>
-                    No video shoots or studio tasks linked to this client.
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {unifiedReportData.videos.map(v => (
-                      <div key={v.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#111728', padding: '10px 14px', borderRadius: '8px', border: '1px solid #293248' }}>
-                        <div>
-                          <div style={{ fontSize: '13px', fontWeight: 600, color: '#F8FAFC' }}>{v.title || v.topic || 'Video Project'}</div>
-                          <div style={{ fontSize: '11px', color: '#64748B', marginTop: '2px' }}>Editor: {v.editorName || v.assigneeName || 'Studio'} • Shoot: {v.shotDate || v.date || 'TBD'}</div>
-                        </div>
-                        <span style={{ fontSize: '11px', fontWeight: 700, color: '#C084FC', background: 'rgba(139,92,246,0.15)', padding: '2px 8px', borderRadius: '4px' }}>
-                          {v.status || 'In Production'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* ── TAB 4: VISUAL ANALYTICS ─────────────────────────────── */}
-          {activeTab === 'analytics' && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-              <div style={{ background: '#171E31', padding: '22px', borderRadius: '16px', border: '1px solid #293248' }}>
-                <h3 style={{ margin: '0 0 16px', fontSize: '15px', fontWeight: 700 }}>Deliverables by Content Type</h3>
-                {unifiedReportData.totalPlanned === 0 ? (
-                  <div style={{ padding: '40px', textAlign: 'center', color: '#64748B' }}>No content data available to graph.</div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    {['Static Post', 'Reel', 'Carousel', 'Story', 'Video', 'YouTube Short'].map(type => {
-                      const count = unifiedReportData.deliverables.filter(d => d.contentType === type).length;
-                      if (count === 0) return null;
-                      const pct = unifiedReportData.totalPlanned > 0 ? Math.round((count / unifiedReportData.totalPlanned) * 100) : 0;
-                      return (
-                        <div key={type}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12.5px', marginBottom: '4px' }}>
-                            <span style={{ color: '#CBD5E1' }}>{type}</span>
-                            <span style={{ fontWeight: 700, color: '#F8FAFC' }}>{count} items ({pct}%)</span>
-                          </div>
-                          <div style={{ height: '7px', background: '#111728', borderRadius: '4px', overflow: 'hidden' }}>
-                            <div style={{ width: `${pct}%`, height: '100%', background: '#5B4BFF' }} />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              <div style={{ background: '#171E31', padding: '22px', borderRadius: '16px', border: '1px solid #293248' }}>
-                <h3 style={{ margin: '0 0 16px', fontSize: '15px', fontWeight: 700 }}>Channel Distribution</h3>
-                {unifiedReportData.totalPlanned === 0 ? (
-                  <div style={{ padding: '40px', textAlign: 'center', color: '#64748B' }}>No platform data available to graph.</div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    {['Instagram', 'Facebook', 'YouTube', 'LinkedIn', 'Website', 'Google Business Profile'].map(platform => {
-                      const count = unifiedReportData.deliverables.filter(d => d.platform === platform).length;
-                      if (count === 0) return null;
-                      const pct = unifiedReportData.totalPlanned > 0 ? Math.round((count / unifiedReportData.totalPlanned) * 100) : 0;
-                      return (
-                        <div key={platform}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12.5px', marginBottom: '4px' }}>
-                            <span style={{ color: '#CBD5E1' }}>{platform}</span>
-                            <span style={{ fontWeight: 700, color: '#F8FAFC' }}>{count} items ({pct}%)</span>
-                          </div>
-                          <div style={{ height: '7px', background: '#111728', borderRadius: '4px', overflow: 'hidden' }}>
-                            <div style={{ width: `${pct}%`, height: '100%', background: '#3B82F6' }} />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* ── TAB 5: TEAM DELIVERY CONTRIBUTION ───────────────────── */}
-          {activeTab === 'team' && (
-            <div style={{ background: '#171E31', padding: '22px', borderRadius: '16px', border: '1px solid #293248' }}>
-              <div style={{ marginBottom: '18px' }}>
-                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>
-                  Team Delivery Contribution — {selectedClient.clientName || selectedClient.name}
-                </h3>
-                <div style={{ fontSize: '12.5px', color: '#94A3B8', marginTop: '2px' }}>
-                  Attribution of specialist tasks, deliverables handled, and work logs for {monthLabel}.
-                </div>
-              </div>
-
-              {unifiedReportData.teamContributions.length === 0 ? (
-                <div style={{ padding: '50px', textAlign: 'center', color: '#64748B' }}>
-                  <Users size={36} style={{ margin: '0 auto 10px', opacity: 0.4 }} />
-                  <div style={{ fontSize: '14px', color: '#94A3B8' }}>No team contributions logged for this client in {monthLabel}.</div>
-                </div>
-              ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px' }}>
-                  {unifiedReportData.teamContributions.map(tc => (
-                    <div key={tc.employeeName} style={{ background: '#111728', padding: '18px', borderRadius: '14px', border: '1px solid #293248' }}>
-                      <div style={{ fontWeight: 800, fontSize: '15px', color: '#F8FAFC', marginBottom: '2px' }}>{tc.employeeName}</div>
-                      <div style={{ fontSize: '12px', color: '#94A3B8', marginBottom: '14px' }}>{tc.role}</div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12.5px', color: '#CBD5E1', borderTop: '1px solid #293248', paddingTop: '10px' }}>
-                        <span>Deliverables Handled:</span>
-                        <strong style={{ color: '#5B4BFF' }}>{tc.deliverablesCount}</strong>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12.5px', color: '#CBD5E1', marginTop: '6px' }}>
-                        <span>Logged Work Hours:</span>
-                        <strong style={{ color: '#10B981' }}>{tc.hoursLogged} hrs</strong>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ── TAB 6: REPORT HISTORY ───────────────────────────────── */}
-          {activeTab === 'history' && (
-            <div style={{ background: '#171E31', padding: '22px', borderRadius: '16px', border: '1px solid #293248' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>
-                    Finalized Report History ({savedReports.length})
-                  </h3>
-                  <div style={{ fontSize: '12px', color: '#94A3B8', marginTop: '2px' }}>
-                    Immutable historical report snapshots stored in database.
-                  </div>
-                </div>
-              </div>
-
-              {savedReports.length === 0 ? (
-                <div style={{ padding: '50px 20px', textAlign: 'center', color: '#64748B' }}>
-                  <History size={36} style={{ margin: '0 auto 10px', opacity: 0.4 }} />
-                  <div style={{ fontSize: '14px', fontWeight: 600, color: '#94A3B8' }}>No saved reports in history yet.</div>
-                  <div style={{ fontSize: '12px', color: '#64748B', marginTop: '4px' }}>Click "Generate & Download Official PDF" or "Save Snapshot Draft" to create a permanent history record.</div>
-                </div>
-              ) : (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid #293248', color: '#94A3B8', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                        <th style={{ padding: '12px 14px' }}>Report Reference</th>
-                        <th style={{ padding: '12px 14px' }}>Client Account</th>
-                        <th style={{ padding: '12px 14px' }}>Month</th>
-                        <th style={{ padding: '12px 14px' }}>PDF Status</th>
-                        <th style={{ padding: '12px 14px' }}>Generated By</th>
-                        <th style={{ padding: '12px 14px' }}>Deliverables</th>
-                        <th style={{ padding: '12px 14px', textAlign: 'right' }}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {savedReports.map(sr => {
-                        const isRepairedOrValid = sr.pdf_status === 'valid';
-                        const isInvalid = sr.pdf_status === 'invalid';
-                        const isRegenerating = regeneratingId === sr.id;
-
-                        return (
-                          <tr key={sr.id || sr.reportReference} style={{ borderBottom: '1px solid rgba(41, 50, 72, 0.6)' }}>
-                            <td style={{ padding: '12px 14px', fontWeight: 700, fontFamily: 'monospace', color: '#5B4BFF' }}>
-                              {sr.reportReference}
-                            </td>
-                            <td style={{ padding: '12px 14px', fontWeight: 600, color: '#F8FAFC' }}>
-                              {sr.clientName}
-                            </td>
-                            <td style={{ padding: '12px 14px', color: '#94A3B8' }}>
-                              {sr.month}
-                            </td>
-                            <td style={{ padding: '12px 14px' }}>
-                              {isRepairedOrValid ? (
-                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 600, color: '#10B981', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.25)', padding: '2px 8px', borderRadius: '4px' }}>
-                                  <Check size={11} /> Valid A4 PDF
-                                </span>
-                              ) : isInvalid ? (
-                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 600, color: '#EF4444', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)', padding: '2px 8px', borderRadius: '4px' }}>
-                                  <AlertCircle size={11} /> Corrupt / Broken
-                                </span>
-                              ) : (
-                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 600, color: '#F59E0B', background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.25)', padding: '2px 8px', borderRadius: '4px' }}>
-                                  <Sparkles size={11} /> Legacy Snapshot
-                                </span>
-                              )}
-                            </td>
-                            <td style={{ padding: '12px 14px', fontSize: '12px', color: '#64748B' }}>
-                              {sr.generatedBy} on {new Date(sr.generatedAt).toLocaleDateString()}
-                            </td>
-                            <td style={{ padding: '12px 14px', fontWeight: 700, color: '#10B981' }}>
-                              {sr.metrics?.totalPlanned || 0} planned
-                            </td>
-                            <td style={{ padding: '12px 14px', textAlign: 'right' }}>
-                              <div style={{ display: 'inline-flex', gap: '6px' }}>
-                                <button
-                                  onClick={() => setViewingSnapshot(sr)}
-                                  style={{
-                                    padding: '5px 10px', borderRadius: '6px', border: '1px solid #293248',
-                                    background: '#111728', color: '#60A5FA', fontSize: '11.5px', fontWeight: 600,
-                                    cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px'
-                                  }}
-                                >
-                                  <Eye size={12} /> Open
-                                </button>
-                                <button
-                                  onClick={() => handleDownloadHistoricalPdf(sr)}
-                                  style={{
-                                    padding: '5px 10px', borderRadius: '6px', border: '1px solid #293248',
-                                    background: '#111728', color: '#10B981', fontSize: '11.5px', fontWeight: 600,
-                                    cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px'
-                                  }}
-                                >
-                                  <Download size={12} /> PDF
-                                </button>
-                                <button
-                                  onClick={() => handleRegeneratePdfForSnapshot(sr)}
-                                  disabled={isRegenerating}
-                                  title="Regenerate & Repair PDF for this historical record"
-                                  style={{
-                                    padding: '5px 10px', borderRadius: '6px', border: '1px solid rgba(91,75,255,0.4)',
-                                    background: 'rgba(91,75,255,0.15)', color: '#A5B4FC', fontSize: '11.5px', fontWeight: 600,
-                                    cursor: isRegenerating ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px'
-                                  }}
-                                >
-                                  <RefreshCw size={12} className={isRegenerating ? 'animate-spin' : ''} /> {isRegenerating ? 'Repairing...' : 'Repair'}
-                                </button>
-                                {isSuperAdmin && (
-                                  <button
-                                    onClick={() => handleDeleteHistoricalReport(sr.id, sr.reportReference)}
-                                    style={{
-                                      padding: '5px 8px', borderRadius: '6px', border: '1px solid #293248',
-                                      background: '#111728', color: '#EF4444', fontSize: '11.5px', cursor: 'pointer'
-                                    }}
-                                    title="Delete Record"
-                                  >
-                                    <Trash2 size={12} />
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── MODAL: HISTORICAL SNAPSHOT FULL VIEWER ──────────────────── */}
-      {viewingSnapshot && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)',
-          zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px'
-        }}>
-          <div style={{
-            background: '#171E31', border: '1px solid #293248', borderRadius: '18px',
-            width: '100%', maxWidth: '820px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden'
-          }}>
-            <div style={{ padding: '18px 24px', borderBottom: '1px solid #293248', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#F8FAFC' }}>
-                  Frozen Report Snapshot · {viewingSnapshot.reportReference}
-                </h3>
-                <div style={{ fontSize: '12px', color: '#94A3B8', marginTop: '2px' }}>
-                  {viewingSnapshot.clientName} ({viewingSnapshot.month}) — Finalized by {viewingSnapshot.generatedBy}
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={() => handleDownloadHistoricalPdf(viewingSnapshot)}
-                  style={{
-                    padding: '6px 12px', borderRadius: '8px', border: 'none',
-                    background: '#5B4BFF', color: '#FFF', fontSize: '12px', fontWeight: 700,
-                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px'
-                  }}
+                  type="button"
+                  disabled={isSubmittingDaily || !empDailySummary.trim()}
+                  onClick={() => handleSaveOrSubmitDaily(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-white/10 text-xs font-bold text-[#475467] dark:text-[#CBD5E1] hover:bg-slate-200 transition-all cursor-pointer"
                 >
-                  <Download size={13} /> Download PDF
+                  Save as Draft
                 </button>
-                <button onClick={() => setViewingSnapshot(null)} style={{ background: 'transparent', border: 'none', color: '#94A3B8', cursor: 'pointer' }}>
-                  <X size={20} />
+                <button
+                  type="button"
+                  disabled={isSubmittingDaily || !empDailySummary.trim()}
+                  onClick={() => handleSaveOrSubmitDaily(true)}
+                  className="px-5 py-2 rounded-xl bg-[#5B4BFF] hover:bg-[#4E3FE6] text-white text-xs font-black shadow-md shadow-[#5B4BFF]/25 transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  {isSubmittingDaily ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  <span>Submit Daily Report</span>
                 </button>
               </div>
             </div>
+          </div>
 
-            <div style={{ flex: 1, overflowY: 'auto', padding: '22px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '18px', textAlign: 'center' }}>
-                <div style={{ background: '#111728', padding: '12px', borderRadius: '10px' }}>
-                  <div style={{ fontSize: '10px', color: '#94A3B8', fontWeight: 700 }}>PLANNED</div>
-                  <div style={{ fontSize: '20px', fontWeight: 900, color: '#5B4BFF' }}>{viewingSnapshot.metrics?.totalPlanned}</div>
-                </div>
-                <div style={{ background: '#111728', padding: '12px', borderRadius: '10px' }}>
-                  <div style={{ fontSize: '10px', color: '#94A3B8', fontWeight: 700 }}>PUBLISHED</div>
-                  <div style={{ fontSize: '20px', fontWeight: 900, color: '#10B981' }}>{viewingSnapshot.metrics?.livePublished}</div>
-                </div>
-                <div style={{ background: '#111728', padding: '12px', borderRadius: '10px' }}>
-                  <div style={{ fontSize: '10px', color: '#94A3B8', fontWeight: 700 }}>APPROVED</div>
-                  <div style={{ fontSize: '20px', fontWeight: 900, color: '#3B82F6' }}>{viewingSnapshot.metrics?.clientApproved}</div>
-                </div>
-                <div style={{ background: '#111728', padding: '12px', borderRadius: '10px' }}>
-                  <div style={{ fontSize: '10px', color: '#94A3B8', fontWeight: 700 }}>CHANNELS</div>
-                  <div style={{ fontSize: '20px', fontWeight: 900, color: '#F59E0B' }}>{viewingSnapshot.metrics?.channelsActive}</div>
-                </div>
+          {/* Operational Tasks for Selected Date */}
+          <div className="bg-white dark:bg-[#111728] p-5 rounded-3xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
+            <h3 className="text-sm font-black text-[#101828] dark:text-white mb-3">
+              Operational Tasks on {selectedDailyDate} ({dailyRecords.tasks.length})
+            </h3>
+            {dailyRecords.tasks.length === 0 ? (
+              <p className="text-xs text-[#64748B] py-4 text-center">No tasks scheduled or completed on this date.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-[#F8FAFC] dark:bg-[#161B31] text-[10px] font-black uppercase text-[#7A8496] border-b border-[#E2E8F0] dark:border-white/10">
+                    <tr>
+                      <th className="py-2 px-3">Task Title</th>
+                      <th className="py-2 px-3">Client</th>
+                      <th className="py-2 px-3">Assignee</th>
+                      <th className="py-2 px-3">Category</th>
+                      <th className="py-2 px-3">Status</th>
+                      <th className="py-2 px-3">Priority</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#E2E8F0] dark:divide-white/5 font-medium">
+                    {dailyRecords.tasks.map(t => (
+                      <tr key={t.id} className="hover:bg-slate-50/50 dark:hover:bg-white/5">
+                        <td className="py-2.5 px-3 font-bold text-[#101828] dark:text-white">{t.title}</td>
+                        <td className="py-2.5 px-3">{t.clientName || 'General'}</td>
+                        <td className="py-2.5 px-3">{t.assigneeName || 'Unassigned'}</td>
+                        <td className="py-2.5 px-3">{t.category}</td>
+                        <td className="py-2.5 px-3">
+                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                            t.status === 'Done' ? 'bg-emerald-50 text-emerald-700' : 'bg-indigo-50 text-indigo-700'
+                          }`}>
+                            {t.status}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3">{t.priority}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-
-              <div style={{ background: '#111728', padding: '16px', borderRadius: '12px', marginBottom: '14px' }}>
-                <div style={{ fontSize: '12px', fontWeight: 800, color: '#A5B4FC', marginBottom: '6px' }}>Executive Summary</div>
-                <div style={{ fontSize: '13px', color: '#CBD5E1', lineHeight: 1.6 }}>{viewingSnapshot.executiveSummary}</div>
-              </div>
-
-              <div style={{ background: '#111728', padding: '16px', borderRadius: '12px', marginBottom: '14px' }}>
-                <div style={{ fontSize: '12px', fontWeight: 800, color: '#10B981', marginBottom: '6px' }}>Top Highlights & Wins</div>
-                <div style={{ fontSize: '13px', color: '#CBD5E1', lineHeight: 1.6, whiteSpace: 'pre-line' }}>{viewingSnapshot.highlights}</div>
-              </div>
-
-              <div style={{ background: '#111728', padding: '16px', borderRadius: '12px' }}>
-                <div style={{ fontSize: '12px', fontWeight: 800, color: '#3B82F6', marginBottom: '6px' }}>Next Month Strategy</div>
-                <div style={{ fontSize: '13px', color: '#CBD5E1', lineHeight: 1.6, whiteSpace: 'pre-line' }}>{viewingSnapshot.nextMonthStrategy}</div>
-              </div>
-            </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* ── MODAL: DELIVERABLE DETAILS VIEWER ──────────────────────── */}
-      {selectedDeliverableModal && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)',
-          zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px'
-        }}>
-          <div style={{
-            background: '#171E31', border: '1px solid #293248', borderRadius: '18px',
-            width: '100%', maxWidth: '580px', overflow: 'hidden'
-          }}>
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid #293248', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#F8FAFC' }}>
-                  {selectedDeliverableModal.topic}
-                </h3>
-                <div style={{ fontSize: '12px', color: '#94A3B8', marginTop: '2px' }}>
-                  {selectedDeliverableModal.platform} • {selectedDeliverableModal.contentType}
-                </div>
+      {/* ── TAB 3: WEEKLY REPORTS ────────────────────────────────────── */}
+      {activeMainTab === 'weekly' && (
+        <div className="space-y-6 animate-in fade-in">
+          {/* Week Selector Bar */}
+          <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-xs flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => {
+                  const d = new Date(selectedWeekStart);
+                  d.setDate(d.getDate() - 7);
+                  setSelectedWeekStart(d.toISOString().split('T')[0]);
+                }}
+                className="p-2 rounded-xl bg-slate-100 dark:bg-white/5 text-[#475467] hover:bg-slate-200 cursor-pointer"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <div className="text-center">
+                <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496] block">Weekly Sprint</span>
+                <span className="text-xs font-black text-[#101828] dark:text-white">{weeklyRecords.startDate} to {weeklyRecords.endDate}</span>
               </div>
-              <button onClick={() => setSelectedDeliverableModal(null)} style={{ background: 'transparent', border: 'none', color: '#94A3B8', cursor: 'pointer' }}>
-                <X size={20} />
+              <button
+                onClick={() => {
+                  const d = new Date(selectedWeekStart);
+                  d.setDate(d.getDate() + 7);
+                  setSelectedWeekStart(d.toISOString().split('T')[0]);
+                }}
+                className="p-2 rounded-xl bg-slate-100 dark:bg-white/5 text-[#475467] hover:bg-slate-200 cursor-pointer"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+              <button
+                onClick={() => setSelectedWeekStart(currentWeekMonday)}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#5B4BFF]/10 text-[#5B4BFF] cursor-pointer"
+              >
+                Current Week
               </button>
             </div>
 
-            <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                <div style={{ background: '#111728', padding: '10px', borderRadius: '8px' }}>
-                  <div style={{ fontSize: '10.5px', color: '#94A3B8' }}>DATE</div>
-                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#F8FAFC' }}>{selectedDeliverableModal.date}</div>
+            {/* Export buttons */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <button onClick={() => handleExportWeekly('pdf')} className="px-3.5 py-1.5 rounded-xl bg-[#5B4BFF]/10 text-[#5B4BFF] text-xs font-black hover:bg-[#5B4BFF] hover:text-white transition-all flex items-center gap-1 cursor-pointer">
+                <Download className="w-3.5 h-3.5" /> PDF
+              </button>
+              <button onClick={() => handleExportWeekly('xlsx')} className="px-3.5 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-600 text-xs font-black hover:bg-emerald-600 hover:text-white transition-all flex items-center gap-1 cursor-pointer">
+                <FileSpreadsheet className="w-3.5 h-3.5" /> Excel
+              </button>
+              <button onClick={() => handleExportWeekly('csv')} className="px-3.5 py-1.5 rounded-xl bg-slate-500/10 text-slate-700 text-xs font-black hover:bg-slate-700 hover:text-white transition-all flex items-center gap-1 cursor-pointer">
+                <FileText className="w-3.5 h-3.5" /> CSV
+              </button>
+            </div>
+          </div>
+
+          {/* Weekly KPI Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+            <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
+              <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496]">Tasks Completed</span>
+              <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1 block">{weeklyRecords.completedTasks.length}</span>
+            </div>
+            <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
+              <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496]">Tasks Pending</span>
+              <span className="text-2xl font-black text-amber-600 dark:text-amber-400 mt-1 block">{weeklyRecords.pendingTasks.length}</span>
+            </div>
+            <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
+              <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496]">Total Work Hours</span>
+              <span className="text-2xl font-black text-[#5B4BFF] mt-1 block">{weeklyRecords.totalHours} hrs</span>
+            </div>
+            <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
+              <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496]">Published Deliverables</span>
+              <span className="text-2xl font-black text-purple-600 dark:text-purple-400 mt-1 block">{weeklyRecords.publishedContent.length}</span>
+            </div>
+          </div>
+
+          {/* Day-by-Day Sprint Velocity */}
+          <div className="bg-white dark:bg-[#111728] p-5 rounded-3xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
+            <h3 className="text-sm font-black text-[#101828] dark:text-white mb-3">Day-by-Day Sprint Activity (Mon - Sun)</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-7 gap-2.5">
+              {weeklyRecords.dayBreakdown.map((d, i) => (
+                <div key={i} className="p-3 rounded-2xl bg-[#F8FAFC] dark:bg-[#161B31] border border-[#E2E8F0] dark:border-white/5 text-center">
+                  <span className="text-[10px] font-black uppercase text-[#7A8496] block">{d.dayName}</span>
+                  <span className="text-xs text-[#64748B] block mb-1">{d.date.slice(5)}</span>
+                  <div className="text-base font-black text-[#101828] dark:text-white">{d.completedCount} <span className="text-[10px] text-emerald-600">done</span></div>
+                  <div className="text-[11px] text-[#5B4BFF] font-bold">{d.hours} hrs</div>
                 </div>
-                <div style={{ background: '#111728', padding: '10px', borderRadius: '8px' }}>
-                  <div style={{ fontSize: '10.5px', color: '#94A3B8' }}>ASSIGNEE</div>
-                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#F8FAFC' }}>{selectedDeliverableModal.assigneeName || 'Unassigned'}</div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── TAB 4: MONTHLY REPORTS ───────────────────────────────────── */}
+      {activeMainTab === 'monthly' && (
+        <div className="space-y-6 animate-in fade-in">
+          <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-xs flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <Calendar className="w-5 h-5 text-[#5B4BFF]" />
+              <input
+                type="month"
+                value={selectedMonth}
+                onChange={e => setSelectedMonth(e.target.value)}
+                className="bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-3 py-2 text-xs font-bold text-[#101828] dark:text-white outline-none cursor-pointer"
+              />
+              <span className="text-xs font-bold text-[#64748B]">Agency Operations for {selectedMonth}</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button onClick={() => handleExportMonthly('pdf')} className="px-3.5 py-1.5 rounded-xl bg-[#5B4BFF]/10 text-[#5B4BFF] text-xs font-black hover:bg-[#5B4BFF] hover:text-white transition-all flex items-center gap-1 cursor-pointer">
+                <Download className="w-3.5 h-3.5" /> PDF
+              </button>
+              <button onClick={() => handleExportMonthly('xlsx')} className="px-3.5 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-600 text-xs font-black hover:bg-emerald-600 hover:text-white transition-all flex items-center gap-1 cursor-pointer">
+                <FileSpreadsheet className="w-3.5 h-3.5" /> Excel
+              </button>
+              <button onClick={() => handleExportMonthly('csv')} className="px-3.5 py-1.5 rounded-xl bg-slate-500/10 text-slate-700 text-xs font-black hover:bg-slate-700 hover:text-white transition-all flex items-center gap-1 cursor-pointer">
+                <FileText className="w-3.5 h-3.5" /> CSV
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+            <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
+              <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496]">Monthly Completed</span>
+              <span className="text-2xl font-black text-emerald-600 mt-1 block">{monthlyRecords.completedTasks.length}</span>
+            </div>
+            <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
+              <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496]">Pending / Ongoing</span>
+              <span className="text-2xl font-black text-amber-600 mt-1 block">{monthlyRecords.pendingTasks.length}</span>
+            </div>
+            <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
+              <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496]">Total Agency Hours</span>
+              <span className="text-2xl font-black text-[#5B4BFF] mt-1 block">{monthlyRecords.totalHours} hrs</span>
+            </div>
+            <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
+              <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496]">Published Content</span>
+              <span className="text-2xl font-black text-purple-600 mt-1 block">{monthlyRecords.publishedContent.length}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── TAB 5: EMPLOYEE PERFORMANCE ──────────────────────────────── */}
+      {activeMainTab === 'employee' && (
+        <div className="space-y-6 animate-in fade-in">
+          <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-xs flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h2 className="text-sm font-black text-[#101828] dark:text-white">Employee Performance & Delivery Matrix</h2>
+              <p className="text-[11px] text-[#64748B]">Factual metrics calculated strictly from verified tasks, work logs, and daily submissions.</p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button onClick={() => handleExportEmployeeReport('pdf')} className="px-3.5 py-1.5 rounded-xl bg-[#5B4BFF]/10 text-[#5B4BFF] text-xs font-black hover:bg-[#5B4BFF] hover:text-white transition-all flex items-center gap-1 cursor-pointer">
+                <Download className="w-3.5 h-3.5" /> PDF
+              </button>
+              <button onClick={() => handleExportEmployeeReport('xlsx')} className="px-3.5 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-600 text-xs font-black hover:bg-emerald-600 hover:text-white transition-all flex items-center gap-1 cursor-pointer">
+                <FileSpreadsheet className="w-3.5 h-3.5" /> Excel
+              </button>
+              <button onClick={() => handleExportEmployeeReport('csv')} className="px-3.5 py-1.5 rounded-xl bg-slate-500/10 text-slate-700 text-xs font-black hover:bg-slate-700 hover:text-white transition-all flex items-center gap-1 cursor-pointer">
+                <FileText className="w-3.5 h-3.5" /> CSV
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-[#111728] rounded-3xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-[#F8FAFC] dark:bg-[#161B31] text-[10px] font-black uppercase text-[#7A8496] border-b border-[#E2E8F0] dark:border-white/10">
+                  <tr>
+                    <th className="py-3 px-4">Employee</th>
+                    <th className="py-3 px-3">Role / Team</th>
+                    <th className="py-3 px-3 text-center">Assigned</th>
+                    <th className="py-3 px-3 text-center">Completed</th>
+                    <th className="py-3 px-3 text-center">Pending</th>
+                    <th className="py-3 px-3 text-center">Overdue</th>
+                    <th className="py-3 px-3 text-center">On-Time %</th>
+                    <th className="py-3 px-3 text-center">Hours Logged</th>
+                    <th className="py-3 px-3 text-center">Clients</th>
+                    <th className="py-3 px-3 text-center">Daily Reports</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E2E8F0] dark:divide-white/5 font-medium">
+                  {employeePerformanceList.map((item, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-white/5">
+                      <td className="py-3 px-4">
+                        <div className="font-bold text-[#101828] dark:text-white">{item.employee.name}</div>
+                        <div className="text-[10px] text-[#64748B]">{item.employee.email}</div>
+                      </td>
+                      <td className="py-3 px-3 text-[#64748B]">{item.employee.role || 'Staff'}</td>
+                      <td className="py-3 px-3 text-center font-bold">{item.tasksAssigned}</td>
+                      <td className="py-3 px-3 text-center font-bold text-emerald-600">{item.tasksCompleted}</td>
+                      <td className="py-3 px-3 text-center font-bold text-amber-600">{item.tasksPending}</td>
+                      <td className="py-3 px-3 text-center font-bold text-rose-600">{item.tasksOverdue}</td>
+                      <td className="py-3 px-3 text-center">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                          item.onTimeRate >= 85 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                        }`}>
+                          {item.onTimeRate}%
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-center font-black text-[#5B4BFF]">{item.hoursLogged} hrs</td>
+                      <td className="py-3 px-3 text-center font-bold">{item.clientsHandled}</td>
+                      <td className="py-3 px-3 text-center font-bold">{item.dailyReportsCount}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── TAB 6: CLIENT REPORTING (Official Branded Client PDF Generator) ── */}
+      {activeMainTab === 'client' && (
+        <div className="space-y-6 animate-in fade-in">
+          <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-xs flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3 flex-wrap">
+              <select
+                value={selectedClientId}
+                onChange={e => setSelectedClientId(e.target.value)}
+                className="bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-3.5 py-2 text-xs font-bold text-[#101828] dark:text-white outline-none min-w-[240px]"
+              >
+                <option value="">-- Choose Client Account --</option>
+                {clients.map(c => (
+                  <option key={c.id || (c as any).clientId} value={c.id || (c as any).clientId}>
+                    {c.clientName || c.name} {c.category ? `(${c.category})` : ''}
+                  </option>
+                ))}
+              </select>
+
+              <input
+                type="month"
+                value={selectedMonth}
+                onChange={e => setSelectedMonth(e.target.value)}
+                className="bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-3 py-2 text-xs font-bold text-[#101828] dark:text-white outline-none"
+              />
+            </div>
+
+            {selectedClientId && clientUnifiedData && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  disabled={isGeneratingPdf}
+                  onClick={handleGenerateOfficialClientPdf}
+                  className="px-4 py-2 rounded-xl bg-[#5B4BFF] hover:bg-[#4E3FE6] text-white text-xs font-black shadow-md shadow-[#5B4BFF]/25 transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  {isGeneratingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                  <span>Generate Official Branded PDF</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {!selectedClientId ? (
+            <div className="bg-white dark:bg-[#111728] border border-dashed border-[#D8DEE9] dark:border-white/10 rounded-3xl p-12 text-center max-w-xl mx-auto">
+              <Briefcase className="w-10 h-10 text-[#5B4BFF] mx-auto mb-3" />
+              <h3 className="text-base font-black text-[#101828] dark:text-white">Select a Client Account</h3>
+              <p className="text-xs text-[#64748B] mt-1">Choose any active client above to view their deliverables, tasks, and generate an official presentation report.</p>
+            </div>
+          ) : clientUnifiedData && (
+            <div className="space-y-6">
+              {/* Client Metrics */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+                <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496]">Planned Content</span>
+                  <span className="text-2xl font-black text-[#5B4BFF] mt-1 block">{clientUnifiedData.totalPlanned}</span>
                 </div>
-                <div style={{ background: '#111728', padding: '10px', borderRadius: '8px' }}>
-                  <div style={{ fontSize: '10.5px', color: '#94A3B8' }}>STATUS</div>
-                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#10B981' }}>{selectedDeliverableModal.status}</div>
+                <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496]">Published Live</span>
+                  <span className="text-2xl font-black text-emerald-600 mt-1 block">{clientUnifiedData.livePublished}</span>
                 </div>
-                <div style={{ background: '#111728', padding: '10px', borderRadius: '8px' }}>
-                  <div style={{ fontSize: '10.5px', color: '#94A3B8' }}>APPROVAL</div>
-                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#60A5FA' }}>{selectedDeliverableModal.clientApprovalStatus || 'Pending'}</div>
+                <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496]">Approved Assets</span>
+                  <span className="text-2xl font-black text-teal-600 mt-1 block">{clientUnifiedData.clientApproved} / {clientUnifiedData.totalPlanned}</span>
+                </div>
+                <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496]">Publishing Velocity</span>
+                  <span className="text-2xl font-black text-purple-600 mt-1 block">
+                    {clientUnifiedData.totalPlanned > 0 ? Math.round((clientUnifiedData.livePublished / clientUnifiedData.totalPlanned) * 100) : 0}%
+                  </span>
                 </div>
               </div>
 
-              {selectedDeliverableModal.caption && (
-                <div style={{ background: '#111728', padding: '12px', borderRadius: '8px' }}>
-                  <div style={{ fontSize: '11px', fontWeight: 700, color: '#94A3B8', marginBottom: '4px' }}>CAPTION / COPY</div>
-                  <div style={{ fontSize: '12.5px', color: '#CBD5E1', lineHeight: 1.5 }}>{selectedDeliverableModal.caption}</div>
+              {/* Client Deliverables Table */}
+              <div className="bg-white dark:bg-[#111728] p-5 rounded-3xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
+                <h3 className="text-sm font-black text-[#101828] dark:text-white mb-3">Content Calendar Deliverables for {selectedClient?.clientName}</h3>
+                {clientUnifiedData.deliverables.length === 0 ? (
+                  <p className="text-xs text-[#64748B] text-center py-4">No content items recorded for this month.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs text-left">
+                      <thead className="bg-[#F8FAFC] dark:bg-[#161B31] text-[10px] font-black uppercase text-[#7A8496] border-b border-[#E2E8F0] dark:border-white/10">
+                        <tr>
+                          <th className="py-2.5 px-3">Date</th>
+                          <th className="py-2.5 px-3">Topic / Title</th>
+                          <th className="py-2.5 px-3">Platform</th>
+                          <th className="py-2.5 px-3">Format</th>
+                          <th className="py-2.5 px-3">Status</th>
+                          <th className="py-2.5 px-3">Assignee</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#E2E8F0] dark:divide-white/5 font-medium">
+                        {clientUnifiedData.deliverables.map((item, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-white/5">
+                            <td className="py-2.5 px-3 font-mono text-[11px]">{item.date || '-'}</td>
+                            <td className="py-2.5 px-3 font-bold text-[#101828] dark:text-white">{item.topic || item.title}</td>
+                            <td className="py-2.5 px-3">{item.platform || 'Multi'}</td>
+                            <td className="py-2.5 px-3">{item.contentType || 'Graphic'}</td>
+                            <td className="py-2.5 px-3">
+                              <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                                item.status === 'Posted' ? 'bg-emerald-50 text-emerald-700' : 'bg-indigo-50 text-indigo-700'
+                              }`}>
+                                {item.status}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3">{item.assigneeName || 'Assigned'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── TAB 7: SUBMISSION TRACKER ────────────────────────────────── */}
+      {activeMainTab === 'submission_tracker' && (
+        <div className="space-y-6 animate-in fade-in">
+          <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-xs flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <Calendar className="w-5 h-5 text-[#5B4BFF]" />
+              <input
+                type="date"
+                value={selectedDailyDate}
+                onChange={e => setSelectedDailyDate(e.target.value)}
+                className="bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-3 py-1.5 text-xs font-bold text-[#101828] dark:text-white outline-none cursor-pointer"
+              />
+              <span className="text-xs font-bold text-[#64748B]">Compliance tracking for {selectedDailyDate}</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button onClick={() => handleExportSubmissionTracker('pdf')} className="px-3.5 py-1.5 rounded-xl bg-[#5B4BFF]/10 text-[#5B4BFF] text-xs font-black hover:bg-[#5B4BFF] hover:text-white transition-all flex items-center gap-1 cursor-pointer">
+                <Download className="w-3.5 h-3.5" /> PDF
+              </button>
+              <button onClick={() => handleExportSubmissionTracker('xlsx')} className="px-3.5 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-600 text-xs font-black hover:bg-emerald-600 hover:text-white transition-all flex items-center gap-1 cursor-pointer">
+                <FileSpreadsheet className="w-3.5 h-3.5" /> Excel
+              </button>
+              <button onClick={() => handleExportSubmissionTracker('csv')} className="px-3.5 py-1.5 rounded-xl bg-slate-500/10 text-slate-700 text-xs font-black hover:bg-slate-700 hover:text-white transition-all flex items-center gap-1 cursor-pointer">
+                <FileText className="w-3.5 h-3.5" /> CSV
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-[#111728] rounded-3xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-[#F8FAFC] dark:bg-[#161B31] text-[10px] font-black uppercase text-[#7A8496] border-b border-[#E2E8F0] dark:border-white/10">
+                  <tr>
+                    <th className="py-3 px-4">Employee</th>
+                    <th className="py-3 px-3">Role / Team</th>
+                    <th className="py-3 px-3">Status</th>
+                    <th className="py-3 px-3">Submitted At</th>
+                    <th className="py-3 px-3 text-center">Hours Logged</th>
+                    <th className="py-3 px-3 text-center">Completed Tasks</th>
+                    <th className="py-3 px-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#E2E8F0] dark:divide-white/5 font-medium">
+                  {dailyTrackerRecords.map((r, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-white/5">
+                      <td className="py-3 px-4 font-bold text-[#101828] dark:text-white">{r.employee.name}</td>
+                      <td className="py-3 px-3 text-[#64748B]">{r.employee.role || 'Staff'}</td>
+                      <td className="py-3 px-3">
+                        <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${
+                          r.status === 'Reviewed'
+                            ? 'bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-400'
+                            : r.status === 'Submitted'
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400'
+                            : r.status === 'Returned'
+                            ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400'
+                            : r.status === 'Late'
+                            ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400'
+                            : 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
+                        }`}>
+                          {r.status}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 font-mono text-[11px] text-[#64748B]">
+                        {r.submission?.submittedAt ? new Date(r.submission.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-'}
+                      </td>
+                      <td className="py-3 px-3 text-center font-bold">{r.hoursLogged} hrs</td>
+                      <td className="py-3 px-3 text-center font-bold text-emerald-600">{r.completedTasksCount}</td>
+                      <td className="py-3 px-3 text-right">
+                        {r.submission ? (
+                          <button
+                            onClick={() => {
+                              setReviewModalReport(r.submission || null);
+                              setReviewRemarks(r.submission?.managerRemarks || '');
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-[#5B4BFF]/10 text-[#5B4BFF] text-[11px] font-black hover:bg-[#5B4BFF] hover:text-white transition-all cursor-pointer"
+                          >
+                            Review Report
+                          </button>
+                        ) : (
+                          <span className="text-[11px] text-slate-400">No submission</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── TAB 8: CUSTOM REPORTS ────────────────────────────────────── */}
+      {activeMainTab === 'custom' && (
+        <div className="space-y-6 animate-in fade-in">
+          <div className="bg-white dark:bg-[#111728] p-5 rounded-3xl border border-[#D8DEE9] dark:border-white/10 shadow-xs space-y-4">
+            <h3 className="text-sm font-black text-[#101828] dark:text-white">Custom Reporting Query Engine</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-[10px] font-black uppercase text-[#7A8496] mb-1">Start Date</label>
+                <input
+                  type="date"
+                  value={customStartDate}
+                  onChange={e => setCustomStartDate(e.target.value)}
+                  className="w-full bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl p-2.5 text-xs font-bold outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-black uppercase text-[#7A8496] mb-1">End Date</label>
+                <input
+                  type="date"
+                  value={customEndDate}
+                  onChange={e => setCustomEndDate(e.target.value)}
+                  className="w-full bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl p-2.5 text-xs font-bold outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-black uppercase text-[#7A8496] mb-1">Employee</label>
+                <select
+                  value={filterEmployeeId}
+                  onChange={e => setFilterEmployeeId(e.target.value)}
+                  className="w-full bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl p-2.5 text-xs font-bold outline-none"
+                >
+                  <option value="">All Employees</option>
+                  {employees.map(e => (
+                    <option key={e.id} value={e.id}>{e.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] font-black uppercase text-[#7A8496] mb-1">Client</label>
+                <select
+                  value={filterClientId}
+                  onChange={e => setFilterClientId(e.target.value)}
+                  className="w-full bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl p-2.5 text-xs font-bold outline-none"
+                >
+                  <option value="">All Clients</option>
+                  {clients.map(c => (
+                    <option key={c.id || (c as any).clientId} value={c.id || (c as any).clientId}>{c.clientName || c.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MANAGER REVIEW MODAL ─────────────────────────────────────── */}
+      {reviewModalReport && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-60 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#111728] border border-[#D8DEE9] dark:border-white/10 rounded-3xl w-full max-w-lg shadow-2xl p-6 space-y-4 animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-[#E2E8F0] dark:border-white/10">
+              <div>
+                <h3 className="text-base font-black text-[#101828] dark:text-white">Daily Report Review</h3>
+                <p className="text-xs text-[#64748B]">{reviewModalReport.employeeName} • {reviewModalReport.date}</p>
+              </div>
+              <button onClick={() => setReviewModalReport(null)} className="p-1.5 rounded-xl text-slate-400 hover:text-white cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <span className="font-bold text-[#7A8496] uppercase text-[10px] block">Submitted Work Summary</span>
+                <p className="p-3 rounded-xl bg-slate-50 dark:bg-[#161B31] mt-1 text-[#101828] dark:text-[#F8FAFC] font-medium whitespace-pre-wrap">
+                  {reviewModalReport.summary || 'No summary entered'}
+                </p>
+              </div>
+
+              {reviewModalReport.blockers && (
+                <div>
+                  <span className="font-bold text-rose-500 uppercase text-[10px] block">Blockers / Dependencies</span>
+                  <p className="p-2.5 rounded-xl bg-rose-50/50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-300 mt-1">
+                    {reviewModalReport.blockers}
+                  </p>
                 </div>
               )}
 
-              {selectedDeliverableModal.creativeLink && (
-                <div style={{ background: '#111728', padding: '12px', borderRadius: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '12px', color: '#94A3B8' }}>Creative Asset Link:</span>
-                  <a href={selectedDeliverableModal.creativeLink} target="_blank" rel="noreferrer" style={{ color: '#60A5FA', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    Open Asset <ExternalLink size={12} />
-                  </a>
+              {reviewModalReport.nextDayPlan && (
+                <div>
+                  <span className="font-bold text-[#7A8496] uppercase text-[10px] block">Next Day Plan</span>
+                  <p className="p-2.5 rounded-xl bg-slate-50 dark:bg-[#161B31] mt-1 text-[#64748B]">
+                    {reviewModalReport.nextDayPlan}
+                  </p>
                 </div>
               )}
+
+              <div>
+                <label className="font-bold text-[#7A8496] uppercase text-[10px] block mb-1">Manager Remarks / Feedback</label>
+                <textarea
+                  rows={3}
+                  value={reviewRemarks}
+                  onChange={e => setReviewRemarks(e.target.value)}
+                  placeholder="Feedback, approval comments, or instructions if returning for edits..."
+                  className="w-full bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl p-2.5 text-xs outline-none focus:border-[#5B4BFF]"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => handleReviewSubmission('Returned')}
+                className="px-4 py-2 rounded-xl bg-rose-50 text-rose-600 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-400 text-xs font-black transition-all cursor-pointer"
+              >
+                Return for Edits
+              </button>
+              <button
+                onClick={() => handleReviewSubmission('Reviewed')}
+                className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black shadow-md shadow-emerald-600/25 transition-all cursor-pointer"
+              >
+                Mark as Reviewed
+              </button>
             </div>
           </div>
         </div>

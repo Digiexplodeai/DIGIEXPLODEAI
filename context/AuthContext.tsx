@@ -47,12 +47,54 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  const [user, setUser] = useState<FirebaseUser | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState<UserProfile | null>(() => {
+    try {
+      if (typeof window !== "undefined") {
+        const cached = localStorage.getItem("digi_demo_profile");
+        if (cached) return JSON.parse(cached);
+      }
+    } catch (e) {}
+    return null;
+  });
+
+  const [user, setUser] = useState<FirebaseUser | null>(() => {
+    try {
+      if (typeof window !== "undefined") {
+        const cached = localStorage.getItem("digi_demo_profile");
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed?.userId) {
+            return {
+              uid: parsed.userId,
+              email: parsed.email,
+              displayName: parsed.name,
+              phoneNumber: parsed.phone,
+            } as any;
+          }
+        }
+      }
+    } catch (e) {}
+    return null;
+  });
+
+  const [loading, setLoading] = useState<boolean>(() => {
+    try {
+      if (typeof window !== "undefined") {
+        const cached = localStorage.getItem("digi_demo_profile");
+        if (cached) return false;
+      }
+    } catch (e) {}
+    return true;
+  });
 
   useEffect(() => {
+    // Safety timeout: Never leave user stuck on Initializing screen for more than 1.5 seconds
+    const safetyTimeout = setTimeout(() => {
+      setLoading(false);
+    }, 1500);
+
     const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
+      clearTimeout(safetyTimeout);
       setUser(currentUser);
 
       if (currentUser) {

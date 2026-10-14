@@ -17,6 +17,8 @@ import { DEFAULT_CLIENTS_MASTER, getCachedClients, subscribeToCanonicalClients }
 import { cfGetClients } from '../../lib/cloudflareApi';
 import { isTaskAssignedToEmployee, EMPLOYEE_ID_ALIASES } from '../../lib/employeeMaster';
 import { SuggestiveCombobox, type SuggestiveOption } from './SuggestiveCombobox';
+import { SuggestiveInput, SuggestiveTextarea } from './SuggestiveInput';
+import { saveFormFieldHistory } from '../../lib/formHistoryStorage';
 import { ensureActiveFirebaseAuth } from '../../lib/calendarStorage';
 import { 
   type Task, 
@@ -708,6 +710,8 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
     e.preventDefault();
     if (!assignTaskForm.title.trim()) return;
     setSavingAssignTask(true);
+    saveFormFieldHistory('task_title', assignTaskForm.title.trim());
+    if (assignTaskForm.description.trim()) saveFormFieldHistory('task_description', assignTaskForm.description.trim());
     try {
       const nowIso = new Date().toISOString();
       const selectedClient = uniqueClients.find(c => c.id === assignTaskForm.clientId) ||
@@ -843,6 +847,8 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
     const logId = editingLogId || `worklog_manual_${Date.now()}`;
 
     setSavingLog(true);
+    saveFormFieldHistory('work_title', desc);
+    if (logForm.workDetails.trim()) saveFormFieldHistory('work_notes', logForm.workDetails.trim());
 
     try {
       // 1. Build canonical Work Log payload (Pure Work Log entity, taskId: null)
@@ -1744,11 +1750,11 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
                 <label className="block font-bold text-[#344054] dark:text-[#CBD5E1] mb-1">
                   Task Title <span className="text-rose-500">*</span>
                 </label>
-                <input
+                <SuggestiveInput
                   required
-                  type="text"
+                  fieldKey="task_title"
                   value={assignTaskForm.title}
-                  onChange={e => setAssignTaskForm(p => ({ ...p, title: e.target.value }))}
+                  onChange={val => setAssignTaskForm(p => ({ ...p, title: val }))}
                   placeholder="e.g. Design Instagram Post, Edit Reel, Update Website…"
                   className="w-full p-2.5 rounded-xl border border-[#D8DEE9] dark:border-white/10 bg-[#F8FAFC] dark:bg-[#161B31] text-[#101828] dark:text-white font-medium outline-none focus:border-[#5B4BFF] transition-all"
                 />
@@ -1826,10 +1832,11 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
               {/* Description */}
               <div>
                 <label className="block font-bold text-[#344054] dark:text-[#CBD5E1] mb-1">Description / Brief <span className="font-normal text-slate-400">(Optional)</span></label>
-                <textarea
+                <SuggestiveTextarea
                   rows={2}
+                  fieldKey="task_description"
                   value={assignTaskForm.description}
-                  onChange={e => setAssignTaskForm(p => ({ ...p, description: e.target.value }))}
+                  onChange={val => setAssignTaskForm(p => ({ ...p, description: val }))}
                   placeholder="Add deliverable context, requirements, or links..."
                   className="w-full p-2.5 rounded-xl border border-[#D8DEE9] dark:border-white/10 bg-[#F8FAFC] dark:bg-[#161B31] text-[#101828] dark:text-white font-medium outline-none resize-none focus:border-[#5B4BFF]"
                 />
@@ -2223,12 +2230,12 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
                 <label className="font-bold text-[#344054] dark:text-[#CBD5E1] block mb-1">
                   Optional Notes / Creative Brief Details
                 </label>
-                <textarea
+                <SuggestiveTextarea
                   rows={2}
-                  maxLength={1000}
+                  fieldKey="work_notes"
                   placeholder="Additional context or links (e.g. Drive folder, raw footage link, special instructions)..."
                   value={logForm.workDetails}
-                  onChange={e => setLogForm(p => ({ ...p, workDetails: e.target.value }))}
+                  onChange={val => setLogForm(p => ({ ...p, workDetails: val }))}
                   className="w-full p-2.5 rounded-xl border border-[#D8DEE9] dark:border-white/10 bg-[#F8FAFC] dark:bg-[#161B31] text-[#101828] dark:text-white font-medium outline-none resize-none focus:border-[#5B4BFF]"
                 />
               </div>

@@ -22,6 +22,8 @@ import { AssignmentBoard } from './AssignmentBoard';
 import { TaskScheduleCalendar } from './TaskScheduleCalendar';
 import { MiniCalendarWidget } from './MiniCalendarWidget';
 import { SuggestiveCombobox, type SuggestiveOption } from './SuggestiveCombobox';
+import { SuggestiveInput, SuggestiveTextarea } from './SuggestiveInput';
+import { saveFormFieldHistory, isLikelyPlaceholder } from '../../lib/formHistoryStorage';
 import {
   type Task,
   type RolloverSettings,
@@ -1802,6 +1804,7 @@ export const TasksView: React.FC = () => {
       {/* ─── CREATE TASK MODAL ─────────────────────────────────────────── */}
       {showCreateModal && (
         <CreateTaskModal
+          tasks={tasks}
           clients={clients}
           employees={employees}
           defaultColumn={createDefaultColumn}
@@ -1870,6 +1873,7 @@ export const TasksView: React.FC = () => {
 
 // ─── CREATE TASK MODAL COMPONENT ──────────────────────────────────────
 const CreateTaskModal: React.FC<{
+  tasks?: Task[];
   clients: any[];
   employees: any[];
   defaultColumn: KanbanColumnKey;
@@ -1879,13 +1883,23 @@ const CreateTaskModal: React.FC<{
   user: any;
   onClose: () => void;
   onCreated: (t: Task) => void;
-}> = ({ clients, employees, defaultColumn, defaultAssigneeId, defaultDate, profile, user, onClose, onCreated }) => {
+}> = ({ tasks = [], clients, employees, defaultColumn, defaultAssigneeId, defaultDate, profile, user, onClose, onCreated }) => {
   const clientList = (clients && clients.length > 0) ? clients : getCachedClients();
   const employeeList = (employees && employees.length > 0) ? employees : getCachedEmployees();
   const inputCls = 'w-full bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-[#101828] dark:text-[#F7F8FC] placeholder-[#98A2B3] outline-none focus:border-[#5B4BFF] focus:bg-white dark:focus:bg-[#1A203C] transition-all shadow-2xs';
 
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
   const initialWorkDate = defaultDate || todayStr;
+
+  const taskTitleSeeds = useMemo(() => {
+    const list = tasks && tasks.length > 0 ? tasks : getCachedTasks();
+    return list.map(t => t.title).filter(t => t && !isLikelyPlaceholder(t));
+  }, [tasks]);
+
+  const taskDescSeeds = useMemo(() => {
+    const list = tasks && tasks.length > 0 ? tasks : getCachedTasks();
+    return list.map(t => t.description || '').filter(d => d && !isLikelyPlaceholder(d));
+  }, [tasks]);
 
   const [videoList, setVideoList] = useState<any[]>(() => {
     try {
@@ -1897,18 +1911,6 @@ const CreateTaskModal: React.FC<{
   });
 
   const [customClientName, setCustomClientName] = useState('');
-  const [showTitleSuggestions, setShowTitleSuggestions] = useState(false);
-
-  const TASK_TEMPLATES = [
-    "Edit 5 Instagram Reels with Motion Typography & Sound FX",
-    "Design 10 Figma Carousel Slides with Dark Aesthetic",
-    "Weekly Performance Analytics & Client Growth Review Deck",
-    "Meta & Google Ad Creatives (1:1, 9:16 & 16:9 Formats)",
-    "YouTube Long-Form Video Cut with B-Roll & Chapter Markers",
-    "Full Landing Page UI Redesign & Conversion Optimization",
-    "Brand Identity Guideline Kit & Vector Typography Assets",
-    "Organic SEO Content Plan & 4 High-Impact Articles"
-  ];
 
   // Suggestive options for Client / Brand
   const clientOptions: SuggestiveOption[] = useMemo(() => {
@@ -2021,6 +2023,9 @@ const CreateTaskModal: React.FC<{
       };
 
       const savedTask = await persistNewTask(newTaskData, { uid: user?.uid, name: profile?.name });
+      saveFormFieldHistory('task_title', form.title.trim());
+      if (form.description.trim()) saveFormFieldHistory('task_description', form.description.trim());
+      if (form.internalNotes.trim()) saveFormFieldHistory('task_notes', form.internalNotes.trim());
       onCreated(savedTask);
     } catch (err) {
       console.error('Task creation error:', err);
@@ -2048,73 +2053,39 @@ const CreateTaskModal: React.FC<{
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="relative">
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496]">
-                Task Title *
-              </label>
-              <button
-                type="button"
-                onClick={() => setShowTitleSuggestions(!showTitleSuggestions)}
-                className="text-[10px] font-bold text-[#5B4BFF] dark:text-[#806CFF] hover:underline cursor-pointer flex items-center gap-1"
-              >
-                <Sparkles className="w-3 h-3" />
-                <span>{showTitleSuggestions ? 'Hide Templates' : 'Suggestive Templates'}</span>
-              </button>
-            </div>
-            <input
+          <div className="relative z-40">
+            <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">
+              Task Title *
+            </label>
+            <SuggestiveInput
               required
-              type="text"
+              fieldKey="task_title"
               value={form.title}
-              onFocus={() => { if (!form.title) setShowTitleSuggestions(true); }}
-              onChange={e => setForm(p => ({ ...p, title: e.target.value }))}
+              extraSeeds={taskTitleSeeds}
+              onChange={val => setForm(p => ({ ...p, title: val }))}
               placeholder="e.g. Design 10 Figma Carousel Slides with Dark Aesthetic"
               className={inputCls}
             />
-
-            {/* Quick Suggestive Title Templates Dropdown */}
-            {showTitleSuggestions && (
-              <div className="mt-1.5 p-2 bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-2xl space-y-1 animate-in fade-in">
-                <div className="text-[10px] font-black uppercase text-[#7A8496] px-2 py-0.5">
-                  Click to use template:
-                </div>
-                <div className="grid grid-cols-1 gap-1 max-h-36 overflow-y-auto">
-                  {TASK_TEMPLATES
-                    .filter(t => !form.title || t.toLowerCase().includes(form.title.toLowerCase()))
-                    .map(tpl => (
-                      <button
-                        key={tpl}
-                        type="button"
-                        onClick={() => {
-                          setForm(p => ({ ...p, title: tpl }));
-                          setShowTitleSuggestions(false);
-                        }}
-                        className="text-left text-xs font-semibold px-2.5 py-1.5 rounded-xl text-[#334155] dark:text-[#CBD5E1] hover:bg-[#EEECFF] hover:text-[#5B4BFF] dark:hover:bg-[#201D45] dark:hover:text-[#806CFF] transition-all cursor-pointer truncate"
-                      >
-                        ⚡ {tpl}
-                      </button>
-                    ))}
-                </div>
-              </div>
-            )}
           </div>
 
-          <div>
+          <div className="relative z-30">
             <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">
               Description & Deliverable Context
             </label>
-            <textarea
+            <SuggestiveTextarea
               rows={3}
+              fieldKey="task_description"
               value={form.description}
-              onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
+              extraSeeds={taskDescSeeds}
+              onChange={val => setForm(p => ({ ...p, description: val }))}
               placeholder="Outline specific asset requirements, style references, or copy instructions…"
               className={`${inputCls} resize-none`}
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 relative z-20">
             {/* CLIENT / BRAND SUGGESTIVE SEARCH */}
-            <div>
+            <div className="relative z-20">
               <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">
                 Client / Brand (Suggestive Search)
               </label>
@@ -2135,7 +2106,7 @@ const CreateTaskModal: React.FC<{
             </div>
 
             {/* ASSIGN EMPLOYEE SUGGESTIVE SEARCH */}
-            <div>
+            <div className="relative z-10">
               <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">
                 Assign Employee (Suggestive Search)
               </label>
@@ -2149,7 +2120,7 @@ const CreateTaskModal: React.FC<{
               />
             </div>
 
-            <div>
+            <div className="relative z-0">
               <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">Category</label>
               <select
                 value={form.category}
@@ -2162,7 +2133,7 @@ const CreateTaskModal: React.FC<{
               </select>
             </div>
 
-            <div>
+            <div className="relative z-0">
               <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">Priority</label>
               <select
                 value={form.priority}
@@ -2320,6 +2291,14 @@ const TaskDetailDrawer: React.FC<{
   const prevStatus = getPrevWorkflowStatus(task.status);
   const nextStatus = getNextWorkflowStatus(task.status);
 
+  const detailTaskTitleSeeds = useMemo(() => {
+    return getCachedTasks().map(t => t.title).filter(t => t && !isLikelyPlaceholder(t));
+  }, []);
+
+  const detailTaskDescSeeds = useMemo(() => {
+    return getCachedTasks().map(t => t.description || '').filter(d => d && !isLikelyPlaceholder(d));
+  }, []);
+
   const clientOptions: SuggestiveOption[] = useMemo(() => {
     return [
       { id: '', label: 'General Client', sublabel: 'No specific client profile' },
@@ -2372,6 +2351,9 @@ const TaskDetailDrawer: React.FC<{
       };
 
       const saved = await persistUpdateTask(task.id, updatedData);
+      saveFormFieldHistory('task_title', title.trim());
+      if (desc.trim()) saveFormFieldHistory('task_description', desc.trim());
+      if (notes.trim()) saveFormFieldHistory('task_notes', notes.trim());
       const merged = saved || normalizeTaskDateModel({ ...task, ...updatedData });
       onSave(merged);
     } catch (err) {
@@ -2410,21 +2392,22 @@ const TaskDetailDrawer: React.FC<{
             </button>
           </div>
 
-          <div>
+          <div className="relative z-40">
             <span className="text-[10px] font-black text-[#5B4BFF] dark:text-[#806CFF] uppercase tracking-wider">
               {task.category || 'Deliverable'}
             </span>
-            <input
-              type="text"
+            <SuggestiveInput
+              fieldKey="task_title"
               value={title}
-              onChange={e => setTitle(e.target.value)}
+              extraSeeds={detailTaskTitleSeeds}
+              onChange={v => setTitle(v)}
               placeholder="Task deliverable title"
               className="w-full bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-3 py-2 text-base font-black text-[#101828] dark:text-white mt-1 outline-none focus:border-[#5B4BFF]"
             />
           </div>
 
           {/* Workflow Status Arrow Controls */}
-          <div className="bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-2xl p-3.5 flex items-center justify-between shadow-2xs">
+          <div className="bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-2xl p-3.5 flex items-center justify-between shadow-2xs relative z-35">
             <div>
               <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496] block">Workflow Status</span>
               <span className="text-sm font-black text-[#5B4BFF] dark:text-[#806CFF]">{normStatus}</span>
@@ -2447,21 +2430,23 @@ const TaskDetailDrawer: React.FC<{
             </div>
           </div>
 
-          <div className="space-y-3.5">
-            <div>
+          <div className="space-y-3.5 relative z-30">
+            <div className="relative z-30">
               <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">
                 Description & Brief
               </label>
-              <textarea
+              <SuggestiveTextarea
                 rows={3}
+                fieldKey="task_description"
                 value={desc}
-                onChange={e => setDesc(e.target.value)}
+                extraSeeds={detailTaskDescSeeds}
+                onChange={v => setDesc(v)}
                 className="w-full bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl p-3 text-xs font-medium text-[#101828] dark:text-[#F7F8FC] outline-none focus:border-[#5B4BFF] resize-none"
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 relative z-20">
+              <div className="relative z-20">
                 <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">
                   Client (Suggestive Search)
                 </label>
@@ -2476,7 +2461,7 @@ const TaskDetailDrawer: React.FC<{
                 />
               </div>
 
-              <div>
+              <div className="relative z-10">
                 <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">
                   Assignee (Suggestive Search)
                 </label>
@@ -2552,10 +2537,11 @@ const TaskDetailDrawer: React.FC<{
               <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">
                 Internal Agency Notes
               </label>
-              <textarea
+              <SuggestiveTextarea
                 rows={2}
+                fieldKey="task_notes"
                 value={notes}
-                onChange={e => setNotes(e.target.value)}
+                onChange={v => setNotes(v)}
                 placeholder="Private team coordination notes…"
                 className="w-full bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl p-3 text-xs text-[#101828] dark:text-[#F7F8FC] outline-none resize-none font-medium"
               />

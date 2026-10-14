@@ -8,6 +8,8 @@ import {
 import { NotificationService } from '../../lib/controlPlane/NotificationService';
 import { NotificationRecord } from '../../lib/controlPlane/types';
 import { WorkspaceEventService } from '../../lib/controlPlane/WorkspaceEventService';
+import { SuggestiveInput, SuggestiveTextarea } from './SuggestiveInput';
+import { saveFormFieldHistory } from '../../lib/formHistoryStorage';
 
 interface NotificationCenterViewProps {
   setActiveTab?: (tab: string) => void;
@@ -88,6 +90,8 @@ export const NotificationCenterView: React.FC<NotificationCenterViewProps> = ({ 
     if (!announcementTitle.trim() || !announcementMessage.trim()) return;
 
     setIsPublishing(true);
+    saveFormFieldHistory('announcement_title', announcementTitle.trim());
+    saveFormFieldHistory('announcement_body', announcementMessage.trim());
     try {
       await WorkspaceEventService.emit({
         eventType: 'announcement.published',
@@ -346,12 +350,12 @@ export const NotificationCenterView: React.FC<NotificationCenterViewProps> = ({ 
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Announcement Title
                 </label>
-                <input
-                  type="text"
+                <SuggestiveInput
+                  fieldKey="announcement_title"
                   required
                   placeholder="e.g. Q4 Growth Meeting & Office Updates"
                   value={announcementTitle}
-                  onChange={e => setAnnouncementTitle(e.target.value)}
+                  onChange={val => setAnnouncementTitle(val)}
                   className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-amber-400"
                 />
               </div>
@@ -375,12 +379,13 @@ export const NotificationCenterView: React.FC<NotificationCenterViewProps> = ({ 
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Message Content
                 </label>
-                <textarea
+                <SuggestiveTextarea
+                  fieldKey="announcement_body"
                   required
                   rows={4}
                   placeholder="Write announcement details here..."
                   value={announcementMessage}
-                  onChange={e => setAnnouncementMessage(e.target.value)}
+                  onChange={val => setAnnouncementMessage(val)}
                   className="w-full bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white outline-none focus:border-amber-400 resize-none"
                 />
               </div>

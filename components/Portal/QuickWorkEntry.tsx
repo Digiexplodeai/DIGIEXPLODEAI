@@ -59,6 +59,8 @@ import {
 import { PopoverDatePicker } from './PopoverDatePicker';
 import { SmartContentRoutines } from './SmartContentRoutines';
 import { SuggestiveCombobox } from './SuggestiveCombobox';
+import { SuggestiveInput } from './SuggestiveInput';
+import { saveFormFieldHistory } from '../../lib/formHistoryStorage';
 
 export interface QuickWorkEntryProps {
   onTaskCreated?: () => void;
@@ -557,6 +559,8 @@ export const QuickWorkEntry: React.FC<QuickWorkEntryProps> = ({ onTaskCreated, s
       const dateObj = new Date(easyDueDate);
       const monthStr = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
 
+      saveFormFieldHistory('calendar_title', easyTitle.trim());
+      if (easyCaption.trim()) saveFormFieldHistory('calendar_caption', easyCaption.trim());
       const calendarPayload: CalendarEntry = {
         contentId,
         clientId: easyClientId,
@@ -970,10 +974,10 @@ export const QuickWorkEntry: React.FC<QuickWorkEntryProps> = ({ onTaskCreated, s
             {/* Title / Topic */}
             <div className="space-y-1 md:col-span-2">
               <label className="text-[10px] font-black uppercase tracking-wider text-slate-400">Content Topic / Title *</label>
-              <input
-                type="text"
+              <SuggestiveInput
+                fieldKey="calendar_title"
                 value={easyTitle}
-                onChange={(e) => setEasyTitle(e.target.value)}
+                onChange={(val) => setEasyTitle(val)}
                 placeholder="e.g. 5 Signs of Herniated Disc, Monsoon Hydration Reel..."
                 className="w-full text-xs font-medium bg-slate-50/60 dark:bg-slate-950/40 border border-slate-200 dark:border-slate-800 p-2 rounded-xl outline-none text-slate-900 dark:text-slate-100"
                 required
@@ -1072,10 +1076,10 @@ export const QuickWorkEntry: React.FC<QuickWorkEntryProps> = ({ onTaskCreated, s
           {/* Caption / Copy */}
           <div className="space-y-1">
             <label className="text-[10px] font-black uppercase tracking-wider text-slate-400">Caption & Work Notes (Optional)</label>
-            <input
-              type="text"
+            <SuggestiveInput
+              fieldKey="calendar_caption"
               value={easyCaption}
-              onChange={(e) => setEasyCaption(e.target.value)}
+              onChange={(val) => setEasyCaption(val)}
               placeholder="Caption details, hashtags, hook notes or design instructions..."
               className="w-full text-xs font-medium bg-slate-50/60 dark:bg-slate-950/40 border border-slate-200 dark:border-slate-800 p-2 rounded-xl outline-none text-slate-900 dark:text-slate-100"
             />
@@ -1414,10 +1418,10 @@ export const QuickWorkEntry: React.FC<QuickWorkEntryProps> = ({ onTaskCreated, s
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] font-black uppercase tracking-wider text-slate-400">Campaign / Project Name</label>
-                <input
-                  type="text"
+                <SuggestiveInput
+                  fieldKey="campaign_name"
                   value={drawerProjectName}
-                  onChange={(e) => setDrawerProjectName(e.target.value)}
+                  onChange={(val) => setDrawerProjectName(val)}
                   className="w-full text-xs font-medium bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2 rounded-xl outline-none"
                   placeholder="Campaign name..."
                 />
@@ -1451,12 +1455,12 @@ export const QuickWorkEntry: React.FC<QuickWorkEntryProps> = ({ onTaskCreated, s
                     {/* Title */}
                     <div className="sm:col-span-2 space-y-1">
                       <label className="text-[9px] font-black uppercase text-slate-400">Title / Topic *</label>
-                      <input
-                        type="text"
+                      <SuggestiveInput
+                        fieldKey="calendar_title"
                         value={task.title}
-                        onChange={(e) => {
+                        onChange={(val) => {
                           const updated = [...reviewTasks];
-                          updated[idx].title = e.target.value;
+                          updated[idx].title = val;
                           setReviewTasks(updated);
                         }}
                         className="w-full text-xs font-bold bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2 rounded-xl outline-none"

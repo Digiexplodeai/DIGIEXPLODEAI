@@ -247,7 +247,7 @@ export const TasksView: React.FC = () => {
     if (res.success) {
       triggerToast(res.message);
     } else {
-      triggerToast('Status update error — rolling back');
+      triggerToast(res.message ? `Error: ${res.message}` : 'Status update error — rolling back');
       setTasks(getCachedTasks());
     }
   }, [tasks, selectedTask, profile, user]);

@@ -232,18 +232,25 @@ export default {
           }
           if (method === 'PUT' && id) {
             const now = new Date().toISOString();
+            const taskId = id;
             await env.DB.prepare(`
-              UPDATE tasks SET title=?,description=?,status=?,priority=?,category=?,clientId=?,clientName=?,
-              assigneeId=?,assigneeName=?,dueDate=?,scheduledDate=?,completedAt=?,updatedAt=?,format=?,platform=?,notes=?
-              WHERE id=?
+              INSERT INTO tasks (id,taskId,title,description,status,priority,category,clientId,clientName,
+              assigneeId,assigneeName,dueDate,scheduledDate,completedAt,createdAt,updatedAt,createdBy,format,platform,notes)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+              ON CONFLICT(id) DO UPDATE SET
+                title=excluded.title, description=excluded.description, status=excluded.status,
+                priority=excluded.priority, category=excluded.category, clientId=excluded.clientId,
+                clientName=excluded.clientName, assigneeId=excluded.assigneeId, assigneeName=excluded.assigneeName,
+                dueDate=excluded.dueDate, scheduledDate=excluded.scheduledDate, completedAt=excluded.completedAt,
+                updatedAt=excluded.updatedAt, format=excluded.format, platform=excluded.platform, notes=excluded.notes
             `).bind(
-              body.title||'', body.description||'', body.status||'Planned',
-              body.priority||'Medium', body.category||'Graphic Design',
+              taskId, taskId, body.title||'', body.description||'',
+              body.status||'Planned', body.priority||'Medium', body.category||'Graphic Design',
               body.clientId||'', body.clientName||'', body.assigneeId||'', body.assigneeName||'',
-              body.dueDate||'', body.scheduledDate||'', body.completedAt||'',
-              now, body.format||'', body.platform||'', body.notes||'', id
+              body.dueDate||'', body.scheduledDate||body.dueDate||'', body.completedAt||'',
+              body.createdAt||now, now, body.createdBy||'', body.format||'', body.platform||'', body.notes||''
             ).run();
-            return json({ success: true, updatedAt: now });
+            return json({ success: true, taskId, updatedAt: now });
           }
           if (method === 'DELETE' && id) {
             await env.DB.prepare('DELETE FROM tasks WHERE id = ?').bind(id).run();

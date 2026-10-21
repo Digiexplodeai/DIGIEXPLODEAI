@@ -139,6 +139,36 @@ async function runAllTests() {
   const res3C = mergeTaskRecords(localDoneTask, d1UpdatedTask);
   assert(res3C.merged.title === 'Campaign Graphics (Updated Version)', 'Newer D1 updates take precedence');
 
+  // Test 3D: Stale D1 task with NEWER updatedAt (e.g. clock skew/server sync) WITHOUT explicit reopen CANNOT overwrite Done
+  const staleD1WithNewerTimestamp = normalizeTaskDateModel({
+    id: 'task_sync_test',
+    title: 'Campaign Graphics',
+    status: 'To Do',
+    updatedAt: '2026-10-21T18:00:00.000Z', // 2.5 hours newer than local completion!
+  });
+  const res3D = mergeTaskRecords(localDoneTask, staleD1WithNewerTimestamp);
+  assert(res3D.merged.status === 'Done', 'Stale D1 To Do with newer timestamp CANNOT overwrite verified Done without explicit reopen');
+  assert(res3D.merged.completedAt === '2026-10-20T15:30:00.000Z', 'Completion timestamp preserved under clock skew');
+  assert(res3D.shouldSyncToD1 === true, 'Flags shouldSyncToD1 to heal D1 record');
+
+  // Test 3E: Fresh device load (Existing from D1 To Do vs Incoming from Firestore Done)
+  const d1InitialToDo = normalizeTaskDateModel({
+    id: 'task_sync_fresh',
+    title: 'Fresh Client Task',
+    status: 'To Do',
+    updatedAt: '2026-10-20T10:00:00.000Z',
+  });
+  const firestoreIncomingDone = normalizeTaskDateModel({
+    id: 'task_sync_fresh',
+    title: 'Fresh Client Task',
+    status: 'Done',
+    completedAt: '2026-10-20T14:00:00.000Z',
+    updatedAt: '2026-10-20T14:00:00.000Z',
+  });
+  const res3E = mergeTaskRecords(d1InitialToDo, firestoreIncomingDone);
+  assert(res3E.merged.status === 'Done', 'Incoming Done from Firestore cleanly overrides initial D1 To Do on fresh device');
+  assert(res3E.shouldSyncToD1 === true, 'Flags shouldSyncToD1 to backfill D1 on fresh device');
+
   // ---------------------------------------------------------------
   // 4. Daily Rollover Engine Verification
   // ---------------------------------------------------------------

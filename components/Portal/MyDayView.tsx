@@ -532,7 +532,7 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
     if (res.success) {
       triggerToast(res.message);
     } else {
-      triggerToast('Status update failed');
+      triggerToast(res.message ? `Error: ${res.message}` : 'Status update failed — rolling back');
       setAllTasks(getCachedTasks());
     }
   };

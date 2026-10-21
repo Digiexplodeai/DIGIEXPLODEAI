@@ -13,6 +13,15 @@ database_id = "cd28fb94-777d-4cea-ae59-0c4ece651ce6"
 [vars]
 ENVIRONMENT = "production"
 
+# Previews configuration for isolated preview testing
+[previews.vars]
+ENVIRONMENT = "preview"
+
+[[previews.d1_databases]]
+binding = "DB"
+database_name = "digiexplodai-db-preview"
+database_id = "f508ad58-0993-4d24-8603-9f58c6c717f0"
+
 # For local development
 [dev]
 port = 8787

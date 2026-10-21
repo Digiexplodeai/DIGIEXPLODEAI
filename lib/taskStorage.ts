@@ -2,7 +2,8 @@ import {
   collection, doc, getDocs, setDoc, updateDoc, deleteDoc, 
   onSnapshot, query, where, orderBy, addDoc 
 } from 'firebase/firestore';
-import { db, sanitizeFirestorePayload } from './firebase';
+import { signInAnonymously } from 'firebase/auth';
+import { db, auth, sanitizeFirestorePayload } from './firebase';
 import { WorkspaceEventService } from './controlPlane/WorkspaceEventService';
 import { cfGetTasks, cfCreateTask, cfUpdateTask, cfDeleteTask } from './cloudflareApi';
 
@@ -258,9 +259,13 @@ export function mergeTaskRecords(existing: Task, incoming: Task): {
   // Case 1: Status conflict between Done and non-Done
   if (isExistingDone && !isIncomingDone) {
     const existingCompletedTime = new Date(normExisting.completedAt || normExisting.updatedAt || 0).getTime();
-    const isExplicitReopen = !!normIncoming.reopenedAt || 
-      !!normIncoming.taskReopened || 
-      (incomingTime > existingCompletedTime + 1000);
+    
+    // A task can ONLY be legitimately reopened if explicit reopen markers are present:
+    // 1. Explicit taskReopened flag
+    // 2. Explicit reopenedAt timestamp that occurred at or after completion
+    const incomingReopenedTime = normIncoming.reopenedAt ? new Date(normIncoming.reopenedAt).getTime() : 0;
+    const isExplicitReopen = !!normIncoming.taskReopened || 
+      (incomingReopenedTime > 0 && incomingReopenedTime >= existingCompletedTime);
 
     if (isExplicitReopen) {
       // User legitimately reopened the task on another client
@@ -270,13 +275,13 @@ export function mergeTaskRecords(existing: Task, incoming: Task): {
         shouldSyncToFirestore: false,
       };
     } else {
-      // Incoming is a stale non-Done record (e.g. D1 before status transition)
-      // Safeguard: Retain existing Done status and heal D1!
+      // Incoming is a stale non-Done record (e.g. D1 before status transition or stale cache)
+      // Safeguard: NEVER allow stale non-Done records to overwrite verified Done tasks!
       const merged: Task = {
         ...normIncoming,
         status: 'Done',
-        completedAt: normExisting.completedAt,
-        completed_at: normExisting.completed_at,
+        completedAt: normExisting.completedAt || normExisting.updatedAt,
+        completed_at: normExisting.completed_at || normExisting.completedAt || normExisting.updatedAt,
         updatedAt: normExisting.updatedAt,
       };
       return {
@@ -288,11 +293,14 @@ export function mergeTaskRecords(existing: Task, incoming: Task): {
   }
 
   if (!isExistingDone && isIncomingDone) {
-    const existingReopenedTime = new Date(normExisting.reopenedAt || 0).getTime();
+    const existingReopenedTime = normExisting.reopenedAt ? new Date(normExisting.reopenedAt).getTime() : 0;
     const incomingCompletedTime = new Date(normIncoming.completedAt || normIncoming.updatedAt || 0).getTime();
 
     // Check if existing was legitimately reopened after incoming completion
-    if (existingReopenedTime > incomingCompletedTime) {
+    const isExplicitExistingReopen = !!normExisting.taskReopened || 
+      (existingReopenedTime > 0 && existingReopenedTime >= incomingCompletedTime);
+
+    if (isExplicitExistingReopen) {
       return {
         merged: normExisting,
         shouldSyncToD1: true,
@@ -302,8 +310,8 @@ export function mergeTaskRecords(existing: Task, incoming: Task): {
       // Incoming is completed and verified - accept incoming Done!
       return {
         merged: normIncoming,
-        shouldSyncToD1: false,
-        shouldSyncToFirestore: true,
+        shouldSyncToD1: true,
+        shouldSyncToFirestore: false,
       };
     }
   }
@@ -555,6 +563,15 @@ export async function persistTaskDualWrite(
   action: 'create' | 'update' = 'update'
 ): Promise<TaskDualWriteResult> {
   const task = normalizeTaskDateModel(taskInput);
+
+  // Ensure active Firebase Auth session so Firestore security rules succeed
+  if (!auth.currentUser && typeof window !== 'undefined') {
+    try {
+      await signInAnonymously(auth);
+    } catch (authErr) {
+      console.warn('Firebase auto-auth preparation notice:', authErr);
+    }
+  }
 
   const [fsResult, d1Result] = await Promise.allSettled([
     setDoc(doc(db, 'tasks', task.id), sanitizeFirestorePayload(task), { merge: true }),
@@ -1604,6 +1621,7 @@ export const subscribeToCanonicalTasks = (
     }
 
     const tasksToHealInD1: Task[] = [];
+    const tasksToHealInFirestore: Task[] = [];
 
     for (const rawCf of cfList) {
       const cfTask = normalizeTaskDateModel(rawCf);
@@ -1612,10 +1630,13 @@ export const subscribeToCanonicalTasks = (
       if (!existing) {
         taskMap.set(cfTask.id, cfTask);
       } else {
-        const { merged, shouldSyncToD1 } = mergeTaskRecords(existing, cfTask);
+        const { merged, shouldSyncToD1, shouldSyncToFirestore } = mergeTaskRecords(existing, cfTask);
         taskMap.set(cfTask.id, merged);
         if (shouldSyncToD1) {
           tasksToHealInD1.push(merged);
+        }
+        if (shouldSyncToFirestore) {
+          tasksToHealInFirestore.push(merged);
         }
       }
     }
@@ -1633,6 +1654,14 @@ export const subscribeToCanonicalTasks = (
         });
       }
     }
+    // Heal stale records in Firestore in the background with retry fallback
+    if (tasksToHealInFirestore.length > 0) {
+      for (const t of tasksToHealInFirestore) {
+        setDoc(doc(db, 'tasks', t.id), sanitizeFirestorePayload(t), { merge: true }).catch((err) => {
+          enqueueTaskSyncRetry(t, 'firestore', 'update', err);
+        });
+      }
+    }
   }).catch(console.warn);
 
   // 4. Real-time Firestore Snapshot Listener with deterministic merging
@@ -1645,6 +1674,7 @@ export const subscribeToCanonicalTasks = (
       }
 
       const tasksToHealInD1: Task[] = [];
+      const tasksToHealInFirestore: Task[] = [];
 
       snapshot.forEach(docSnap => {
         const d = docSnap.data();
@@ -1654,10 +1684,13 @@ export const subscribeToCanonicalTasks = (
           if (!existing) {
             taskMap.set(fsTask.id, fsTask);
           } else {
-            const { merged, shouldSyncToD1 } = mergeTaskRecords(existing, fsTask);
+            const { merged, shouldSyncToD1, shouldSyncToFirestore } = mergeTaskRecords(existing, fsTask);
             taskMap.set(fsTask.id, merged);
             if (shouldSyncToD1) {
               tasksToHealInD1.push(merged);
+            }
+            if (shouldSyncToFirestore) {
+              tasksToHealInFirestore.push(merged);
             }
           }
         }
@@ -1674,6 +1707,14 @@ export const subscribeToCanonicalTasks = (
         for (const t of tasksToHealInD1) {
           cfUpdateTask(t.id, t).catch((err) => {
             enqueueTaskSyncRetry(t, 'd1', 'update', err);
+          });
+        }
+      }
+      // Heal stale records in Firestore in background with retry fallback
+      if (tasksToHealInFirestore.length > 0) {
+        for (const t of tasksToHealInFirestore) {
+          setDoc(doc(db, 'tasks', t.id), sanitizeFirestorePayload(t), { merge: true }).catch((err) => {
+            enqueueTaskSyncRetry(t, 'firestore', 'update', err);
           });
         }
       }

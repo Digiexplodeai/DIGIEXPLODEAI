@@ -273,7 +273,7 @@ export const TasksView: React.FC = () => {
     if (selectedTaskIds.size === 0 || !bulkRescheduleDate) return;
     setBulkProcessing(true);
     try {
-      const count = await bulkRescheduleTasks(
+      const res = await bulkRescheduleTasks(
         Array.from(selectedTaskIds), 
         bulkRescheduleDate, 
         { uid: user?.uid, name: profile?.name }
@@ -281,7 +281,12 @@ export const TasksView: React.FC = () => {
       setTasks(getCachedTasks());
       setSelectedTaskIds(new Set());
       setBulkRescheduleDate('');
-      triggerToast(`✓ Rescheduled ${count} task${count === 1 ? '' : 's'} to ${bulkRescheduleDate}`);
+      const count = typeof res === 'number' ? res : res.successCount;
+      if (res && typeof res === 'object' && (res.failureCount > 0 || res.partialFailures.length > 0)) {
+        triggerToast(`Rescheduled ${count} tasks (${res.failureCount} failed, ${res.partialFailures.length} queued for retry)`);
+      } else {
+        triggerToast(`✓ Rescheduled ${count} task${count === 1 ? '' : 's'} to ${bulkRescheduleDate}`);
+      }
     } catch (e) {
       console.error('Bulk reschedule error:', e);
       triggerToast('Bulk reschedule failed');

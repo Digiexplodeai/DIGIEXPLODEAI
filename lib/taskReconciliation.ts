@@ -11,7 +11,14 @@
  * No data is modified without explicit function call and approval.
  */
 
-import { type Task, getCachedTasks, setCachedTasks, normalizeTaskDateModel, normalizeTaskStatus } from './taskStorage';
+import { 
+  type Task, 
+  getCachedTasks, 
+  setCachedTasks, 
+  normalizeTaskDateModel, 
+  normalizeTaskStatus,
+  persistTaskDualWrite 
+} from './taskStorage';
 import { cfGetTasks, cfGetWorkLogs, cfUpdateTask } from './cloudflareApi';
 import { db, sanitizeFirestorePayload } from './firebase';
 import { doc, setDoc, addDoc, collection } from 'firebase/firestore';
@@ -244,26 +251,36 @@ export async function applyApprovedTaskRecovery(
         updatedAt: new Date().toISOString(),
       });
 
-      // 1. Update Cloudflare D1
-      cfUpdateTask(t.id, recoveredTask).catch(console.warn);
+      // 1. Reliable Dual-Backend Persistence
+      const writeRes = await persistTaskDualWrite(recoveredTask, 'update');
 
-      // 2. Update Firestore
-      try {
-        await setDoc(doc(db, 'tasks', t.id), sanitizeFirestorePayload(recoveredTask), { merge: true });
-        await addDoc(collection(db, 'activityLogs'), {
-          userId: userProfile?.uid || 'admin',
-          userName: userProfile?.name || 'Admin',
-          action: `reconciled task "${t.title}" to Done from historical Work Log record`,
-          details: `Completed timestamp: ${completionTime}`,
-          createdAt: new Date().toISOString(),
-        });
-      } catch (err) {
-        console.warn('[Recovery] Firestore sync warning:', err);
+      if (writeRes.success) {
+        recoveredCount++;
+        if (writeRes.partialFailure) {
+          const failedBackend = writeRes.d1Status === 'failed' ? 'Cloudflare D1' : 'Firestore';
+          details.push(`⚠ Recovered "${t.title}" (ID: ${t.id}) to Done (Partial: ${failedBackend} sync queued for retry)`);
+        } else {
+          details.push(`✓ Recovered "${t.title}" (ID: ${t.id}) to Done across all backends`);
+        }
+
+        try {
+          await addDoc(collection(db, 'activityLogs'), {
+            userId: userProfile?.uid || 'admin',
+            userName: userProfile?.name || 'Admin',
+            action: `reconciled task "${t.title}" to Done from historical Work Log record`,
+            details: `Completed timestamp: ${completionTime}`,
+            createdAt: new Date().toISOString(),
+          });
+        } catch (err) {
+          console.warn('[Recovery] Activity log notice:', err);
+        }
+
+        updatedTasksList.push(recoveredTask);
+      } else {
+        failedCount++;
+        details.push(`✗ Failed to recover "${t.title}" (ID: ${t.id}): ${writeRes.firestoreError || writeRes.d1Error}`);
+        updatedTasksList.push(t);
       }
-
-      updatedTasksList.push(recoveredTask);
-      recoveredCount++;
-      details.push(`✓ Recovered "${t.title}" (ID: ${t.id}) to Done`);
     } else {
       updatedTasksList.push(t);
     }

@@ -14,9 +14,19 @@ import {
   differenceInCalendarDays,
   addDaysToDateStr,
   DEFAULT_ROLLOVER_SETTINGS,
+  getTaskSyncQueue,
+  setTaskSyncQueue,
+  clearTaskSyncQueue,
+  enqueueTaskSyncRetry,
+  dequeueTaskSyncRetry,
+  processTaskSyncQueue,
+  persistTaskDualWrite,
+  bulkRescheduleTasks,
+  getCachedTasks,
+  setCachedTasks,
 } from '../lib/taskStorage';
 
-import { generateTaskAuditReport } from '../lib/taskReconciliation';
+import { generateTaskAuditReport, applyApprovedTaskRecovery } from '../lib/taskReconciliation';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -246,6 +256,160 @@ async function runAllTests() {
   }
 
   // ---------------------------------------------------------------
+  // 7. Failure-Path Persistence & Idempotent Retry Handling
+  // ---------------------------------------------------------------
+  console.log('\n▶ 7. Failure-Path Persistence & Idempotent Retry Handling');
+  
+  clearTaskSyncQueue();
+  assert(getTaskSyncQueue().length === 0, 'Retry queue starts clean');
+
+  const failureTask: Task = normalizeTaskDateModel({
+    id: 'fail_task_01',
+    title: 'Offline Video Edit',
+    status: 'In Progress',
+    scheduledDate: kolkataDate,
+    dueDate: kolkataDate,
+  });
+
+  // Test 7A: Enqueueing partial failure
+  enqueueTaskSyncRetry(failureTask, 'd1', 'update', new Error('Cloudflare D1 503 Service Unavailable'));
+  let queue = getTaskSyncQueue();
+  assert(queue.length === 1, 'Failed write successfully enqueued in retry queue');
+  assert(queue[0].targetBackend === 'd1', 'Enqueued item targets failed backend (D1)');
+  assert(queue[0].lastError?.includes('503') === true, 'Error message recorded in retry queue item');
+
+  // Test 7B: Idempotent Deduplication (No Duplicated Operations)
+  // When task is updated to Done before retry fires, newer payload supersedes older payload
+  const failureTaskDone: Task = normalizeTaskDateModel({
+    ...failureTask,
+    status: 'Done',
+    completedAt: `${kolkataDate}T12:00:00.000Z`,
+    updatedAt: `${kolkataDate}T12:00:00.000Z`,
+  });
+  enqueueTaskSyncRetry(failureTaskDone, 'd1', 'update', new Error('Cloudflare D1 Network Timeout'));
+  queue = getTaskSyncQueue();
+  assert(queue.length === 1, 'Queue deduplicated: 0 duplicate entries created for same task');
+  assert(queue[0].taskPayload.status === 'Done', 'Latest verified task payload preserved in queue');
+
+  // Test 7C: Dequeue on Successful Sync
+  dequeueTaskSyncRetry(failureTask.id, 'd1');
+  assert(getTaskSyncQueue().length === 0, 'Dequeued successfully after authoritative synchronization');
+
+  // Test 7D: Dual-Write Result Contract Structure
+  const writeResultTestTask = normalizeTaskDateModel({
+    id: 'contract_test_task',
+    title: 'Dual Write Contract Test',
+    status: 'Done',
+    scheduledDate: kolkataDate,
+    dueDate: kolkataDate,
+  });
+  const dualResult = await persistTaskDualWrite(writeResultTestTask, 'update');
+  assert(typeof dualResult.success === 'boolean', 'persistTaskDualWrite returns boolean success');
+  assert(typeof dualResult.allBackendsSynced === 'boolean', 'persistTaskDualWrite returns allBackendsSynced');
+  assert(typeof dualResult.partialFailure === 'boolean', 'persistTaskDualWrite returns partialFailure');
+  assert(dualResult.firestoreStatus === 'success' || dualResult.firestoreStatus === 'failed', 'firestoreStatus is valid status');
+  assert(dualResult.d1Status === 'success' || dualResult.d1Status === 'failed', 'd1Status is valid status');
+
+  // ---------------------------------------------------------------
+  // 8. Concurrent Updates & Race-Condition Tests
+  // ---------------------------------------------------------------
+  console.log('\n▶ 8. Concurrent Updates & Race-Condition Determinism');
+
+  // Test 8A: Concurrent Simultaneous Edits (Newer Timestamp Wins)
+  const taskAtT1 = normalizeTaskDateModel({
+    id: 'concurrent_task_1',
+    title: 'Version from Device 1',
+    status: 'In Progress',
+    updatedAt: '2026-10-21T10:00:00.000Z',
+  });
+  const taskAtT2 = normalizeTaskDateModel({
+    id: 'concurrent_task_1',
+    title: 'Version from Device 2 (Later)',
+    status: 'In Review',
+    updatedAt: '2026-10-21T10:05:00.000Z',
+  });
+  const mergeSimultaneous = mergeTaskRecords(taskAtT1, taskAtT2);
+  assert(mergeSimultaneous.merged.title === 'Version from Device 2 (Later)', 'Newer concurrent edit deterministically wins title');
+  assert(mergeSimultaneous.merged.status === 'In Review', 'Newer concurrent edit deterministically wins status');
+
+  // Test 8B: Concurrent Task Completion vs Stale Device Overwrite
+  const deviceA_completed = normalizeTaskDateModel({
+    id: 'concurrent_done_task',
+    title: 'Client Landing Page',
+    status: 'Done',
+    completedAt: '2026-10-21T11:00:00.000Z',
+    updatedAt: '2026-10-21T11:00:00.000Z',
+  });
+  const deviceB_staleOpen = normalizeTaskDateModel({
+    id: 'concurrent_done_task',
+    title: 'Client Landing Page',
+    status: 'To Do',
+    updatedAt: '2026-10-21T09:00:00.000Z',
+  });
+  const mergeDoneRace = mergeTaskRecords(deviceA_completed, deviceB_staleOpen);
+  assert(mergeDoneRace.merged.status === 'Done', 'Concurrent stale open task cannot revert verified Done');
+  assert(mergeDoneRace.shouldSyncToD1 === true, 'Flags healing write for stale backend');
+
+  // Test 8C: Concurrent Legitimate Reopen vs Stale Completion
+  const legitReopened = normalizeTaskDateModel({
+    id: 'concurrent_done_task',
+    title: 'Client Landing Page',
+    status: 'In Progress',
+    taskReopened: true,
+    reopenedAt: '2026-10-21T11:30:00.000Z',
+    updatedAt: '2026-10-21T11:30:00.000Z',
+  });
+  const mergeReopenRace = mergeTaskRecords(deviceA_completed, legitReopened);
+  assert(mergeReopenRace.merged.status === 'In Progress', 'Legitimate deliberate reopening overrides prior completion');
+  assert(mergeReopenRace.merged.taskReopened === true, 'Reopen flag retained through concurrent merge');
+
+  // Test 8D: Concurrent Rollover Evaluation Idempotency
+  const concurrentRolloverTasks = [
+    normalizeTaskDateModel({
+      id: 'concurrent_roll_task',
+      title: 'Overdue Campaign',
+      status: 'To Do',
+      scheduledDate: yesterdayDate,
+      dueDate: yesterdayDate,
+      rolloverCount: 0,
+    })
+  ];
+  const [evalRunA] = await Promise.all([
+    evaluateTaskRollovers(concurrentRolloverTasks, DEFAULT_ROLLOVER_SETTINGS),
+    evaluateTaskRollovers(concurrentRolloverTasks, DEFAULT_ROLLOVER_SETTINGS),
+  ]);
+  const rolledA = evalRunA.updatedTasks[0];
+  const evalRunC = await evaluateTaskRollovers(evalRunA.updatedTasks, DEFAULT_ROLLOVER_SETTINGS);
+  assert(rolledA.rolloverCount === 1, 'Rollover count is exactly 1 after first execution');
+  assert(evalRunC.rolledOverCount === 0, 'Second simultaneous/subsequent evaluation yields 0 additional rollovers');
+  assert(evalRunC.updatedTasks[0].rolloverCount === 1, 'Rollover count never double-increments under concurrency');
+
+  // ---------------------------------------------------------------
+  // 9. Bulk Rescheduling Persistence & Partial Failure Contract
+  // ---------------------------------------------------------------
+  console.log('\n▶ 9. Bulk Reschedule Contract & Failure Reporting');
+  const dummyCachedTasks = [
+    normalizeTaskDateModel({ id: 'resched_1', title: 'Task 1', status: 'To Do', scheduledDate: kolkataDate }),
+    normalizeTaskDateModel({ id: 'resched_2', title: 'Task 2', status: 'To Do', scheduledDate: kolkataDate }),
+  ];
+  setCachedTasks(dummyCachedTasks);
+
+  const reschedTargetDate = addDaysToDateStr(kolkataDate, 2);
+  const reschedResult = await bulkRescheduleTasks(['resched_1', 'resched_2'], reschedTargetDate, { uid: 'test_admin', name: 'Admin' });
+  assert(reschedResult.updatedCount === 2, 'bulkRescheduleTasks updated count matches requested tasks');
+  assert(typeof reschedResult.successCount === 'number', 'bulkRescheduleTasks returns numeric successCount');
+  assert(typeof reschedResult.failureCount === 'number', 'bulkRescheduleTasks returns numeric failureCount');
+  assert(Array.isArray(reschedResult.partialFailures), 'bulkRescheduleTasks returns partialFailures array');
+
+  // ---------------------------------------------------------------
+  // 10. Historical Reconciliation Recovery Contract
+  // ---------------------------------------------------------------
+  console.log('\n▶ 10. Historical Reconciliation Approval Contract');
+  const emptyRecovery = await applyApprovedTaskRecovery([]);
+  assert(emptyRecovery.recoveredCount === 0, 'Empty approval list safely returns 0 recovered');
+  assert(emptyRecovery.details[0] === 'No tasks selected for recovery', 'Empty approval reports clear notice');
+
+  // ---------------------------------------------------------------
   // Final Results
   // ---------------------------------------------------------------
   console.log('\n====================================================');
@@ -254,6 +418,8 @@ async function runAllTests() {
 
   if (failedTests > 0) {
     process.exit(1);
+  } else {
+    process.exit(0);
   }
 }
 

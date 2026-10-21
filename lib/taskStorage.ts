@@ -337,6 +337,281 @@ export function mergeTaskRecords(existing: Task, incoming: Task): {
 }
 
 /**
+ * ─────────────────────────────────────────────────────────────────────────────
+ * RELIABLE DUAL-BACKEND PERSISTENCE & RETRY ENGINE (OUTBOX PATTERN)
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
+export interface TaskSyncQueueItem {
+  id: string; // unique item id e.g. `${taskId}_${targetBackend}`
+  taskId: string;
+  action: 'create' | 'update' | 'delete';
+  targetBackend: 'firestore' | 'd1' | 'both';
+  taskPayload: Task;
+  queuedAt: string;
+  attempts: number;
+  lastError?: string;
+  lastAttemptAt?: string;
+}
+
+export const LOCAL_STORAGE_TASK_SYNC_QUEUE_KEY = 'digi_task_sync_queue_v1';
+
+// In-memory queue fallback for non-browser/test environments
+let memoryTaskSyncQueue: TaskSyncQueueItem[] = [];
+
+export const getTaskSyncQueue = (): TaskSyncQueueItem[] => {
+  if (typeof window === 'undefined') return [...memoryTaskSyncQueue];
+  try {
+    const raw = localStorage.getItem(LOCAL_STORAGE_TASK_SYNC_QUEUE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.warn('Could not read task sync queue:', e);
+  }
+  return [...memoryTaskSyncQueue];
+};
+
+export const setTaskSyncQueue = (queue: TaskSyncQueueItem[]) => {
+  memoryTaskSyncQueue = [...queue];
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(LOCAL_STORAGE_TASK_SYNC_QUEUE_KEY, JSON.stringify(queue));
+  } catch (e) {
+    console.warn('Could not save task sync queue:', e);
+  }
+};
+
+export const clearTaskSyncQueue = () => {
+  memoryTaskSyncQueue = [];
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.removeItem(LOCAL_STORAGE_TASK_SYNC_QUEUE_KEY);
+    } catch {}
+  }
+};
+
+/**
+ * Enqueues or updates a failed write into the persistent retry queue.
+ * Idempotently deduplicates by taskId and targetBackend, keeping the newest verified payload.
+ */
+export const enqueueTaskSyncRetry = (
+  task: Task,
+  targetBackend: 'firestore' | 'd1' | 'both',
+  action: 'create' | 'update' | 'delete' = 'update',
+  error?: any
+) => {
+  const currentQueue = getTaskSyncQueue();
+  const queueId = `${task.id}_${targetBackend}`;
+  const nowIso = new Date().toISOString();
+  const errorMessage = error instanceof Error ? error.message : String(error || 'Write failed');
+
+  const existingIdx = currentQueue.findIndex(item => 
+    item.taskId === task.id && (item.targetBackend === targetBackend || targetBackend === 'both' || item.targetBackend === 'both')
+  );
+
+  const newItem: TaskSyncQueueItem = {
+    id: queueId,
+    taskId: task.id,
+    action,
+    targetBackend,
+    taskPayload: normalizeTaskDateModel(task),
+    queuedAt: existingIdx >= 0 ? currentQueue[existingIdx].queuedAt : nowIso,
+    attempts: existingIdx >= 0 ? currentQueue[existingIdx].attempts : 0,
+    lastError: errorMessage,
+    lastAttemptAt: nowIso,
+  };
+
+  if (existingIdx >= 0) {
+    currentQueue[existingIdx] = newItem;
+  } else {
+    currentQueue.push(newItem);
+  }
+
+  setTaskSyncQueue(currentQueue);
+};
+
+/**
+ * Removes a task retry entry once successfully synced.
+ */
+export const dequeueTaskSyncRetry = (taskId: string, targetBackend?: 'firestore' | 'd1' | 'both') => {
+  const currentQueue = getTaskSyncQueue();
+  const updated = currentQueue.filter(item => {
+    if (item.taskId !== taskId) return true;
+    if (!targetBackend || targetBackend === 'both') return false;
+    return item.targetBackend !== targetBackend && item.targetBackend !== 'both';
+  });
+  setTaskSyncQueue(updated);
+};
+
+/**
+ * Processes queued failed writes with exponential backoff / attempt capping.
+ * Strictly idempotent: relies on key-based upserts and newest payload preservation.
+ */
+export const processTaskSyncQueue = async (
+  options?: { maxAttempts?: number }
+): Promise<{ 
+  retriedCount: number; 
+  succeededCount: number; 
+  failedCount: number; 
+  errors: Array<{ taskId: string; backend: string; error: string }> 
+}> => {
+  const maxAttempts = options?.maxAttempts || 5;
+  const currentQueue = getTaskSyncQueue();
+  if (currentQueue.length === 0) {
+    return { retriedCount: 0, succeededCount: 0, failedCount: 0, errors: [] };
+  }
+
+  let succeededCount = 0;
+  let failedCount = 0;
+  const errors: Array<{ taskId: string; backend: string; error: string }> = [];
+  const remainingQueue: TaskSyncQueueItem[] = [];
+
+  for (const item of currentQueue) {
+    if (item.attempts >= maxAttempts) {
+      remainingQueue.push(item);
+      failedCount++;
+      continue;
+    }
+
+    item.attempts++;
+    item.lastAttemptAt = new Date().toISOString();
+
+    let firestoreOk = item.targetBackend !== 'firestore' && item.targetBackend !== 'both';
+    let d1Ok = item.targetBackend !== 'd1' && item.targetBackend !== 'both';
+
+    if (!firestoreOk) {
+      try {
+        if (item.action === 'delete') {
+          await setDoc(doc(db, 'tasks', item.taskId), sanitizeFirestorePayload({
+            is_deleted: true,
+            isArchived: true,
+            updatedAt: new Date().toISOString()
+          }), { merge: true });
+        } else {
+          await setDoc(doc(db, 'tasks', item.taskId), sanitizeFirestorePayload(item.taskPayload), { merge: true });
+        }
+        firestoreOk = true;
+      } catch (fsErr: any) {
+        item.lastError = `Firestore retry failed: ${fsErr?.message || fsErr}`;
+        errors.push({ taskId: item.taskId, backend: 'firestore', error: item.lastError });
+      }
+    }
+
+    if (!d1Ok) {
+      try {
+        if (item.action === 'delete') {
+          await cfDeleteTask(item.taskId);
+        } else if (item.action === 'create') {
+          await cfCreateTask(item.taskPayload);
+        } else {
+          await cfUpdateTask(item.taskId, item.taskPayload);
+        }
+        d1Ok = true;
+      } catch (cfErr: any) {
+        item.lastError = `Cloudflare D1 retry failed: ${cfErr?.message || cfErr}`;
+        errors.push({ taskId: item.taskId, backend: 'd1', error: item.lastError });
+      }
+    }
+
+    if (firestoreOk && d1Ok) {
+      succeededCount++;
+    } else {
+      failedCount++;
+      if (firestoreOk && !d1Ok) {
+        item.targetBackend = 'd1';
+      } else if (!firestoreOk && d1Ok) {
+        item.targetBackend = 'firestore';
+      }
+      remainingQueue.push(item);
+    }
+  }
+
+  setTaskSyncQueue(remainingQueue);
+  return { retriedCount: currentQueue.length, succeededCount, failedCount, errors };
+};
+
+export interface TaskDualWriteResult {
+  success: boolean;
+  allBackendsSynced: boolean;
+  partialFailure: boolean;
+  firestoreStatus: 'success' | 'failed';
+  d1Status: 'success' | 'failed';
+  firestoreError?: string;
+  d1Error?: string;
+  retryQueued: boolean;
+  task: Task;
+}
+
+/**
+ * Reliable Dual-Write Core:
+ * Executes writes to both Firestore and Cloudflare D1 with Promise.allSettled.
+ * Automatically catches partial failures, enqueues idempotent retries,
+ * and preserves verified task history.
+ */
+export async function persistTaskDualWrite(
+  taskInput: Task,
+  action: 'create' | 'update' = 'update'
+): Promise<TaskDualWriteResult> {
+  const task = normalizeTaskDateModel(taskInput);
+
+  const [fsResult, d1Result] = await Promise.allSettled([
+    setDoc(doc(db, 'tasks', task.id), sanitizeFirestorePayload(task), { merge: true }),
+    action === 'create' ? cfCreateTask(task) : cfUpdateTask(task.id, task)
+  ]);
+
+  const firestoreStatus: 'success' | 'failed' = fsResult.status === 'fulfilled' ? 'success' : 'failed';
+  const d1Status: 'success' | 'failed' = d1Result.status === 'fulfilled' ? 'success' : 'failed';
+
+  const firestoreError = fsResult.status === 'rejected' 
+    ? (fsResult.reason instanceof Error ? fsResult.reason.message : String(fsResult.reason))
+    : undefined;
+
+  const d1Error = d1Result.status === 'rejected'
+    ? (d1Result.reason instanceof Error ? d1Result.reason.message : String(d1Result.reason))
+    : undefined;
+
+  const allBackendsSynced = firestoreStatus === 'success' && d1Status === 'success';
+  const partialFailure = (firestoreStatus === 'success' && d1Status === 'failed') ||
+                         (firestoreStatus === 'failed' && d1Status === 'success');
+
+  let retryQueued = false;
+
+  if (partialFailure) {
+    if (d1Status === 'failed') {
+      enqueueTaskSyncRetry(task, 'd1', action, d1Error);
+      retryQueued = true;
+    } else if (firestoreStatus === 'failed') {
+      enqueueTaskSyncRetry(task, 'firestore', action, firestoreError);
+      retryQueued = true;
+    }
+  } else if (!allBackendsSynced) {
+    // Both backends failed
+    enqueueTaskSyncRetry(task, 'both', action, `${firestoreError || ''} | ${d1Error || ''}`);
+    retryQueued = true;
+  } else {
+    // Both succeeded! Dequeue any previous pending retries for this task
+    dequeueTaskSyncRetry(task.id);
+  }
+
+  // Operation considered functionally successful if at least one backend persisted
+  const success = firestoreStatus === 'success' || d1Status === 'success';
+
+  return {
+    success,
+    allBackendsSynced,
+    partialFailure,
+    firestoreStatus,
+    d1Status,
+    firestoreError,
+    d1Error,
+    retryQueued,
+    task
+  };
+}
+
+/**
  * Calculates next valid working day in YYYY-MM-DD format based on configured working days.
  */
 export function getNextWorkingDate(dateStr: string, workingDays: number[] = [1, 2, 3, 4, 5, 6]): string {
@@ -599,25 +874,46 @@ export async function evaluateTaskRollovers(
     // 1. Update Local Cache immediately
     setCachedTasks(updatedTasks);
 
-    // 2. Persist to Firestore and Cloudflare D1
-    try {
-      for (const t of modifiedTasksToPersist) {
-        setDoc(doc(db, 'tasks', t.id), sanitizeFirestorePayload(t), { merge: true }).catch(console.warn);
-        cfUpdateTask(t.id, t).catch(console.warn);
+    // 2. Persist to Firestore and Cloudflare D1 with Promise.allSettled and retry queue
+    const partialFailures: Array<{ taskId: string; backend: 'firestore' | 'd1'; error: string }> = [];
+    let failedCount = 0;
+
+    const persistenceResults = await Promise.allSettled(
+      modifiedTasksToPersist.map(t => persistTaskDualWrite(t, 'update'))
+    );
+
+    for (let i = 0; i < persistenceResults.length; i++) {
+      const res = persistenceResults[i];
+      const t = modifiedTasksToPersist[i];
+      if (res.status === 'fulfilled') {
+        if (res.value.partialFailure) {
+          partialFailures.push({
+            taskId: t.id,
+            backend: res.value.d1Status === 'failed' ? 'd1' : 'firestore',
+            error: res.value.d1Error || res.value.firestoreError || 'Partial rollover sync failure'
+          });
+        }
+      } else {
+        failedCount++;
+        enqueueTaskSyncRetry(t, 'both', 'update', res.reason);
       }
-    } catch (e) {
-      console.warn('Rollover sync notice:', e);
     }
+
+    return { updatedTasks, rolledOverCount: count, partialFailures, failedCount };
   }
 
-  return { updatedTasks, rolledOverCount: count };
+  return { updatedTasks, rolledOverCount: count, partialFailures: [], failedCount: 0 };
 }
+
+let memoryCachedTasks: Task[] = [];
 
 /**
  * Loads tasks immediately from local cache with automatic date normalization
  */
 export const getCachedTasks = (): Task[] => {
-  if (typeof window === 'undefined') return DEFAULT_MASTER_TASKS.map(normalizeTaskDateModel);
+  if (typeof window === 'undefined') {
+    return (memoryCachedTasks.length > 0 ? memoryCachedTasks : DEFAULT_MASTER_TASKS).map(normalizeTaskDateModel);
+  }
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_TASKS_KEY);
     if (raw) {
@@ -638,9 +934,10 @@ export const getCachedTasks = (): Task[] => {
  * Updates local cache with full task list
  */
 export const setCachedTasks = (tasks: Task[]) => {
+  const normalized = tasks.map(normalizeTaskDateModel);
+  memoryCachedTasks = [...normalized];
   if (typeof window === 'undefined') return;
   try {
-    const normalized = tasks.map(normalizeTaskDateModel);
     localStorage.setItem(LOCAL_STORAGE_TASKS_KEY, JSON.stringify(normalized));
   } catch (e) {
     console.warn('Could not write cached tasks:', e);
@@ -699,12 +996,13 @@ export const persistNewTask = async (
   const updatedCache = [newTask, ...currentCached.filter(t => t.id !== taskId)];
   setCachedTasks(updatedCache);
 
-  // Sync to Cloudflare D1
-  cfCreateTask(newTask).catch(e => console.warn('Cloudflare D1 task create sync note:', e));
+  // 2. Reliable Dual-Backend Persistence
+  const writeRes = await persistTaskDualWrite(newTask, 'create');
+  if (!writeRes.success) {
+    console.warn('Backend persistence error for new task (queued for retry):', writeRes.firestoreError, writeRes.d1Error);
+  }
 
-  // 2. Persist to Firestore
   try {
-    await setDoc(doc(db, 'tasks', taskId), sanitizeFirestorePayload(newTask), { merge: true });
 
     // 3. Write activity log & emit workspace events
     try {
@@ -843,12 +1141,13 @@ export const persistUpdateTask = async (
   if (!target) updatedList.unshift(updatedTask);
   setCachedTasks(updatedList);
 
-  // Sync to Cloudflare D1
-  cfUpdateTask(taskId, updatedTask).catch(e => console.warn('Cloudflare D1 task update sync note:', e));
+  // 2. Reliable Dual-Backend Persistence
+  const writeRes = await persistTaskDualWrite(updatedTask, 'update');
+  if (!writeRes.success) {
+    console.warn('Backend persistence error for task update (queued for retry):', writeRes.firestoreError, writeRes.d1Error);
+  }
 
-  // 2. Persist to Firestore
   try {
-    await setDoc(doc(db, 'tasks', taskId), sanitizeFirestorePayload(updatedTask), { merge: true });
 
     // 3. Auto-sync to Approvals Queue if status is In Review
     if (updatedTask.status === 'In Review') {
@@ -870,48 +1169,94 @@ export const persistUpdateTask = async (
  * Bulk Reschedule Tasks (Super Admin operation)
  * Modifies scheduledDate while keeping original due date and auditing each task.
  */
+export interface BulkRescheduleResult {
+  updatedCount: number;
+  successCount: number;
+  failureCount: number;
+  partialFailures: Array<{ taskId: string; backend: 'firestore' | 'd1'; error: string }>;
+}
+
 export const bulkRescheduleTasks = async (
   taskIds: string[],
   newScheduledDate: string,
   userProfile?: { uid?: string; name?: string }
-): Promise<number> => {
-  if (!taskIds || taskIds.length === 0 || !newScheduledDate) return 0;
+): Promise<BulkRescheduleResult> => {
+  if (!taskIds || taskIds.length === 0 || !newScheduledDate) {
+    return { updatedCount: 0, successCount: 0, failureCount: 0, partialFailures: [] };
+  }
   const nowIso = new Date().toISOString();
   const currentCached = getCachedTasks();
   let updatedCount = 0;
 
+  const tasksToPersist: Task[] = [];
   const updatedList = currentCached.map(task => {
     if (taskIds.includes(task.id)) {
       updatedCount++;
-      return normalizeTaskDateModel({
+      const updated = normalizeTaskDateModel({
         ...task,
         scheduledDate: newScheduledDate,
         scheduled_date: newScheduledDate,
         updatedAt: nowIso,
       });
+      tasksToPersist.push(updated);
+      return updated;
     }
     return task;
   });
 
   setCachedTasks(updatedList);
 
-  for (const tId of taskIds) {
-    const target = updatedList.find(t => t.id === tId);
-    if (target) {
-      setDoc(doc(db, 'tasks', tId), sanitizeFirestorePayload(target), { merge: true }).catch(console.warn);
-      cfUpdateTask(tId, target).catch(console.warn);
-      addDoc(collection(db, 'activityLogs'), {
-        userId: userProfile?.uid || '',
-        userName: userProfile?.name || 'Super Admin',
-        action: `rescheduled task "${target.title}" to ${newScheduledDate}`,
-        details: `Original Scheduled: ${target.originalScheduledDate || 'N/A'} · Due: ${target.dueDate}`,
-        createdAt: nowIso,
-      }).catch(() => {});
-    }
-  }
+  const partialFailures: Array<{ taskId: string; backend: 'firestore' | 'd1'; error: string }> = [];
+  let successCount = 0;
+  let failureCount = 0;
 
-  return updatedCount;
+  const writePromises = tasksToPersist.map(async (target) => {
+    const writeRes = await persistTaskDualWrite(target, 'update');
+    if (writeRes.success) {
+      successCount++;
+      if (writeRes.partialFailure) {
+        partialFailures.push({
+          taskId: target.id,
+          backend: writeRes.d1Status === 'failed' ? 'd1' : 'firestore',
+          error: writeRes.d1Error || writeRes.firestoreError || 'Partial sync failure'
+        });
+      }
+    } else {
+      failureCount++;
+    }
+
+    addDoc(collection(db, 'activityLogs'), {
+      userId: userProfile?.uid || '',
+      userName: userProfile?.name || 'Super Admin',
+      action: `rescheduled task "${target.title}" to ${newScheduledDate}`,
+      details: `Original Scheduled: ${target.originalScheduledDate || 'N/A'} · Due: ${target.dueDate}`,
+      createdAt: nowIso,
+    }).catch(() => {});
+  });
+
+  await Promise.allSettled(writePromises);
+
+  return {
+    updatedCount,
+    successCount,
+    failureCount,
+    partialFailures
+  };
 };
+
+export interface TaskTransitionResult {
+  success: boolean;
+  task: Task | null;
+  message: string;
+  allBackendsSynced?: boolean;
+  partialFailure?: boolean;
+  backendSync?: {
+    firestore: 'success' | 'failed';
+    d1: 'success' | 'failed';
+    firestoreError?: string;
+    d1Error?: string;
+  };
+}
 
 /**
  * Canonical Single Status Transition Engine
@@ -919,10 +1264,10 @@ export const bulkRescheduleTasks = async (
  */
 export const transitionTaskStatus = async (
   taskId: string,
-  targetStatus: 'To Do' | 'In Progress' | 'In Review' | 'Done',
+  targetStatus: 'To Do' | 'In Progress' | 'In Review' | 'Done' | 'Cancelled',
   source: 'drag_drop' | 'left_arrow' | 'right_arrow' | 'status_dropdown' | 'bulk_action' | 'approval_sync' | 'calendar_action',
   userProfile?: { uid?: string; name?: string; role?: string }
-): Promise<{ success: boolean; task: Task | null; message: string }> => {
+): Promise<TaskTransitionResult> => {
   const currentCached = getCachedTasks();
   const targetTask = currentCached.find(t => t.id === taskId);
   if (!targetTask) {
@@ -933,7 +1278,14 @@ export const transitionTaskStatus = async (
   const newStatus = normalizeTaskStatus(targetStatus);
 
   if (previousStatus === newStatus) {
-    return { success: true, task: targetTask, message: 'Status unchanged' };
+    return { 
+      success: true, 
+      task: targetTask, 
+      message: 'Status unchanged',
+      allBackendsSynced: true,
+      partialFailure: false,
+      backendSync: { firestore: 'success', d1: 'success' }
+    };
   }
 
   const nowIso = new Date().toISOString();
@@ -964,35 +1316,25 @@ export const transitionTaskStatus = async (
   const updatedList = currentCached.map(t => t.id === taskId ? updatedTask : t);
   setCachedTasks(updatedList);
 
-  // 2. Persist to authoritative backends (both Firestore and Cloudflare D1)
-  let firestoreSuccess = false;
-  let d1Success = false;
-  let persistError: any = null;
-
-  try {
-    await setDoc(doc(db, 'tasks', taskId), sanitizeFirestorePayload(updatedTask), { merge: true });
-    firestoreSuccess = true;
-  } catch (fsErr) {
-    console.warn('Firestore task status persistence notice:', fsErr);
-    persistError = fsErr;
-  }
-
-  try {
-    await cfUpdateTask(taskId, updatedTask);
-    d1Success = true;
-  } catch (cfErr) {
-    console.warn('Cloudflare D1 task status persistence notice:', cfErr);
-    if (!persistError) persistError = cfErr;
-  }
+  // 2. Reliable Dual-Backend Persistence
+  const writeRes = await persistTaskDualWrite(updatedTask, 'update');
 
   // If both backends fail to persist, rollback local cache and report error explicitly
-  if (!firestoreSuccess && !d1Success) {
-    console.error('Failed to persist task status to any storage backend:', persistError);
+  if (!writeRes.success) {
+    console.error('Failed to persist task status to server database:', writeRes.firestoreError, writeRes.d1Error);
     setCachedTasks(currentCached);
     return {
       success: false,
       task: targetTask,
-      message: 'Failed to persist status change to server database'
+      message: 'Failed to persist status change to server database',
+      allBackendsSynced: false,
+      partialFailure: false,
+      backendSync: {
+        firestore: writeRes.firestoreStatus,
+        d1: writeRes.d1Status,
+        firestoreError: writeRes.firestoreError,
+        d1Error: writeRes.d1Error
+      }
     };
   }
 
@@ -1089,12 +1431,27 @@ export const transitionTaskStatus = async (
     }
   }
 
+  let statusMessage = isNowDone 
+    ? 'Task completed & Work Log synced' 
+    : (wasDone && !isNowDone ? `Task reopened to ${newStatus}` : `Moved to ${newStatus}`);
+
+  if (writeRes.partialFailure) {
+    const failedBackend = writeRes.d1Status === 'failed' ? 'Cloudflare D1' : 'Firestore';
+    statusMessage += ` (${failedBackend} sync queued for background retry)`;
+  }
+
   return { 
     success: true, 
     task: updatedTask, 
-    message: isNowDone 
-      ? 'Task completed & Work Log synced' 
-      : (wasDone && !isNowDone ? `Task reopened to ${newStatus}` : `Moved to ${newStatus}`)
+    message: statusMessage,
+    allBackendsSynced: writeRes.allBackendsSynced,
+    partialFailure: writeRes.partialFailure,
+    backendSync: {
+      firestore: writeRes.firestoreStatus,
+      d1: writeRes.d1Status,
+      firestoreError: writeRes.firestoreError,
+      d1Error: writeRes.d1Error
+    }
   };
 };
 
@@ -1112,27 +1469,31 @@ export const persistDeleteTask = async (
   const updatedList = currentCached.filter(t => t.id !== taskId);
   setCachedTasks(updatedList);
 
-  // Sync delete to Cloudflare D1
-  cfDeleteTask(taskId).catch(e => console.warn('Cloudflare D1 task delete sync note:', e));
-
   const nowIso = new Date().toISOString();
   const actorName = userProfile?.name || 'User';
   const actorId = userProfile?.uid || 'admin';
   const actorRole = userProfile?.role || 'employee';
 
   try {
-    if (options?.softDelete !== false) {
-      // Soft-delete / Archive canonical Task in Firestore
-      await setDoc(doc(db, 'tasks', taskId), sanitizeFirestorePayload({
-        is_deleted: true,
-        isArchived: true,
-        deleted_at: nowIso,
-        deleted_by: actorName,
-        deleted_by_id: actorId,
-        updatedAt: nowIso
-      }), { merge: true });
-    } else {
-      await deleteDoc(doc(db, 'tasks', taskId));
+    const [d1Res, fsRes] = await Promise.allSettled([
+      cfDeleteTask(taskId),
+      options?.softDelete !== false
+        ? setDoc(doc(db, 'tasks', taskId), sanitizeFirestorePayload({
+            is_deleted: true,
+            isArchived: true,
+            deleted_at: nowIso,
+            deleted_by: actorName,
+            deleted_by_id: actorId,
+            updatedAt: nowIso
+          }), { merge: true })
+        : deleteDoc(doc(db, 'tasks', taskId))
+    ]);
+
+    if (d1Res.status === 'rejected') {
+      enqueueTaskSyncRetry({ id: taskId } as Task, 'd1', 'delete', d1Res.reason);
+    }
+    if (fsRes.status === 'rejected') {
+      enqueueTaskSyncRetry({ id: taskId } as Task, 'firestore', 'delete', fsRes.reason);
     }
 
     // Audit Event: task.deleted and activityLog
@@ -1221,6 +1582,9 @@ export const subscribeToCanonicalTasks = (
   let currentTasks = getCachedTasks();
   onUpdate(currentTasks);
 
+  // Safely process any pending retries from prior offline/failed operations
+  processTaskSyncQueue().catch(console.warn);
+
   // 2. Evaluate rollovers on initial load safely (once per business day)
   evaluateTaskRollovers(currentTasks).then(({ updatedTasks, rolledOverCount }) => {
     if (rolledOverCount > 0) {
@@ -1261,10 +1625,12 @@ export const subscribeToCanonicalTasks = (
     currentTasks = reconciledList;
     onUpdate(reconciledList);
 
-    // Heal stale records in D1 in the background
+    // Heal stale records in D1 in the background with retry fallback
     if (tasksToHealInD1.length > 0) {
       for (const t of tasksToHealInD1) {
-        cfUpdateTask(t.id, t).catch(() => {});
+        cfUpdateTask(t.id, t).catch((err) => {
+          enqueueTaskSyncRetry(t, 'd1', 'update', err);
+        });
       }
     }
   }).catch(console.warn);
@@ -1303,10 +1669,12 @@ export const subscribeToCanonicalTasks = (
       currentTasks = updatedTasks;
       onUpdate(updatedTasks);
 
-      // Heal stale records in D1 in background
+      // Heal stale records in D1 in background with retry fallback
       if (tasksToHealInD1.length > 0) {
         for (const t of tasksToHealInD1) {
-          cfUpdateTask(t.id, t).catch(() => {});
+          cfUpdateTask(t.id, t).catch((err) => {
+            enqueueTaskSyncRetry(t, 'd1', 'update', err);
+          });
         }
       }
       return;

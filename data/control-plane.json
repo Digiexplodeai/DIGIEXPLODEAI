@@ -1,6 +1,138 @@
 {
   "auditLogs": [
     {
+      "audit_id": "audit_1792589877417_r478j",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792589877417_vv87zo",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "action": "Status changed",
+      "module": "Tasks & Work",
+      "entity_type": "task",
+      "entity_id": "task_1792061865382_i5ql8",
+      "description": "Task \"TRUST REALTOR 3 VIDEOS CORRECTIONS\" was reopened to To Do by Digiexplode Super Admin",
+      "metadata": {
+        "taskTitle": "TRUST REALTOR 3 VIDEOS CORRECTIONS",
+        "previousStatus": "Done",
+        "newStatus": "To Do",
+        "clientName": "General",
+        "assigneeName": "Vansh",
+        "source": "status_dropdown"
+      },
+      "created_at": "2026-10-21T13:37:57.417Z"
+    },
+    {
+      "audit_id": "audit_1792589872436_488m4",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792589872436_hggpsk",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "action": "Status changed",
+      "module": "Tasks & Work",
+      "entity_type": "task",
+      "entity_id": "task_1792061741069_7pilu",
+      "description": "Task \"SILVER CARE GOOGLE ADS UPDATE\" was reopened to To Do by Digiexplode Super Admin",
+      "metadata": {
+        "taskTitle": "SILVER CARE GOOGLE ADS UPDATE",
+        "previousStatus": "Done",
+        "newStatus": "To Do",
+        "clientName": "General",
+        "assigneeName": "Vansh",
+        "source": "status_dropdown"
+      },
+      "created_at": "2026-10-21T13:37:52.436Z"
+    },
+    {
+      "audit_id": "audit_1792589862223_hf93a",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792589862223_1j2mcj",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "action": "Completed",
+      "module": "Tasks & Work",
+      "entity_type": "task",
+      "entity_id": "task_1792061741069_7pilu",
+      "description": "Task \"SILVER CARE GOOGLE ADS UPDATE\" moved from To Do to Done (right_arrow) by Digiexplode Super Admin",
+      "metadata": {
+        "taskTitle": "SILVER CARE GOOGLE ADS UPDATE",
+        "previousStatus": "To Do",
+        "newStatus": "Done",
+        "clientName": "General",
+        "assigneeName": "Vansh",
+        "source": "right_arrow"
+      },
+      "created_at": "2026-10-21T13:37:42.223Z"
+    },
+    {
+      "audit_id": "audit_1792589858383_wd0z1",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792589858383_m0fk67",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "action": "Completed",
+      "module": "Tasks & Work",
+      "entity_type": "task",
+      "entity_id": "task_1792061865382_i5ql8",
+      "description": "Task \"TRUST REALTOR 3 VIDEOS CORRECTIONS\" moved from To Do to Done (right_arrow) by Digiexplode Super Admin",
+      "metadata": {
+        "taskTitle": "TRUST REALTOR 3 VIDEOS CORRECTIONS",
+        "previousStatus": "To Do",
+        "newStatus": "Done",
+        "clientName": "General",
+        "assigneeName": "Vansh",
+        "source": "right_arrow"
+      },
+      "created_at": "2026-10-21T13:37:38.383Z"
+    },
+    {
+      "audit_id": "audit_1792589857355_7qfpp",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792589857355_11lz2n",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "action": "Status changed",
+      "module": "Tasks & Work",
+      "entity_type": "task",
+      "entity_id": "task_1792061865382_i5ql8",
+      "description": "Task \"TRUST REALTOR 3 VIDEOS CORRECTIONS\" moved from In Progress to To Do (left_arrow) by Digiexplode Super Admin",
+      "metadata": {
+        "taskTitle": "TRUST REALTOR 3 VIDEOS CORRECTIONS",
+        "previousStatus": "In Progress",
+        "newStatus": "To Do",
+        "clientName": "General",
+        "assigneeName": "Vansh",
+        "source": "left_arrow"
+      },
+      "created_at": "2026-10-21T13:37:37.355Z"
+    },
+    {
+      "audit_id": "audit_1792589854590_hmizr",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792589854589_5rtkv5",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "action": "Status changed",
+      "module": "Tasks & Work",
+      "entity_type": "task",
+      "entity_id": "task_1792061865382_i5ql8",
+      "description": "Task \"TRUST REALTOR 3 VIDEOS CORRECTIONS\" moved from To Do to In Progress (right_arrow) by Digiexplode Super Admin",
+      "metadata": {
+        "taskTitle": "TRUST REALTOR 3 VIDEOS CORRECTIONS",
+        "previousStatus": "To Do",
+        "newStatus": "In Progress",
+        "clientName": "General",
+        "assigneeName": "Vansh",
+        "source": "right_arrow"
+      },
+      "created_at": "2026-10-21T13:37:34.589Z"
+    },
+    {
       "audit_id": "audit_1791298054150_r1rfa",
       "workspace_id": "default_workspace",
       "event_id": "evt_1791298054150_20a6qj",
@@ -940,6 +1072,150 @@
   },
   "settings": {},
   "events": [
+    {
+      "event_id": "evt_1792589877417_vv87zo",
+      "event_type": "task.status_changed",
+      "workspace_id": "default_workspace",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "entity_type": "task",
+      "entity_id": "task_1792061865382_i5ql8",
+      "client_id": "",
+      "target_member_ids": [
+        "emp_vansh"
+      ],
+      "timestamp": "2026-10-21T13:37:57.417Z",
+      "metadata": {
+        "taskTitle": "TRUST REALTOR 3 VIDEOS CORRECTIONS",
+        "previousStatus": "Done",
+        "newStatus": "To Do",
+        "clientName": "General",
+        "assigneeName": "Vansh",
+        "source": "status_dropdown"
+      },
+      "idempotency_key": "task.status_changed_task_1792061865382_i5ql8_1792589877417"
+    },
+    {
+      "event_id": "evt_1792589872436_hggpsk",
+      "event_type": "task.status_changed",
+      "workspace_id": "default_workspace",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "entity_type": "task",
+      "entity_id": "task_1792061741069_7pilu",
+      "client_id": "",
+      "target_member_ids": [
+        "emp_vansh"
+      ],
+      "timestamp": "2026-10-21T13:37:52.436Z",
+      "metadata": {
+        "taskTitle": "SILVER CARE GOOGLE ADS UPDATE",
+        "previousStatus": "Done",
+        "newStatus": "To Do",
+        "clientName": "General",
+        "assigneeName": "Vansh",
+        "source": "status_dropdown"
+      },
+      "idempotency_key": "task.status_changed_task_1792061741069_7pilu_1792589872436"
+    },
+    {
+      "event_id": "evt_1792589862223_1j2mcj",
+      "event_type": "task.completed",
+      "workspace_id": "default_workspace",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "entity_type": "task",
+      "entity_id": "task_1792061741069_7pilu",
+      "client_id": "",
+      "target_member_ids": [
+        "emp_vansh"
+      ],
+      "timestamp": "2026-10-21T13:37:42.223Z",
+      "metadata": {
+        "taskTitle": "SILVER CARE GOOGLE ADS UPDATE",
+        "previousStatus": "To Do",
+        "newStatus": "Done",
+        "clientName": "General",
+        "assigneeName": "Vansh",
+        "source": "right_arrow"
+      },
+      "idempotency_key": "task.completed_task_1792061741069_7pilu_1792589862223"
+    },
+    {
+      "event_id": "evt_1792589858383_m0fk67",
+      "event_type": "task.completed",
+      "workspace_id": "default_workspace",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "entity_type": "task",
+      "entity_id": "task_1792061865382_i5ql8",
+      "client_id": "",
+      "target_member_ids": [
+        "emp_vansh"
+      ],
+      "timestamp": "2026-10-21T13:37:38.383Z",
+      "metadata": {
+        "taskTitle": "TRUST REALTOR 3 VIDEOS CORRECTIONS",
+        "previousStatus": "To Do",
+        "newStatus": "Done",
+        "clientName": "General",
+        "assigneeName": "Vansh",
+        "source": "right_arrow"
+      },
+      "idempotency_key": "task.completed_task_1792061865382_i5ql8_1792589858383"
+    },
+    {
+      "event_id": "evt_1792589857355_11lz2n",
+      "event_type": "task.status_changed",
+      "workspace_id": "default_workspace",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "entity_type": "task",
+      "entity_id": "task_1792061865382_i5ql8",
+      "client_id": "",
+      "target_member_ids": [
+        "emp_vansh"
+      ],
+      "timestamp": "2026-10-21T13:37:37.355Z",
+      "metadata": {
+        "taskTitle": "TRUST REALTOR 3 VIDEOS CORRECTIONS",
+        "previousStatus": "In Progress",
+        "newStatus": "To Do",
+        "clientName": "General",
+        "assigneeName": "Vansh",
+        "source": "left_arrow"
+      },
+      "idempotency_key": "task.status_changed_task_1792061865382_i5ql8_1792589857355"
+    },
+    {
+      "event_id": "evt_1792589854589_5rtkv5",
+      "event_type": "task.status_changed",
+      "workspace_id": "default_workspace",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "entity_type": "task",
+      "entity_id": "task_1792061865382_i5ql8",
+      "client_id": "",
+      "target_member_ids": [
+        "emp_vansh"
+      ],
+      "timestamp": "2026-10-21T13:37:34.589Z",
+      "metadata": {
+        "taskTitle": "TRUST REALTOR 3 VIDEOS CORRECTIONS",
+        "previousStatus": "To Do",
+        "newStatus": "In Progress",
+        "clientName": "General",
+        "assigneeName": "Vansh",
+        "source": "right_arrow"
+      },
+      "idempotency_key": "task.status_changed_task_1792061865382_i5ql8_1792589854589"
+    },
     {
       "event_id": "evt_1791298054150_20a6qj",
       "event_type": "permissions.updated",

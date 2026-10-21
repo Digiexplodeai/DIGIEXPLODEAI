@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
 import { type Employee } from './AttendanceView';
-import { Shield, Brain, Sparkles, TrendingUp, AlertTriangle, User, Clock, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 import { type Task, subscribeToCanonicalTasks, getCachedTasks } from '../../lib/taskStorage';
-import { type CalendarEntry } from './ContentCalendar';
+import { type CalendarEntry, subscribeToCanonicalCalendarEntries } from '../../lib/calendarStorage';
 import { getCachedEmployees, subscribeToCanonicalEmployees } from '../../lib/employeeMaster';
 import { cfGetEmployees } from '../../lib/cloudflareApi';
 
@@ -33,15 +31,8 @@ export const CalendarWorkloadView: React.FC<CalendarWorkloadViewProps> = ({ onOp
     });
 
     // 3. Subscribe to Content Calendar items
-    const unsubCalendar = onSnapshot(collection(db, 'contentCalendar'), (snap) => {
-      const list: CalendarEntry[] = [];
-      snap.forEach(d => {
-        const item = { contentId: d.id, ...d.data() } as CalendarEntry;
-        if (item.status !== 'Posted') {
-          list.push(item);
-        }
-      });
-      setCalendarEntries(list);
+    const unsubCalendar = subscribeToCanonicalCalendarEntries((list) => {
+      setCalendarEntries(list.filter(item => item.status !== 'Posted'));
     });
 
     return () => {

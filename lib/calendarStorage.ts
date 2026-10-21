@@ -8,6 +8,12 @@
 import { auth } from './firebase';
 import { signInAnonymously } from 'firebase/auth';
 import { persistNewTask, persistUpdateTask, persistDeleteTask } from './taskStorage';
+import {
+  cfGetCalendar,
+  cfCreateCalendarEntry,
+  cfUpdateCalendarEntry,
+  cfDeleteCalendarEntry
+} from './cloudflareApi';
 
 export interface CalendarEntry {
   contentId: string;
@@ -47,6 +53,7 @@ export interface CalendarEntry {
 }
 
 export const LOCAL_STORAGE_CALENDAR_KEY = 'digi_social_calendar_cache_v2';
+export const CALENDAR_UPDATED_EVENT = 'digi_calendar_changed';
 
 export const DEFAULT_CALENDAR_SEEDS: CalendarEntry[] = [];
 
@@ -68,9 +75,116 @@ export const setCachedCalendarEntries = (data: CalendarEntry[]) => {
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem(LOCAL_STORAGE_CALENDAR_KEY, JSON.stringify(data));
+    window.dispatchEvent(new CustomEvent(CALENDAR_UPDATED_EVENT, { detail: data }));
   } catch (e) {
     console.warn('Could not write calendar cache:', e);
   }
+};
+
+const d1ToCalendarEntry = (r: any): CalendarEntry => ({
+  contentId: r.id,
+  clientId: r.clientId || '',
+  clientName: r.clientName || '',
+  date: r.scheduledDate || r.dueDate || new Date().toISOString().split('T')[0],
+  time: '12:00',
+  month: (r.scheduledDate || '').substring(0, 7),
+  year: parseInt((r.scheduledDate || '').substring(0, 4), 10) || new Date().getFullYear(),
+  platform: (Array.isArray(r.platforms) && r.platforms[0]) || 'Instagram',
+  platforms: Array.isArray(r.platforms) ? r.platforms : [],
+  contentType: r.contentType || 'Static Post',
+  topic: r.title || 'Deliverable',
+  caption: r.caption || '',
+  internalNotes: r.notes || '',
+  status: r.status || 'Planned',
+  postedStatus: r.status === 'Posted' ? 'Posted' : 'Not Posted',
+  clientApprovalStatus: r.approvalStatus || 'Pending',
+  assigneeId: r.assigneeId || '',
+  assigneeName: r.assigneeName || '',
+  createdBy: 'Admin',
+  updatedBy: 'Admin',
+  createdAt: r.createdAt || new Date().toISOString(),
+  updatedAt: r.updatedAt || new Date().toISOString(),
+});
+
+const calendarEntryToD1 = (e: CalendarEntry) => ({
+  id: e.contentId,
+  title: e.topic,
+  clientId: e.clientId,
+  clientName: e.clientName,
+  contentType: e.contentType,
+  platforms: e.platforms && e.platforms.length > 0 ? e.platforms : [e.platform],
+  status: e.status,
+  assigneeId: e.assigneeId || '',
+  assigneeName: e.assigneeName || '',
+  scheduledDate: e.date,
+  dueDate: e.date,
+  caption: e.caption || '',
+  notes: e.internalNotes || '',
+  approvalStatus: e.clientApprovalStatus || 'Pending',
+});
+
+/**
+ * Subscribes to canonical calendar entries:
+ * 1. Delivers cache immediately (instant UI render)
+ * 2. Fetches fresh data from Cloudflare D1 Worker
+ * 3. Listens to reactive local change events
+ * 4. Periodic background sync with Cloudflare D1
+ */
+export const subscribeToCanonicalCalendarEntries = (
+  callback: (entries: CalendarEntry[]) => void,
+  clientId?: string
+): (() => void) => {
+  // Initial delivery from local cache
+  callback(getCachedCalendarEntries());
+
+  const fetchFromD1 = async () => {
+    try {
+      const d1Rows = await cfGetCalendar(clientId);
+      if (Array.isArray(d1Rows) && d1Rows.length > 0) {
+        const d1Entries = d1Rows.map(d1ToCalendarEntry);
+        // Merge with any freshly cached items
+        const local = getCachedCalendarEntries();
+        const map = new Map<string, CalendarEntry>();
+        d1Entries.forEach(e => map.set(e.contentId, e));
+        local.forEach(e => {
+          if (!map.has(e.contentId)) {
+            map.set(e.contentId, e);
+          } else {
+            // Keep the newer one
+            const d1Item = map.get(e.contentId)!;
+            if (e.updatedAt && d1Item.updatedAt && e.updatedAt > d1Item.updatedAt) {
+              map.set(e.contentId, { ...d1Item, ...e });
+            }
+          }
+        });
+        const merged = Array.from(map.values());
+        setCachedCalendarEntries(merged);
+        callback(merged);
+      }
+    } catch (err) {
+      console.warn('Cloudflare D1 calendar fetch notice:', err);
+    }
+  };
+
+  fetchFromD1();
+
+  const handleLocalChange = () => {
+    callback(getCachedCalendarEntries());
+  };
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener(CALENDAR_UPDATED_EVENT, handleLocalChange);
+  }
+
+  // Poll Cloudflare D1 every 30 seconds
+  const intervalId = setInterval(fetchFromD1, 30000);
+
+  return () => {
+    if (typeof window !== 'undefined') {
+      window.removeEventListener(CALENDAR_UPDATED_EVENT, handleLocalChange);
+    }
+    clearInterval(intervalId);
+  };
 };
 
 /**
@@ -92,10 +206,9 @@ export const ensureActiveFirebaseAuth = async (): Promise<string> => {
 
 /**
  * Persists a new Calendar Entry:
-/**
- * Persists a new Calendar Entry:
  * 1. Updates LocalStorage cache immediately (optimistic UI)
- * 2. Synchronizes with Tasks collection
+ * 2. Synchronizes with Cloudflare D1 via Worker API
+ * 3. Synchronizes with Tasks collection in Cloudflare D1
  */
 export const persistNewCalendarEntry = async (entry: CalendarEntry, userProfile?: any): Promise<CalendarEntry> => {
   const nowIso = new Date().toISOString();
@@ -115,7 +228,14 @@ export const persistNewCalendarEntry = async (entry: CalendarEntry, userProfile?
   const updatedList = [normalizedEntry, ...current.filter(e => e.contentId !== contentId)];
   setCachedCalendarEntries(updatedList);
 
-  // 2. Cross-module task sync
+  // 2. Cloudflare D1 persistence
+  try {
+    await cfCreateCalendarEntry(calendarEntryToD1(normalizedEntry));
+  } catch (d1Err) {
+    console.warn('Cloudflare D1 calendar creation notice:', d1Err);
+  }
+
+  // 3. Cross-module task sync in Cloudflare D1
   try {
     await persistNewTask({
       id: taskId,
@@ -137,7 +257,7 @@ export const persistNewCalendarEntry = async (entry: CalendarEntry, userProfile?
     console.warn('Task synchronization notice:', taskErr);
   }
 
-  // 3. Auto-sync to Approvals Queue if status requires review
+  // 4. Auto-sync to Approvals Queue if status requires review
   const isUnderReview = normalizedEntry.status === 'Sent for Approval' || normalizedEntry.clientApprovalStatus === 'Pending';
   if (isUnderReview) {
     try {
@@ -152,7 +272,10 @@ export const persistNewCalendarEntry = async (entry: CalendarEntry, userProfile?
 };
 
 /**
- * Updates an existing Calendar Entry
+ * Updates an existing Calendar Entry:
+ * 1. Updates LocalStorage cache immediately (optimistic UI)
+ * 2. Synchronizes with Cloudflare D1 via Worker API
+ * 3. Synchronizes with Tasks collection in Cloudflare D1
  */
 export const persistUpdateCalendarEntry = async (contentId: string, updates: Partial<CalendarEntry>, userProfile?: any): Promise<CalendarEntry | null> => {
   const nowIso = new Date().toISOString();
@@ -179,12 +302,19 @@ export const persistUpdateCalendarEntry = async (contentId: string, updates: Par
     ...updates
   };
 
-  // 1. Update LocalStorage cache
+  // 1. Update LocalStorage cache immediately
   const updatedList = current.map(e => e.contentId === contentId ? updatedEntry : e);
   if (!target) updatedList.unshift(updatedEntry);
   setCachedCalendarEntries(updatedList);
 
-  // 2. Sync linked task
+  // 2. Cloudflare D1 persistence
+  try {
+    await cfUpdateCalendarEntry(contentId, calendarEntryToD1(updatedEntry));
+  } catch (d1Err) {
+    console.warn('Cloudflare D1 calendar update notice:', d1Err);
+  }
+
+  // 3. Sync linked task in Cloudflare D1
   if (updatedEntry.taskId) {
     try {
       await persistUpdateTask(updatedEntry.taskId, {
@@ -199,7 +329,7 @@ export const persistUpdateCalendarEntry = async (contentId: string, updates: Par
     }
   }
 
-  // 3. Auto-sync to Approvals Queue if status requires review
+  // 4. Auto-sync to Approvals Queue if status requires review
   const isUnderReview = updatedEntry.status === 'Sent for Approval' || updatedEntry.clientApprovalStatus === 'Pending';
   if (isUnderReview) {
     try {
@@ -214,13 +344,22 @@ export const persistUpdateCalendarEntry = async (contentId: string, updates: Par
 };
 
 /**
- * Deletes a Calendar Entry
+ * Deletes a Calendar Entry:
+ * 1. Updates LocalStorage cache immediately
+ * 2. Deletes from Cloudflare D1 via Worker API
+ * 3. Deletes linked Task from Cloudflare D1
  */
 export const persistDeleteCalendarEntry = async (contentId: string): Promise<void> => {
   const current = getCachedCalendarEntries();
   const target = current.find(e => e.contentId === contentId);
   const updatedList = current.filter(e => e.contentId !== contentId);
   setCachedCalendarEntries(updatedList);
+
+  try {
+    await cfDeleteCalendarEntry(contentId);
+  } catch (d1Err) {
+    console.warn('Cloudflare D1 calendar delete notice:', d1Err);
+  }
 
   if (target?.taskId) {
     try {

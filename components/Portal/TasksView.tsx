@@ -9,11 +9,7 @@ import {
   Settings, CheckCheck, AlertCircle, Calendar as CalendarIcon, SlidersHorizontal,
   Copy
 } from 'lucide-react';
-import { db } from '../../lib/firebase';
-import {
-  collection, query, where, getDocs, addDoc, updateDoc,
-  deleteDoc, doc, orderBy, Timestamp, onSnapshot
-} from 'firebase/firestore';
+
 import { useActiveEmployee } from '../../hooks/useActiveEmployee';
 import { DEFAULT_CLIENTS_MASTER, ensureCentralClientsSeeded, getCachedClients, subscribeToCanonicalClients } from '../../lib/clientMaster';
 import { cfGetClients, cfGetEmployees } from '../../lib/cloudflareApi';

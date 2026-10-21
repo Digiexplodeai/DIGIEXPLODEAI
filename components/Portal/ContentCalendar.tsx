@@ -67,7 +67,9 @@ import {
   getCachedCalendarEntries, 
   setCachedCalendarEntries, 
   persistDeleteCalendarEntry,
-  ensureActiveFirebaseAuth
+  ensureActiveFirebaseAuth,
+  subscribeToCanonicalCalendarEntries,
+  persistUpdateCalendarEntry
 } from '../../lib/calendarStorage';
 
 import {
@@ -290,35 +292,10 @@ export const ContentCalendar: React.FC = () => {
       }
     }, () => {});
 
-    // Content Calendar Firestore stream
-    const unsubCalendar = onSnapshot(collection(db, 'contentCalendar'), (snapshot) => {
-      if (!snapshot.empty) {
-        const list: CalendarEntry[] = [];
-        snapshot.forEach((docSnap) => {
-          list.push({ contentId: docSnap.id, ...docSnap.data() } as CalendarEntry);
-        });
-        setEntries(list);
-        setCachedCalendarEntries(list);
-      } else {
-        const cached = getCachedCalendarEntries();
-        if (cached && cached.length > 0) setEntries(cached);
-      }
-    }, (err) => console.warn('Content calendar live notice:', err));
-
-    const unsubContentPosts = onSnapshot(collection(db, 'contentPosts'), (snapshot) => {
-      if (!snapshot.empty) {
-        const list: CalendarEntry[] = [];
-        snapshot.forEach((docSnap) => {
-          list.push({ contentId: docSnap.id, ...docSnap.data() } as CalendarEntry);
-        });
-        setEntries(prev => {
-          const map = new Map<string, CalendarEntry>();
-          prev.forEach(e => map.set(e.contentId, e));
-          list.forEach(e => map.set(e.contentId, { ...map.get(e.contentId), ...e }));
-          return Array.from(map.values());
-        });
-      }
-    }, () => {});
+    // Canonical Content Calendar stream (Cloudflare D1 + reactive local cache)
+    const unsubCalendar = subscribeToCanonicalCalendarEntries((calEntries) => {
+      setEntries(calEntries);
+    });
 
     return () => {
       unsubTasks();
@@ -327,7 +304,6 @@ export const ContentCalendar: React.FC = () => {
       unsubVideos();
       unsubVideoProd();
       unsubCalendar();
-      unsubContentPosts();
     };
   }, []);
 
@@ -701,12 +677,10 @@ export const ContentCalendar: React.FC = () => {
       showToast(`✓ Task rescheduled to ${targetDateStr}`);
     } else if (event.source === 'content' && event.rawContent) {
       try {
-        await setDoc(doc(db, 'contentCalendar', event.rawContent.contentId), {
-          ...event.rawContent,
+        await persistUpdateCalendarEntry(event.rawContent.contentId, {
           date: targetDateStr,
-          month: targetDateStr.substring(0, 7),
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
+          month: targetDateStr.substring(0, 7)
+        }, profile);
         showToast(`✓ Content post moved to ${targetDateStr}`);
       } catch (err) {
         showToast('Could not reschedule content', 'error');

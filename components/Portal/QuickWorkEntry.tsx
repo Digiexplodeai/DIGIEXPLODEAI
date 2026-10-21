@@ -1,11 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import {
-  collection,
-  onSnapshot,
-  doc,
-  setDoc
-} from 'firebase/firestore';
-import { db, auth, handleFirestoreError, OperationType } from '../../lib/firebase';
+import { auth } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
 import {
   Sparkles,

@@ -1,8 +1,7 @@
 import React from 'react';
 import { type CalendarEntry } from './ContentCalendar';
 import { Clock, AlertCircle, ChevronLeft, ChevronRight, User, CheckCircle2 } from 'lucide-react';
-import { updateDoc, doc } from 'firebase/firestore';
-import { db } from '../../lib/firebase';
+import { persistUpdateCalendarEntry } from '../../lib/calendarStorage';
 import { persistUpdateTask } from '../../lib/taskStorage';
 
 interface CalendarKanbanViewProps {
@@ -38,12 +37,10 @@ export const CalendarKanbanView: React.FC<CalendarKanbanViewProps> = ({
       const nowIso = new Date().toISOString();
 
       try {
-        const docRef = doc(db, 'contentCalendar', entry.contentId);
-        await updateDoc(docRef, {
+        await persistUpdateCalendarEntry(entry.contentId, {
           status: nextStatus,
           postedStatus: nextStatus === 'Posted' ? 'Posted' : 'Not Posted',
           clientApprovalStatus: nextStatus === 'Approved' ? 'Approved' : (nextStatus === 'Changes Required' ? 'Changes Required' : entry.clientApprovalStatus),
-          updatedAt: nowIso
         });
 
         // Sync canonical task

@@ -1,6 +1,94 @@
 {
   "auditLogs": [
     {
+      "audit_id": "audit_1792591053264_e7lq7",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792591053264_pu1kft",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "action": "Completed",
+      "module": "Tasks & Work",
+      "entity_type": "task",
+      "entity_id": "task_1791997330850_ho1qx",
+      "description": "Task \"Digiexplode ai videos\" moved from To Do to Done (right_arrow) by Digiexplode Super Admin",
+      "metadata": {
+        "taskTitle": "Digiexplode ai videos",
+        "previousStatus": "To Do",
+        "newStatus": "Done",
+        "clientName": "General",
+        "assigneeName": "Ravinder",
+        "source": "right_arrow"
+      },
+      "created_at": "2026-10-21T13:57:33.264Z"
+    },
+    {
+      "audit_id": "audit_1792591051187_eizq5",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792591051187_wkcv7m",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "action": "Completed",
+      "module": "Tasks & Work",
+      "entity_type": "task",
+      "entity_id": "task_1792061820477_q467t",
+      "description": "Task \"GANGOTRI BROCHURE\" moved from To Do to Done (right_arrow) by Digiexplode Super Admin",
+      "metadata": {
+        "taskTitle": "GANGOTRI BROCHURE",
+        "previousStatus": "To Do",
+        "newStatus": "Done",
+        "clientName": "Gangotri Ice Cubes",
+        "assigneeName": "Unassigned",
+        "source": "right_arrow"
+      },
+      "created_at": "2026-10-21T13:57:31.187Z"
+    },
+    {
+      "audit_id": "audit_1792591048671_aravx",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792591048671_8sxu1s",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "action": "Completed",
+      "module": "Tasks & Work",
+      "entity_type": "task",
+      "entity_id": "task_1792061865382_i5ql8",
+      "description": "Task \"TRUST REALTOR 3 VIDEOS CORRECTIONS\" moved from In Progress to Done (right_arrow) by Digiexplode Super Admin",
+      "metadata": {
+        "taskTitle": "TRUST REALTOR 3 VIDEOS CORRECTIONS",
+        "previousStatus": "In Progress",
+        "newStatus": "Done",
+        "clientName": "General",
+        "assigneeName": "Vansh",
+        "source": "right_arrow"
+      },
+      "created_at": "2026-10-21T13:57:28.671Z"
+    },
+    {
+      "audit_id": "audit_1792591043081_3u75o",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792591043081_l5cc14",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "action": "Status changed",
+      "module": "Tasks & Work",
+      "entity_type": "task",
+      "entity_id": "task_1792061865382_i5ql8",
+      "description": "Task \"TRUST REALTOR 3 VIDEOS CORRECTIONS\" moved from To Do to In Progress (right_arrow) by Digiexplode Super Admin",
+      "metadata": {
+        "taskTitle": "TRUST REALTOR 3 VIDEOS CORRECTIONS",
+        "previousStatus": "To Do",
+        "newStatus": "In Progress",
+        "clientName": "General",
+        "assigneeName": "Vansh",
+        "source": "right_arrow"
+      },
+      "created_at": "2026-10-21T13:57:23.081Z"
+    },
+    {
       "audit_id": "audit_1792589877417_r478j",
       "workspace_id": "default_workspace",
       "event_id": "evt_1792589877417_vv87zo",
@@ -1072,6 +1160,100 @@
   },
   "settings": {},
   "events": [
+    {
+      "event_id": "evt_1792591053264_pu1kft",
+      "event_type": "task.completed",
+      "workspace_id": "default_workspace",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "entity_type": "task",
+      "entity_id": "task_1791997330850_ho1qx",
+      "client_id": "",
+      "target_member_ids": [
+        "emp_ravinder"
+      ],
+      "timestamp": "2026-10-21T13:57:33.264Z",
+      "metadata": {
+        "taskTitle": "Digiexplode ai videos",
+        "previousStatus": "To Do",
+        "newStatus": "Done",
+        "clientName": "General",
+        "assigneeName": "Ravinder",
+        "source": "right_arrow"
+      },
+      "idempotency_key": "task.completed_task_1791997330850_ho1qx_1792591053264"
+    },
+    {
+      "event_id": "evt_1792591051187_wkcv7m",
+      "event_type": "task.completed",
+      "workspace_id": "default_workspace",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "entity_type": "task",
+      "entity_id": "task_1792061820477_q467t",
+      "client_id": "client_gangotri_ice_cubes",
+      "target_member_ids": [],
+      "timestamp": "2026-10-21T13:57:31.187Z",
+      "metadata": {
+        "taskTitle": "GANGOTRI BROCHURE",
+        "previousStatus": "To Do",
+        "newStatus": "Done",
+        "clientName": "Gangotri Ice Cubes",
+        "assigneeName": "Unassigned",
+        "source": "right_arrow"
+      },
+      "idempotency_key": "task.completed_task_1792061820477_q467t_1792591051187"
+    },
+    {
+      "event_id": "evt_1792591048671_8sxu1s",
+      "event_type": "task.completed",
+      "workspace_id": "default_workspace",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "entity_type": "task",
+      "entity_id": "task_1792061865382_i5ql8",
+      "client_id": "",
+      "target_member_ids": [
+        "emp_vansh"
+      ],
+      "timestamp": "2026-10-21T13:57:28.671Z",
+      "metadata": {
+        "taskTitle": "TRUST REALTOR 3 VIDEOS CORRECTIONS",
+        "previousStatus": "In Progress",
+        "newStatus": "Done",
+        "clientName": "General",
+        "assigneeName": "Vansh",
+        "source": "right_arrow"
+      },
+      "idempotency_key": "task.completed_task_1792061865382_i5ql8_1792591048671"
+    },
+    {
+      "event_id": "evt_1792591043081_l5cc14",
+      "event_type": "task.status_changed",
+      "workspace_id": "default_workspace",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "entity_type": "task",
+      "entity_id": "task_1792061865382_i5ql8",
+      "client_id": "",
+      "target_member_ids": [
+        "emp_vansh"
+      ],
+      "timestamp": "2026-10-21T13:57:23.081Z",
+      "metadata": {
+        "taskTitle": "TRUST REALTOR 3 VIDEOS CORRECTIONS",
+        "previousStatus": "To Do",
+        "newStatus": "In Progress",
+        "clientName": "General",
+        "assigneeName": "Vansh",
+        "source": "right_arrow"
+      },
+      "idempotency_key": "task.status_changed_task_1792061865382_i5ql8_1792591043081"
+    },
     {
       "event_id": "evt_1792589877417_vv87zo",
       "event_type": "task.status_changed",

@@ -1336,6 +1336,7 @@ export const TasksView: React.FC = () => {
                             const nextStatus = getNextWorkflowStatus(task.status);
                             const isSelected = selectedTaskIds.has(task.id);
                             const isDone = col.key === 'Done';
+                            const normStatus = normalizeTaskStatus(task.status);
 
                             return (
                               <div
@@ -1542,61 +1543,64 @@ export const TasksView: React.FC = () => {
                                   </div>
                                 </div>
 
-                                {/* 5. Action Footer Row: Bigger Workflow Arrows + Dropdown + Done Button */}
-                                <div 
-                                  className="pt-2.5 border-t border-[#D8DEE9]/60 dark:border-white/10 flex items-center justify-between gap-1.5"
-                                  onClick={e => e.stopPropagation()}
-                                >
-                                  {/* Larger Left / Right Workflow Buttons (36px comfortable click target) */}
-                                  <div className="flex items-center gap-1 bg-[#F8FAFC] dark:bg-[#11152D] border border-[#D8DEE9] dark:border-white/10 rounded-xl p-1 shadow-2xs">
-                                    <button
-                                      type="button"
-                                      disabled={!prevStatus}
-                                      onClick={() => prevStatus && handleStatusChange(task.id, prevStatus, 'left_arrow')}
-                                      title={prevStatus ? `Move backward to "${prevStatus}"` : 'Already in To Do'}
-                                      className="w-8 h-8 rounded-lg flex items-center justify-center text-[#334155] dark:text-[#CBD5E1] hover:bg-white dark:hover:bg-white/10 hover:text-[#5B4BFF] disabled:opacity-20 disabled:cursor-not-allowed transition-all cursor-pointer shadow-2xs"
-                                    >
-                                      <ArrowLeft className="w-4 h-4" />
-                                    </button>
+                                  {/* 5. Action Footer Row: Balanced Stepper + Proportionate Done Button */}
+                                  <div 
+                                    className="pt-2.5 border-t border-[#D8DEE9]/60 dark:border-white/10 flex items-center justify-between gap-1.5"
+                                    onClick={e => e.stopPropagation()}
+                                  >
+                                    {/* Left: Compact Workflow Stepper */}
+                                    <div className="flex items-center gap-0.5 bg-[#F8FAFC] dark:bg-[#11152D] border border-[#D8DEE9] dark:border-white/10 rounded-xl p-0.5 h-8 shadow-2xs min-w-0">
+                                      <button
+                                        type="button"
+                                        disabled={!prevStatus}
+                                        onClick={() => prevStatus && handleStatusChange(task.id, prevStatus, 'left_arrow')}
+                                        title={prevStatus ? `Move backward to "${prevStatus}"` : 'Already in To Do'}
+                                        className="w-7 h-7 rounded-lg flex items-center justify-center text-[#334155] dark:text-[#CBD5E1] hover:bg-white dark:hover:bg-white/10 hover:text-[#5B4BFF] disabled:opacity-20 disabled:cursor-not-allowed transition-all cursor-pointer shrink-0"
+                                      >
+                                        <ArrowLeft className="w-3.5 h-3.5" />
+                                      </button>
 
-                                    <select
-                                      value={normalizeTaskStatus(task.status)}
-                                      onChange={e => handleStatusChange(task.id, e.target.value as KanbanColumnKey, 'status_dropdown')}
-                                      className="text-[10px] font-black bg-transparent text-[#334155] dark:text-[#CBD5E1] outline-none cursor-pointer px-1.5 py-1"
-                                    >
-                                      {KANBAN_COLUMNS.map(c => (
-                                        <option key={c.key} value={c.key} className="bg-white dark:bg-[#11152D] text-[#101828] dark:text-white">
-                                          {c.label}
-                                        </option>
-                                      ))}
-                                    </select>
+                                      <select
+                                        value={normalizeTaskStatus(task.status)}
+                                        onChange={e => handleStatusChange(task.id, e.target.value as KanbanColumnKey, 'status_dropdown')}
+                                        className="text-[11px] font-black bg-transparent text-[#334155] dark:text-[#CBD5E1] outline-none cursor-pointer px-1 py-0.5 truncate"
+                                      >
+                                        {KANBAN_COLUMNS.map(c => (
+                                          <option key={c.key} value={c.key} className="bg-white dark:bg-[#11152D] text-[#101828] dark:text-white">
+                                            {c.label}
+                                          </option>
+                                        ))}
+                                      </select>
 
-                                    <button
-                                      type="button"
-                                      disabled={!nextStatus}
-                                      onClick={() => nextStatus && handleStatusChange(task.id, nextStatus, 'right_arrow')}
-                                      title={nextStatus ? `Advance to "${nextStatus}"` : 'Already Done'}
-                                      className="w-8 h-8 rounded-lg flex items-center justify-center text-[#334155] dark:text-[#CBD5E1] hover:bg-white dark:hover:bg-white/10 hover:text-[#5B4BFF] disabled:opacity-20 disabled:cursor-not-allowed transition-all cursor-pointer shadow-2xs"
-                                    >
-                                      <ArrowRight className="w-4 h-4" />
-                                    </button>
+                                      <button
+                                        type="button"
+                                        disabled={!nextStatus}
+                                        onClick={() => nextStatus && handleStatusChange(task.id, nextStatus, 'right_arrow')}
+                                        title={nextStatus ? `Advance to "${nextStatus}"` : 'Already Done'}
+                                        className="w-7 h-7 rounded-lg flex items-center justify-center text-[#334155] dark:text-[#CBD5E1] hover:bg-white dark:hover:bg-white/10 hover:text-[#5B4BFF] disabled:opacity-20 disabled:cursor-not-allowed transition-all cursor-pointer shrink-0"
+                                      >
+                                        <ArrowRight className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+
+                                    {/* Right: Perfectly Proportioned Done Button / Indicator */}
+                                    {!isDone ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleStatusChange(task.id, 'Done', 'right_arrow')}
+                                        title="Mark deliverable as Done"
+                                        className="h-8 px-2.5 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-600 dark:hover:bg-emerald-600 text-emerald-700 dark:text-emerald-400 hover:text-white dark:hover:text-white border border-emerald-200 dark:border-emerald-800/60 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs hover:shadow-xs shrink-0"
+                                      >
+                                        <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                                        <span>Done</span>
+                                      </button>
+                                    ) : (
+                                      <span className="h-8 px-2.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-2xs shrink-0">
+                                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                                        <span>Done</span>
+                                      </span>
+                                    )}
                                   </div>
-
-                                  {!isDone ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleStatusChange(task.id, 'Done', 'right_arrow')}
-                                      title="Complete deliverable & record Work Log"
-                                      className="px-3.5 py-1.5 bg-[#ECFDF3] hover:bg-[#16A34A] text-[#15803D] hover:text-white border border-[#BBF7D0] rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs hover:shadow-xs"
-                                    >
-                                      <Check className="w-3.5 h-3.5" /> Done
-                                    </button>
-                                  ) : (
-                                    <span className="text-xs font-bold text-[#16A34A] flex items-center gap-1 px-2 py-1 bg-[#ECFDF3] dark:bg-[#16A34A]/10 rounded-lg">
-                                      <CheckCircle2 className="w-3.5 h-3.5" /> Synced
-                                    </span>
-                                  )}
-                                </div>
                               </div>
                             );
                           })

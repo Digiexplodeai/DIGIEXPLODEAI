@@ -31,7 +31,8 @@ import {
   subscribeToCanonicalTasks,
   getCachedTasks,
   persistNewTask,
-  differenceInCalendarDays
+  differenceInCalendarDays,
+  addDaysToDateStr
 } from '../../lib/taskStorage';
 
 interface MyDayProps {
@@ -160,6 +161,7 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
 
   // Tab & View Selection
   const [activeTaskTab, setActiveTaskTab] = useState<'today' | 'overdue' | 'upcoming' | 'completed'>('today');
+  const [completedTimeScope, setCompletedTimeScope] = useState<'today' | 'yesterday' | 'all'>('today');
   const [workLogModalOpen, setWorkLogModalOpen] = useState(false);
   const [editingLogId, setEditingLogId] = useState<string | null>(null);
 
@@ -472,6 +474,8 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
     });
   }, [myAssignedTasks, todayStr]);
 
+  const yesterdayStr = useMemo(() => addDaysToDateStr(todayStr, -1), [todayStr]);
+
   // STRICT TASK COMPLETION KPI: Only counts actual tasks where status is Done and completed today
   const completedTodayTasks = useMemo(() => {
     return myAssignedTasks.filter(t => {
@@ -480,6 +484,24 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
       return compDate === todayStr;
     });
   }, [myAssignedTasks, todayStr]);
+
+  const completedYesterdayTasks = useMemo(() => {
+    return myAssignedTasks.filter(t => {
+      if (normalizeTaskStatus(t.status) !== 'Done') return false;
+      const compDate = (t.completedAt || t.completed_at || t.updatedAt || '').slice(0, 10);
+      return compDate === yesterdayStr;
+    });
+  }, [myAssignedTasks, yesterdayStr]);
+
+  const allCompletedTasks = useMemo(() => {
+    return myAssignedTasks
+      .filter(t => normalizeTaskStatus(t.status) === 'Done')
+      .sort((a, b) => {
+        const tA = new Date(a.completedAt || a.completed_at || a.updatedAt || 0).getTime();
+        const tB = new Date(b.completedAt || b.completed_at || b.updatedAt || 0).getTime();
+        return tB - tA;
+      });
+  }, [myAssignedTasks]);
 
   // Authoritative Daily KPIs (Cleanly Separated)
   const kpiDueToday = todayFocusTasks.length;
@@ -983,13 +1005,19 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
     }
   };
 
+  const activeCompletedList = completedTimeScope === 'today' 
+    ? completedTodayTasks 
+    : completedTimeScope === 'yesterday' 
+      ? completedYesterdayTasks 
+      : allCompletedTasks;
+
   const displayedTasks = activeTaskTab === 'today' 
     ? todayFocusTasks 
     : activeTaskTab === 'overdue' 
       ? overdueTasks 
       : activeTaskTab === 'upcoming' 
         ? upcomingTasks 
-        : completedTodayTasks;
+        : activeCompletedList;
 
   return (
     <div className="space-y-6 font-sans pb-12">
@@ -1292,12 +1320,16 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
                       : 'text-[#64748B] dark:text-[#94A3B8] hover:text-[#16A34A]'
                   }`}
                 >
-                  <span>Completed Today</span>
-                  {completedTodayTasks.length > 0 && (
+                  <span>Completed</span>
+                  {completedTodayTasks.length > 0 ? (
                     <span className="text-[10px] px-1.5 py-0.2 rounded-full font-black bg-emerald-100 dark:bg-emerald-900/50 text-[#16A34A]">
                       {completedTodayTasks.length}
                     </span>
-                  )}
+                  ) : allCompletedTasks.length > 0 ? (
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full font-bold bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300">
+                      {allCompletedTasks.length}
+                    </span>
+                  ) : null}
                 </button>
               </div>
 
@@ -1305,6 +1337,53 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
                 {displayedTasks.length} task{displayedTasks.length === 1 ? '' : 's'} in view
               </span>
             </div>
+
+            {/* Completed Sub-Filter Toolbar (When Completed tab is active) */}
+            {activeTaskTab === 'completed' && (
+              <div className="flex items-center justify-between gap-2 p-2.5 bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/40 rounded-xl flex-wrap">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-emerald-800 dark:text-emerald-300 mr-1.5">
+                    History Scope:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setCompletedTimeScope('today')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      completedTimeScope === 'today'
+                        ? 'bg-emerald-600 text-white shadow-2xs'
+                        : 'text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/40'
+                    }`}
+                  >
+                    Today ({completedTodayTasks.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCompletedTimeScope('yesterday')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      completedTimeScope === 'yesterday'
+                        ? 'bg-emerald-600 text-white shadow-2xs'
+                        : 'text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/40'
+                    }`}
+                  >
+                    Yesterday ({completedYesterdayTasks.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCompletedTimeScope('all')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      completedTimeScope === 'all'
+                        ? 'bg-emerald-600 text-white shadow-2xs'
+                        : 'text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/40'
+                    }`}
+                  >
+                    All History ({allCompletedTasks.length})
+                  </button>
+                </div>
+                <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
+                  {completedTimeScope === 'today' ? 'Showing today’s finished tasks' : completedTimeScope === 'yesterday' ? 'Showing yesterday’s deliverables' : 'Showing all deliverables ever completed'}
+                </span>
+              </div>
+            )}
 
             {/* Task Checklist Items */}
             <div className="space-y-3">
@@ -1314,17 +1393,28 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
                     <Check className="w-5 h-5" />
                   </div>
                   <h3 className="font-black text-sm text-[#101828] dark:text-white">
-                    {activeTaskTab === 'today' ? 'All caught up for today!' : activeTaskTab === 'overdue' ? 'No overdue tasks!' : activeTaskTab === 'completed' ? 'No tasks finished yet today.' : 'No upcoming tasks scheduled.'}
+                    {activeTaskTab === 'today' ? 'All caught up for today!' : activeTaskTab === 'overdue' ? 'No overdue tasks!' : activeTaskTab === 'completed' ? (completedTimeScope === 'today' ? 'No tasks finished yet today.' : completedTimeScope === 'yesterday' ? 'No tasks completed yesterday.' : 'No completed tasks on record.') : 'No upcoming tasks scheduled.'}
                   </h3>
                   <p className="text-xs text-[#64748B] dark:text-[#94A3B8] max-w-sm">
-                    {activeTaskTab === 'today' ? 'All scheduled work is complete or moved. Check upcoming work or view your full task workspace.' : activeTaskTab === 'completed' ? 'Completed deliverables for today will show here.' : 'Great job staying on top of delivery deadlines!'}
+                    {activeTaskTab === 'today' ? 'All scheduled work is complete or moved. Check upcoming work or view your full task workspace.' : activeTaskTab === 'completed' ? (completedTimeScope === 'today' && allCompletedTasks.length > 0 ? `You have ${allCompletedTasks.length} task${allCompletedTasks.length > 1 ? 's' : ''} completed on earlier dates. Click below to review your full delivery record.` : 'Completed deliverables for your shift will show here.') : 'Great job staying on top of delivery deadlines!'}
                   </p>
-                  <button
-                    onClick={() => setActiveTab('tasks')}
-                    className="px-4 py-2 bg-[#5B4BFF] hover:bg-[#4E3FE6] text-white text-xs font-black rounded-xl transition-all mt-2 cursor-pointer shadow-xs"
-                  >
-                    Open Delivery Workspace
-                  </button>
+                  {activeTaskTab === 'completed' && completedTimeScope === 'today' && allCompletedTasks.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => setCompletedTimeScope('all')}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl transition-all mt-2 cursor-pointer shadow-xs flex items-center gap-1.5"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>View Past Completed Tasks ({allCompletedTasks.length})</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => setActiveTab('tasks')}
+                      className="px-4 py-2 bg-[#5B4BFF] hover:bg-[#4E3FE6] text-white text-xs font-black rounded-xl transition-all mt-2 cursor-pointer shadow-xs"
+                    >
+                      Open Delivery Workspace
+                    </button>
+                  )}
                 </div>
               ) : (
                 displayedTasks.map(task => {

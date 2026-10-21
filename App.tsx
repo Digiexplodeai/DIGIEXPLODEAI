@@ -13,59 +13,6 @@ import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { MotionalBackground } from './components/UI/MotionalBackground';
 
-import { collection, getDocs, deleteDoc } from 'firebase/firestore';
-import { db } from './lib/firebase';
-
-// Nuclear clean slate — purges ALL cached mock/seed data so portal starts empty
-// Version bump forces re-run on all existing browsers that ran older purges
-if (typeof window !== 'undefined') {
-  const PURGE_KEY = 'digi_agency_clean_slate_v4';
-  if (!localStorage.getItem(PURGE_KEY)) {
-    // Remove old purge flags so this one supersedes them
-    localStorage.removeItem('digi_agency_clean_slate_v1');
-    localStorage.removeItem('digi_agency_clean_slate_v2');
-    localStorage.removeItem('digi_agency_clean_slate_v3');
-    const keysToPurge = [
-      // Tasks & rollover
-      'digi_persisted_tasks_v2',
-      'digi_rollover_settings_v1',
-      // Employees
-      'digi_local_employees',
-      // Video tracker
-      'digi_video_tracker_cache',
-      // Social / content calendar
-      'digi_social_calendar_cache_v2',
-      // Approvals
-      'digi_persisted_approvals_v2',
-      // Work logs
-      'digi_persisted_worklogs_v2',
-      // Payroll
-      'digi_payroll_records',
-      'digi_payroll_seq',
-      // HR docs
-      'digi_hr_documents',
-      'digi_hr_docs_seq',
-      // Notifications & audit
-      'digi_notifications_local',
-      'digi_audit_log_local',
-      // Attendance
-      'digi_local_attendance',
-      // Old cache key names (legacy)
-      'digi_tasks_cache_v2',
-      'digi_clients_cache',
-      'digi_attendance_cache',
-      'digi_work_log_cache',
-      'digi_approvals_cache',
-      'digi_client_tasks',
-      'digi_pending_approvals',
-      'digi_reports_history',
-    ];
-    keysToPurge.forEach(k => {
-      try { localStorage.removeItem(k); } catch (e) {}
-    });
-    localStorage.setItem(PURGE_KEY, 'true');
-  }
-}
 
 const ScrollToTop = () => {
   const { pathname } = useLocation();
@@ -124,32 +71,6 @@ const LayoutContainer: React.FC<{ children: React.ReactNode }> = ({ children }) 
 };
 
 const App: React.FC = () => {
-  useEffect(() => {
-    const FS_PURGE_KEY = 'digi_firestore_clean_slate_v3';
-    if (!localStorage.getItem(FS_PURGE_KEY)) {
-      const wipeFirestore = async () => {
-        try {
-          const collections = ['employees', 'clients', 'tasks', 'video_production', 'approvals', 'work_logs', 'attendance', 'calendar_items'];
-          for (const c of collections) {
-            try {
-              const snap = await getDocs(collection(db, c));
-              for (const d of snap.docs) {
-                // Keep permanent super admin
-                const data = d.data();
-                if (c === 'employees' && (d.id === 'emp_superadmin' || data.role === 'superAdmin' || data.name?.includes('Super Admin'))) {
-                  continue;
-                }
-                await deleteDoc(d.ref).catch(() => {});
-              }
-            } catch (err) {}
-          }
-          localStorage.setItem(FS_PURGE_KEY, 'true');
-        } catch (e) {}
-      };
-      wipeFirestore();
-    }
-  }, []);
-
   return (
     <ThemeProvider>
       <AuthProvider>

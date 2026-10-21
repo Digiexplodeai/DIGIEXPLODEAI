@@ -474,6 +474,7 @@ export const TasksView: React.FC = () => {
       // Canonical Date Model comparison (YYYY-MM-DD)
       const schDate = (t.scheduledDate || t.scheduled_date || todayStr).slice(0, 10);
       const dueDate = (t.dueDate || t.due_date || schDate).slice(0, 10);
+      const compDate = (t.completedAt || t.completed_at || '').slice(0, 10);
       const normStatus = normalizeTaskStatus(t.status);
       const isDone = normStatus === 'Done';
 
@@ -481,13 +482,16 @@ export const TasksView: React.FC = () => {
       if (dateFilterMode === 'day') {
         if (selectedOperationalDate === todayStr) {
           // When viewing TODAY:
-          // Include: scheduled today, or active carried-forward rollover tasks, or tasks due today
-          const isTodayWork = schDate === todayStr || (!isDone && (t.rolloverCount || 0) > 0) || dueDate === todayStr;
+          // Unfinished tasks: scheduled today, active carried-forward rollover, or due today
+          // Completed tasks: completed today (regardless of scheduledDate), or scheduled today, or due today
+          const isTodayWork = isDone
+            ? (compDate === todayStr || schDate === todayStr || dueDate === todayStr)
+            : (schDate === todayStr || (t.rolloverCount || 0) > 0 || dueDate === todayStr);
           if (!isTodayWork) return false;
         } else {
           // When viewing another specific date:
-          // Include: scheduled on that date or due on that date
-          const isSelectedDayWork = schDate === selectedOperationalDate || dueDate === selectedOperationalDate;
+          // Include: scheduled on that date, due on that date, or completed on that date
+          const isSelectedDayWork = schDate === selectedOperationalDate || dueDate === selectedOperationalDate || (isDone && compDate === selectedOperationalDate);
           if (!isSelectedDayWork) return false;
         }
       } else if (dateFilterMode === 'tomorrow') {
@@ -570,6 +574,7 @@ export const TasksView: React.FC = () => {
     const todayCount = tasks.filter(t => 
       !t.isArchived && !t.is_deleted && t.status !== 'Cancelled' &&
       ((t.scheduledDate || t.scheduled_date || '').slice(0, 10) === todayStr || 
+       (t.completedAt || t.completed_at || '').slice(0, 10) === todayStr ||
        (normalizeTaskStatus(t.status) !== 'Done' && (t.rolloverCount || 0) > 0))
     ).length;
 

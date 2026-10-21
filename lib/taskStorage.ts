@@ -1,9 +1,12 @@
-import { 
-  collection, doc, getDocs, setDoc, updateDoc, deleteDoc, 
-  onSnapshot, query, where, orderBy, addDoc 
-} from 'firebase/firestore';
-import { signInAnonymously } from 'firebase/auth';
-import { db, auth, sanitizeFirestorePayload } from './firebase';
+/**
+ * DigiExplodeAI — Task Storage & Sync Engine
+ * Database Backend: Cloudflare D1 (via Cloudflare Worker API)
+ * Local Cache: localStorage (optimistic layer for 0ms UI updates)
+ *
+ * FIRESTORE IS NOT USED FOR DATA STORAGE.
+ * Firebase is only used for Authentication (see lib/firebase.ts auth export).
+ */
+
 import { WorkspaceEventService } from './controlPlane/WorkspaceEventService';
 import { cfGetTasks, cfCreateTask, cfUpdateTask, cfDeleteTask } from './cloudflareApi';
 
@@ -25,7 +28,7 @@ export interface Task {
   assignedById?: string;
   assignedByName?: string;
   priority: 'Urgent' | 'High' | 'Medium' | 'Low';
-  
+
   // Canonical Date Model
   scheduledDate: string;             // Operational date when team is expected to work on task (YYYY-MM-DD)
   dueDate: string;                   // Final deadline for task (YYYY-MM-DD)
@@ -36,7 +39,7 @@ export interface Task {
   lastRolloverAt?: string;           // Timestamp of most recent automatic carry-forward ISO
   rolloverCount?: number;            // Number of automatic day rollovers (default 0)
 
-  // Compatibility snake_case aliases for Firestore queries and scripts
+  // Compatibility snake_case aliases
   scheduled_date?: string;
   due_date?: string;
   original_scheduled_date?: string;
@@ -176,8 +179,8 @@ export function normalizeTaskDateModel(raw: any): Task {
   const origScheduled = raw.originalScheduledDate || raw.original_scheduled_date || initialScheduled;
   const origDue = raw.originalDueDate || raw.original_due_date || initialDue;
   const pendingSince = raw.firstPendingSince || raw.first_pending_since || origScheduled || createdAtStr;
-  const count = typeof raw.rolloverCount === 'number' 
-    ? raw.rolloverCount 
+  const count = typeof raw.rolloverCount === 'number'
+    ? raw.rolloverCount
     : (typeof raw.rollover_count === 'number' ? raw.rollover_count : 0);
 
   const normalizedStatus = normalizeTaskStatus(raw.status || 'To Do');
@@ -185,7 +188,7 @@ export function normalizeTaskDateModel(raw: any): Task {
   const assignedEmpName = raw.assigneeName || raw.assignee_name || raw.employeeName || raw.employee_name || (assignedEmpId ? 'Team Member' : 'Unassigned');
 
   const isDone = normalizedStatus === 'Done';
-  const resolvedCompletedAt = isDone 
+  const resolvedCompletedAt = isDone
     ? (raw.completedAt || raw.completed_at || raw.updatedAt || nowIso)
     : undefined;
 
@@ -242,10 +245,9 @@ export function normalizeTaskDateModel(raw: any): Task {
  * Uses updatedAt timestamps, safeguards completed states against stale reverts,
  * and preserves deliberate user reopenings.
  */
-export function mergeTaskRecords(existing: Task, incoming: Task): { 
-  merged: Task; 
-  shouldSyncToD1: boolean; 
-  shouldSyncToFirestore: boolean 
+export function mergeTaskRecords(existing: Task, incoming: Task): {
+  merged: Task;
+  shouldSyncToD1: boolean;
 } {
   const normExisting = normalizeTaskDateModel(existing);
   const normIncoming = normalizeTaskDateModel(incoming);
@@ -259,24 +261,17 @@ export function mergeTaskRecords(existing: Task, incoming: Task): {
   // Case 1: Status conflict between Done and non-Done
   if (isExistingDone && !isIncomingDone) {
     const existingCompletedTime = new Date(normExisting.completedAt || normExisting.updatedAt || 0).getTime();
-    
-    // A task can ONLY be legitimately reopened if explicit reopen markers are present:
-    // 1. Explicit taskReopened flag
-    // 2. Explicit reopenedAt timestamp that occurred at or after completion
+
+    // A task can ONLY be legitimately reopened if explicit reopen markers are present
     const incomingReopenedTime = normIncoming.reopenedAt ? new Date(normIncoming.reopenedAt).getTime() : 0;
-    const isExplicitReopen = !!normIncoming.taskReopened || 
+    const isExplicitReopen = !!normIncoming.taskReopened ||
       (incomingReopenedTime > 0 && incomingReopenedTime >= existingCompletedTime);
 
     if (isExplicitReopen) {
-      // User legitimately reopened the task on another client
-      return {
-        merged: normIncoming,
-        shouldSyncToD1: false,
-        shouldSyncToFirestore: false,
-      };
+      // User legitimately reopened the task
+      return { merged: normIncoming, shouldSyncToD1: false };
     } else {
-      // Incoming is a stale non-Done record (e.g. D1 before status transition or stale cache)
-      // Safeguard: NEVER allow stale non-Done records to overwrite verified Done tasks!
+      // Incoming is a stale non-Done record — NEVER overwrite verified Done tasks!
       const merged: Task = {
         ...normIncoming,
         status: 'Done',
@@ -284,11 +279,7 @@ export function mergeTaskRecords(existing: Task, incoming: Task): {
         completed_at: normExisting.completed_at || normExisting.completedAt || normExisting.updatedAt,
         updatedAt: normExisting.updatedAt,
       };
-      return {
-        merged,
-        shouldSyncToD1: true,
-        shouldSyncToFirestore: false,
-      };
+      return { merged, shouldSyncToD1: true };
     }
   }
 
@@ -297,41 +288,25 @@ export function mergeTaskRecords(existing: Task, incoming: Task): {
     const incomingCompletedTime = new Date(normIncoming.completedAt || normIncoming.updatedAt || 0).getTime();
 
     // Check if existing was legitimately reopened after incoming completion
-    const isExplicitExistingReopen = !!normExisting.taskReopened || 
+    const isExplicitExistingReopen = !!normExisting.taskReopened ||
       (existingReopenedTime > 0 && existingReopenedTime >= incomingCompletedTime);
 
     if (isExplicitExistingReopen) {
-      return {
-        merged: normExisting,
-        shouldSyncToD1: true,
-        shouldSyncToFirestore: false,
-      };
+      return { merged: normExisting, shouldSyncToD1: true };
     } else {
-      // Incoming is completed and verified - accept incoming Done!
-      return {
-        merged: normIncoming,
-        shouldSyncToD1: true,
-        shouldSyncToFirestore: false,
-      };
+      // Incoming is completed and verified — accept incoming Done
+      return { merged: normIncoming, shouldSyncToD1: true };
     }
   }
 
-  // Case 2: Both have the same completion state or neither is Done -> Latest timestamp wins
+  // Case 2: Both have the same completion state — latest timestamp wins
   if (incomingTime > existingTime) {
-    return {
-      merged: normIncoming,
-      shouldSyncToD1: false,
-      shouldSyncToFirestore: true,
-    };
+    return { merged: normIncoming, shouldSyncToD1: false };
   } else if (existingTime > incomingTime) {
-    return {
-      merged: normExisting,
-      shouldSyncToD1: true,
-      shouldSyncToFirestore: false,
-    };
+    return { merged: normExisting, shouldSyncToD1: true };
   }
 
-  // Exact same timestamp: merge cleanly
+  // Exact same timestamp: merge cleanly, prefer existing
   return {
     merged: {
       ...normIncoming,
@@ -340,21 +315,17 @@ export function mergeTaskRecords(existing: Task, incoming: Task): {
       completedAt: normExisting.completedAt || normIncoming.completedAt,
     },
     shouldSyncToD1: false,
-    shouldSyncToFirestore: false,
   };
 }
 
-/**
- * ─────────────────────────────────────────────────────────────────────────────
- * RELIABLE DUAL-BACKEND PERSISTENCE & RETRY ENGINE (OUTBOX PATTERN)
- * ─────────────────────────────────────────────────────────────────────────────
- */
+// ─────────────────────────────────────────────────────────────────────────────
+// D1 RETRY QUEUE (for failed D1 writes only)
+// ─────────────────────────────────────────────────────────────────────────────
 
 export interface TaskSyncQueueItem {
-  id: string; // unique item id e.g. `${taskId}_${targetBackend}`
+  id: string;
   taskId: string;
   action: 'create' | 'update' | 'delete';
-  targetBackend: 'firestore' | 'd1' | 'both';
   taskPayload: Task;
   queuedAt: string;
   attempts: number;
@@ -362,9 +333,8 @@ export interface TaskSyncQueueItem {
   lastAttemptAt?: string;
 }
 
-export const LOCAL_STORAGE_TASK_SYNC_QUEUE_KEY = 'digi_task_sync_queue_v1';
+export const LOCAL_STORAGE_TASK_SYNC_QUEUE_KEY = 'digi_task_sync_queue_v2';
 
-// In-memory queue fallback for non-browser/test environments
 let memoryTaskSyncQueue: TaskSyncQueueItem[] = [];
 
 export const getTaskSyncQueue = (): TaskSyncQueueItem[] => {
@@ -401,29 +371,24 @@ export const clearTaskSyncQueue = () => {
 };
 
 /**
- * Enqueues or updates a failed write into the persistent retry queue.
- * Idempotently deduplicates by taskId and targetBackend, keeping the newest verified payload.
+ * Enqueues or updates a failed D1 write into the persistent retry queue.
  */
 export const enqueueTaskSyncRetry = (
   task: Task,
-  targetBackend: 'firestore' | 'd1' | 'both',
   action: 'create' | 'update' | 'delete' = 'update',
   error?: any
 ) => {
   const currentQueue = getTaskSyncQueue();
-  const queueId = `${task.id}_${targetBackend}`;
+  const queueId = `${task.id}_d1`;
   const nowIso = new Date().toISOString();
-  const errorMessage = error instanceof Error ? error.message : String(error || 'Write failed');
+  const errorMessage = error instanceof Error ? error.message : String(error || 'D1 write failed');
 
-  const existingIdx = currentQueue.findIndex(item => 
-    item.taskId === task.id && (item.targetBackend === targetBackend || targetBackend === 'both' || item.targetBackend === 'both')
-  );
+  const existingIdx = currentQueue.findIndex(item => item.taskId === task.id);
 
   const newItem: TaskSyncQueueItem = {
     id: queueId,
     taskId: task.id,
     action,
-    targetBackend,
     taskPayload: normalizeTaskDateModel(task),
     queuedAt: existingIdx >= 0 ? currentQueue[existingIdx].queuedAt : nowIso,
     attempts: existingIdx >= 0 ? currentQueue[existingIdx].attempts : 0,
@@ -443,27 +408,22 @@ export const enqueueTaskSyncRetry = (
 /**
  * Removes a task retry entry once successfully synced.
  */
-export const dequeueTaskSyncRetry = (taskId: string, targetBackend?: 'firestore' | 'd1' | 'both') => {
+export const dequeueTaskSyncRetry = (taskId: string) => {
   const currentQueue = getTaskSyncQueue();
-  const updated = currentQueue.filter(item => {
-    if (item.taskId !== taskId) return true;
-    if (!targetBackend || targetBackend === 'both') return false;
-    return item.targetBackend !== targetBackend && item.targetBackend !== 'both';
-  });
+  const updated = currentQueue.filter(item => item.taskId !== taskId);
   setTaskSyncQueue(updated);
 };
 
 /**
- * Processes queued failed writes with exponential backoff / attempt capping.
- * Strictly idempotent: relies on key-based upserts and newest payload preservation.
+ * Processes queued failed D1 writes with exponential backoff.
  */
 export const processTaskSyncQueue = async (
   options?: { maxAttempts?: number }
-): Promise<{ 
-  retriedCount: number; 
-  succeededCount: number; 
-  failedCount: number; 
-  errors: Array<{ taskId: string; backend: string; error: string }> 
+): Promise<{
+  retriedCount: number;
+  succeededCount: number;
+  failedCount: number;
+  errors: Array<{ taskId: string; error: string }>
 }> => {
   const maxAttempts = options?.maxAttempts || 5;
   const currentQueue = getTaskSyncQueue();
@@ -473,7 +433,7 @@ export const processTaskSyncQueue = async (
 
   let succeededCount = 0;
   let failedCount = 0;
-  const errors: Array<{ taskId: string; backend: string; error: string }> = [];
+  const errors: Array<{ taskId: string; error: string }> = [];
   const remainingQueue: TaskSyncQueueItem[] = [];
 
   for (const item of currentQueue) {
@@ -486,52 +446,20 @@ export const processTaskSyncQueue = async (
     item.attempts++;
     item.lastAttemptAt = new Date().toISOString();
 
-    let firestoreOk = item.targetBackend !== 'firestore' && item.targetBackend !== 'both';
-    let d1Ok = item.targetBackend !== 'd1' && item.targetBackend !== 'both';
-
-    if (!firestoreOk) {
-      try {
-        if (item.action === 'delete') {
-          await setDoc(doc(db, 'tasks', item.taskId), sanitizeFirestorePayload({
-            is_deleted: true,
-            isArchived: true,
-            updatedAt: new Date().toISOString()
-          }), { merge: true });
-        } else {
-          await setDoc(doc(db, 'tasks', item.taskId), sanitizeFirestorePayload(item.taskPayload), { merge: true });
-        }
-        firestoreOk = true;
-      } catch (fsErr: any) {
-        item.lastError = `Firestore retry failed: ${fsErr?.message || fsErr}`;
-        errors.push({ taskId: item.taskId, backend: 'firestore', error: item.lastError });
+    try {
+      if (item.action === 'delete') {
+        await cfDeleteTask(item.taskId);
+      } else if (item.action === 'create') {
+        await cfCreateTask(item.taskPayload);
+      } else {
+        await cfUpdateTask(item.taskId, item.taskPayload);
       }
-    }
-
-    if (!d1Ok) {
-      try {
-        if (item.action === 'delete') {
-          await cfDeleteTask(item.taskId);
-        } else if (item.action === 'create') {
-          await cfCreateTask(item.taskPayload);
-        } else {
-          await cfUpdateTask(item.taskId, item.taskPayload);
-        }
-        d1Ok = true;
-      } catch (cfErr: any) {
-        item.lastError = `Cloudflare D1 retry failed: ${cfErr?.message || cfErr}`;
-        errors.push({ taskId: item.taskId, backend: 'd1', error: item.lastError });
-      }
-    }
-
-    if (firestoreOk && d1Ok) {
       succeededCount++;
-    } else {
+      // Don't push to remaining — it's done
+    } catch (cfErr: any) {
+      item.lastError = `D1 retry failed: ${cfErr?.message || cfErr}`;
+      errors.push({ taskId: item.taskId, error: item.lastError });
       failedCount++;
-      if (firestoreOk && !d1Ok) {
-        item.targetBackend = 'd1';
-      } else if (!firestoreOk && d1Ok) {
-        item.targetBackend = 'firestore';
-      }
       remainingQueue.push(item);
     }
   }
@@ -540,91 +468,50 @@ export const processTaskSyncQueue = async (
   return { retriedCount: currentQueue.length, succeededCount, failedCount, errors };
 };
 
-export interface TaskDualWriteResult {
+export interface TaskD1WriteResult {
   success: boolean;
-  allBackendsSynced: boolean;
-  partialFailure: boolean;
-  firestoreStatus: 'success' | 'failed';
   d1Status: 'success' | 'failed';
-  firestoreError?: string;
   d1Error?: string;
   retryQueued: boolean;
   task: Task;
 }
 
 /**
- * Reliable Dual-Write Core:
- * Executes writes to both Firestore and Cloudflare D1 with Promise.allSettled.
- * Automatically catches partial failures, enqueues idempotent retries,
- * and preserves verified task history.
+ * Reliable D1-only persistence with local cache as optimistic layer.
+ * Replaces the old dual-write that included Firestore.
  */
-export async function persistTaskDualWrite(
+export async function persistTaskToD1(
   taskInput: Task,
   action: 'create' | 'update' = 'update'
-): Promise<TaskDualWriteResult> {
+): Promise<TaskD1WriteResult> {
   const task = normalizeTaskDateModel(taskInput);
 
-  // Ensure active Firebase Auth session so Firestore security rules succeed
-  if (!auth.currentUser && typeof window !== 'undefined') {
-    try {
-      await signInAnonymously(auth);
-    } catch (authErr) {
-      console.warn('Firebase auto-auth preparation notice:', authErr);
-    }
-  }
-
-  const [fsResult, d1Result] = await Promise.allSettled([
-    setDoc(doc(db, 'tasks', task.id), sanitizeFirestorePayload(task), { merge: true }),
-    action === 'create' ? cfCreateTask(task) : cfUpdateTask(task.id, task)
-  ]);
-
-  const firestoreStatus: 'success' | 'failed' = fsResult.status === 'fulfilled' ? 'success' : 'failed';
-  const d1Status: 'success' | 'failed' = d1Result.status === 'fulfilled' ? 'success' : 'failed';
-
-  const firestoreError = fsResult.status === 'rejected' 
-    ? (fsResult.reason instanceof Error ? fsResult.reason.message : String(fsResult.reason))
-    : undefined;
-
-  const d1Error = d1Result.status === 'rejected'
-    ? (d1Result.reason instanceof Error ? d1Result.reason.message : String(d1Result.reason))
-    : undefined;
-
-  const allBackendsSynced = firestoreStatus === 'success' && d1Status === 'success';
-  const partialFailure = (firestoreStatus === 'success' && d1Status === 'failed') ||
-                         (firestoreStatus === 'failed' && d1Status === 'success');
-
+  let d1Status: 'success' | 'failed' = 'success';
+  let d1Error: string | undefined;
   let retryQueued = false;
 
-  if (partialFailure) {
-    if (d1Status === 'failed') {
-      enqueueTaskSyncRetry(task, 'd1', action, d1Error);
-      retryQueued = true;
-    } else if (firestoreStatus === 'failed') {
-      enqueueTaskSyncRetry(task, 'firestore', action, firestoreError);
-      retryQueued = true;
+  try {
+    if (action === 'create') {
+      await cfCreateTask(task);
+    } else {
+      await cfUpdateTask(task.id, task);
     }
-  } else if (!allBackendsSynced) {
-    // Both backends failed
-    enqueueTaskSyncRetry(task, 'both', action, `${firestoreError || ''} | ${d1Error || ''}`);
-    retryQueued = true;
-  } else {
-    // Both succeeded! Dequeue any previous pending retries for this task
+    // Success: clear any previous retry for this task
     dequeueTaskSyncRetry(task.id);
+  } catch (err: any) {
+    d1Status = 'failed';
+    d1Error = err instanceof Error ? err.message : String(err);
+    enqueueTaskSyncRetry(task, action, err);
+    retryQueued = true;
+    console.warn(`[TaskStorage] D1 ${action} failed for task ${task.id}, queued for retry:`, d1Error);
   }
 
-  // Operation considered functionally successful if at least one backend persisted
-  const success = firestoreStatus === 'success' || d1Status === 'success';
-
   return {
-    success,
-    allBackendsSynced,
-    partialFailure,
-    firestoreStatus,
+    success: d1Status === 'success' || retryQueued, // success if persisted OR queued
     d1Status,
-    firestoreError,
     d1Error,
     retryQueued,
-    task
+    task,
   };
 }
 
@@ -636,12 +523,10 @@ export function getNextWorkingDate(dateStr: string, workingDays: number[] = [1, 
   const [y, m, d] = dateStr.split('-').map(Number);
   const dateObj = new Date(y, m - 1, d);
 
-  // If already a working day, keep it
   if (workingDays.includes(dateObj.getDay())) {
     return dateStr;
   }
 
-  // Find next working day up to 7 days ahead
   for (let i = 1; i <= 7; i++) {
     const next = new Date(dateObj);
     next.setDate(next.getDate() + i);
@@ -713,7 +598,7 @@ export function addDaysToDateStr(dateStr: string, days: number): string {
 }
 
 /**
- * Formats a YYYY-MM-DD date string into human-friendly full, day-of-week, and short representations
+ * Formats a YYYY-MM-DD date string into human-friendly representations
  */
 export function formatOperationalDate(dateStr: string): { fullDate: string; dayOfWeek: string; shortDate: string } {
   try {
@@ -758,14 +643,12 @@ export function getTaskAgeingInfo(task: Task, todayStr: string = new Date().toIS
   const dueDate = task.dueDate || task.due_date || scheduledDate;
   const pendingSince = task.firstPendingSince || task.first_pending_since || task.originalScheduledDate || task.original_scheduled_date || scheduledDate;
 
-  // Pending days calculation from first_pending_since to today
   let pendingDays = 0;
   if (!isDone) {
     const rawDiff = differenceInCalendarDays(todayStr, pendingSince);
     pendingDays = Math.max(0, rawDiff);
   }
 
-  // Overdue calculation from due_date to today
   const overdueDiff = differenceInCalendarDays(todayStr, dueDate);
   const isOverdue = !isDone && overdueDiff > 0;
   const overdueDays = isOverdue ? overdueDiff : 0;
@@ -773,7 +656,6 @@ export function getTaskAgeingInfo(task: Task, todayStr: string = new Date().toIS
   const rolloverCount = task.rolloverCount || task.rollover_count || 0;
   const isRolledOver = rolloverCount > 0 || (task.originalScheduledDate && task.originalScheduledDate < scheduledDate);
 
-  // Scheduled date human label
   let scheduledBadge = scheduledDate;
   if (scheduledDate === todayStr) {
     scheduledBadge = 'Today';
@@ -786,7 +668,6 @@ export function getTaskAgeingInfo(task: Task, todayStr: string = new Date().toIS
     } catch {}
   }
 
-  // Pending badge text and controlled color styling
   let pendingBadge = 'Today';
   let pendingColorClass = 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300';
 
@@ -807,10 +688,7 @@ export function getTaskAgeingInfo(task: Task, todayStr: string = new Date().toIS
     pendingColorClass = 'bg-rose-100 text-rose-900 border-rose-300 dark:bg-rose-950/60 dark:text-rose-200 font-black';
   }
 
-  // Overdue badge text
   const overdueBadge = isOverdue ? `${overdueDays} Day${overdueDays > 1 ? 's' : ''} Overdue` : null;
-
-  // Rollover badge text
   const rolloverBadge = isRolledOver ? `Carried Forward · ${rolloverCount > 0 ? `${rolloverCount}d` : 'Active'}` : null;
 
   return {
@@ -831,12 +709,11 @@ export function getTaskAgeingInfo(task: Task, todayStr: string = new Date().toIS
  * Automatic Rollover Engine
  * At app evaluation or start of day, finds unfinished tasks whose scheduled_date is before today.
  * Preserves original_scheduled_date, original_due_date, due_date and first_pending_since.
- * Updates scheduled_date to today's working day without creating duplicate tasks.
  */
 export async function evaluateTaskRollovers(
-  tasks: Task[], 
+  tasks: Task[],
   settings: RolloverSettings = getRolloverSettings()
-): Promise<{ updatedTasks: Task[]; rolledOverCount: number }> {
+): Promise<{ updatedTasks: Task[]; rolledOverCount: number; partialFailures?: any[]; failedCount?: number }> {
   if (!settings.automaticRollover) {
     return { updatedTasks: tasks, rolledOverCount: 0 };
   }
@@ -855,7 +732,6 @@ export async function evaluateTaskRollovers(
     const isFinished = normStatus === 'Done' || task.status === 'Cancelled' || !!task.isArchived || !!task.is_deleted;
     const lastRolloverDate = (task.lastRolloverAt || task.last_rollover_at || '').slice(0, 10);
 
-    // Strictly unfinished tasks whose scheduled_date is prior to today and NOT already rolled over today
     if (!isFinished && task.scheduledDate < todayStr && lastRolloverDate !== todayStr) {
       const origScheduled = task.originalScheduledDate || task.scheduledDate;
       const origDue = task.originalDueDate || task.dueDate;
@@ -888,33 +764,22 @@ export async function evaluateTaskRollovers(
   }
 
   if (modifiedTasksToPersist.length > 0) {
-    // 1. Update Local Cache immediately
     setCachedTasks(updatedTasks);
 
-    // 2. Persist to Firestore and Cloudflare D1 with Promise.allSettled and retry queue
-    const partialFailures: Array<{ taskId: string; backend: 'firestore' | 'd1'; error: string }> = [];
+    const partialFailures: any[] = [];
     let failedCount = 0;
 
-    const persistenceResults = await Promise.allSettled(
-      modifiedTasksToPersist.map(t => persistTaskDualWrite(t, 'update'))
-    );
-
-    for (let i = 0; i < persistenceResults.length; i++) {
-      const res = persistenceResults[i];
-      const t = modifiedTasksToPersist[i];
-      if (res.status === 'fulfilled') {
-        if (res.value.partialFailure) {
-          partialFailures.push({
-            taskId: t.id,
-            backend: res.value.d1Status === 'failed' ? 'd1' : 'firestore',
-            error: res.value.d1Error || res.value.firestoreError || 'Partial rollover sync failure'
-          });
+    await Promise.allSettled(
+      modifiedTasksToPersist.map(async (t) => {
+        try {
+          await cfUpdateTask(t.id, t);
+        } catch (err) {
+          enqueueTaskSyncRetry(t, 'update', err);
+          failedCount++;
+          partialFailures.push({ taskId: t.id, error: String(err) });
         }
-      } else {
-        failedCount++;
-        enqueueTaskSyncRetry(t, 'both', 'update', res.reason);
-      }
-    }
+      })
+    );
 
     return { updatedTasks, rolledOverCount: count, partialFailures, failedCount };
   }
@@ -962,7 +827,7 @@ export const setCachedTasks = (tasks: Task[]) => {
 };
 
 /**
- * Creates and persists a new task in Firestore and Local Cache
+ * Creates and persists a new task to Cloudflare D1 and Local Cache
  */
 export const persistNewTask = async (
   taskInput: Partial<Task>,
@@ -1008,121 +873,85 @@ export const persistNewTask = async (
 
   const newTask = normalizeTaskDateModel(rawTask);
 
-  // 1. Update Local Storage Cache immediately
+  // 1. Update Local Storage Cache immediately (optimistic)
   const currentCached = getCachedTasks();
   const updatedCache = [newTask, ...currentCached.filter(t => t.id !== taskId)];
   setCachedTasks(updatedCache);
 
-  // 2. Reliable Dual-Backend Persistence
-  const writeRes = await persistTaskDualWrite(newTask, 'create');
+  // 2. Persist to Cloudflare D1
+  const writeRes = await persistTaskToD1(newTask, 'create');
   if (!writeRes.success) {
-    console.warn('Backend persistence error for new task (queued for retry):', writeRes.firestoreError, writeRes.d1Error);
+    console.warn('[TaskStorage] D1 write queued for retry:', writeRes.d1Error);
   }
 
+  // 3. Emit workspace events (fire and forget)
   try {
+    const recipientId = newTask.assigneeId || newTask.assigned_employee_id;
+    WorkspaceEventService.emit({
+      eventType: 'task.created',
+      entityType: 'task',
+      entityId: newTask.id,
+      actorId: userProfile?.uid || 'admin',
+      actorName: userProfile?.name || 'Admin',
+      actorRole: 'admin',
+      clientId: newTask.clientId,
+      targetMemberIds: recipientId ? [recipientId] : [],
+      metadata: {
+        taskTitle: newTask.title,
+        clientName: newTask.clientName,
+        dueDate: newTask.dueDate,
+        scheduledDate: newTask.scheduledDate,
+        priority: newTask.priority,
+        assigneeName: newTask.assigneeName
+      },
+      customDescription: `Created task "${newTask.title}" for ${newTask.clientName || 'General'} (Assignee: ${newTask.assigneeName || 'Unassigned'})`
+    }).catch(console.warn);
+  } catch (evtErr) {
+    console.warn('WorkspaceEvent emission notice:', evtErr);
+  }
 
-    // 3. Write activity log & emit workspace events
+  // 4. Auto-sync to Work Log if status is Done
+  if (newTask.status === 'Done') {
     try {
-      await addDoc(collection(db, 'activityLogs'), {
-        userId: userProfile?.uid || '',
-        userName: userProfile?.name || 'Admin',
-        action: `created task "${newTask.title}"`,
-        details: `Scheduled: ${newTask.scheduledDate} · Deadline: ${newTask.dueDate} · Assignee: ${newTask.assigneeName}`,
-        createdAt: nowIso,
-      });
-    } catch (e) {}
-
-    // Emit Canonical Workspace Events (triggers AuditLog and NotificationService)
-    try {
-      const recipientId = newTask.assigneeId || newTask.assignee_id || newTask.assigned_employee_id;
-      await WorkspaceEventService.emit({
-        eventType: 'task.created',
-        entityType: 'task',
-        entityId: newTask.id,
-        actorId: userProfile?.uid || 'admin',
-        actorName: userProfile?.name || 'Admin',
-        actorRole: 'admin',
-        clientId: newTask.clientId,
-        targetMemberIds: recipientId ? [recipientId] : [],
-        metadata: {
-          taskTitle: newTask.title,
-          clientName: newTask.clientName,
-          dueDate: newTask.dueDate,
-          scheduledDate: newTask.scheduledDate,
-          priority: newTask.priority,
-          assigneeName: newTask.assigneeName
-        },
-        customDescription: `Created task "${newTask.title}" for ${newTask.clientName || 'General'} (Assignee: ${newTask.assigneeName || 'Unassigned'})`
-      });
-
-      if (recipientId) {
-        await WorkspaceEventService.emit({
-          eventType: 'task.assigned',
-          entityType: 'task',
-          entityId: newTask.id,
-          actorId: userProfile?.uid || 'admin',
-          actorName: userProfile?.name || 'Admin',
-          actorRole: 'admin',
+      const { syncTaskCompletionToWorkLog } = await import('./taskWorkLogSync');
+      syncTaskCompletionToWorkLog(
+        {
+          taskId: newTask.id,
+          title: newTask.title,
+          description: newTask.description,
           clientId: newTask.clientId,
-          targetMemberIds: [recipientId],
-          metadata: {
-            taskTitle: newTask.title,
-            clientName: newTask.clientName,
-            dueDate: newTask.dueDate,
-            scheduledDate: newTask.scheduledDate,
-            assigneeName: newTask.assigneeName
-          }
-        });
-      }
-    } catch (evtErr) {
-      console.warn('WorkspaceEvent emission notice:', evtErr);
+          clientName: newTask.clientName,
+          assigneeId: newTask.assigneeId,
+          assigneeName: newTask.assigneeName,
+          category: newTask.category || 'Other',
+          quantity: 1,
+          completedAt: newTask.completedAt || nowIso,
+          source: 'task_completion',
+          videoProductionId: newTask.videoProductionId,
+        },
+        userProfile,
+        userProfile?.uid
+      ).catch(console.warn);
+    } catch (workLogErr) {
+      console.warn('Work Log auto-sync notice on task creation:', workLogErr);
     }
+  }
 
-    // 4. Auto-sync to Work Log if status is Done
-    if (newTask.status === 'Done') {
-      try {
-        const { syncTaskCompletionToWorkLog } = await import('./taskWorkLogSync');
-        syncTaskCompletionToWorkLog(
-          {
-            taskId: newTask.id,
-            title: newTask.title,
-            description: newTask.description,
-            clientId: newTask.clientId,
-            clientName: newTask.clientName,
-            assigneeId: newTask.assigneeId,
-            assigneeName: newTask.assigneeName,
-            category: newTask.category || 'Other',
-            quantity: 1,
-            completedAt: newTask.completedAt || nowIso,
-            source: 'task_completion',
-            videoProductionId: newTask.videoProductionId,
-          },
-          userProfile,
-          userProfile?.uid
-        ).catch(console.warn);
-      } catch (workLogErr) {
-        console.warn('Work Log auto-sync notice on task creation:', workLogErr);
-      }
+  // 5. Auto-sync to Approvals Queue if status is In Review
+  if (newTask.status === 'In Review') {
+    try {
+      const { createOrUpdateApprovalFromSource } = await import('./approvalStorage');
+      await createOrUpdateApprovalFromSource('task', newTask, { userId: userProfile?.uid, name: userProfile?.name });
+    } catch (apprErr) {
+      console.warn('Approvals auto-sync notice:', apprErr);
     }
-
-    // 5. Auto-sync to Approvals Queue if status is In Review
-    if (newTask.status === 'In Review') {
-      try {
-        const { createOrUpdateApprovalFromSource } = await import('./approvalStorage');
-        await createOrUpdateApprovalFromSource('task', newTask, { userId: userProfile?.uid, name: userProfile?.name });
-      } catch (apprErr) {
-        console.warn('Approvals auto-sync notice:', apprErr);
-      }
-    }
-  } catch (err) {
-    console.warn('Firestore write warning for task (cached locally):', err);
   }
 
   return newTask;
 };
 
 /**
- * Updates an existing task in Firestore and Local Cache
+ * Updates an existing task in Cloudflare D1 and Local Cache
  */
 export const persistUpdateTask = async (
   taskId: string,
@@ -1153,30 +982,25 @@ export const persistUpdateTask = async (
 
   const updatedTask = normalizeTaskDateModel(merged);
 
-  // 1. Update Local Cache
+  // 1. Update Local Cache immediately (optimistic)
   const updatedList = currentCached.map(t => t.id === taskId ? updatedTask : t);
   if (!target) updatedList.unshift(updatedTask);
   setCachedTasks(updatedList);
 
-  // 2. Reliable Dual-Backend Persistence
-  const writeRes = await persistTaskDualWrite(updatedTask, 'update');
+  // 2. Persist to Cloudflare D1
+  const writeRes = await persistTaskToD1(updatedTask, 'update');
   if (!writeRes.success) {
-    console.warn('Backend persistence error for task update (queued for retry):', writeRes.firestoreError, writeRes.d1Error);
+    console.warn('[TaskStorage] D1 update queued for retry:', writeRes.d1Error);
   }
 
-  try {
-
-    // 3. Auto-sync to Approvals Queue if status is In Review
-    if (updatedTask.status === 'In Review') {
-      try {
-        const { createOrUpdateApprovalFromSource } = await import('./approvalStorage');
-        await createOrUpdateApprovalFromSource('task', updatedTask, { userId: userProfile?.uid, name: userProfile?.name });
-      } catch (apprErr) {
-        console.warn('Approvals auto-sync notice on task update:', apprErr);
-      }
+  // 3. Auto-sync to Approvals Queue if status is In Review
+  if (updatedTask.status === 'In Review') {
+    try {
+      const { createOrUpdateApprovalFromSource } = await import('./approvalStorage');
+      await createOrUpdateApprovalFromSource('task', updatedTask, { userId: userProfile?.uid, name: userProfile?.name });
+    } catch (apprErr) {
+      console.warn('Approvals auto-sync notice on task update:', apprErr);
     }
-  } catch (err) {
-    console.warn('Firestore update warning for task (cached locally):', err);
   }
 
   return updatedTask;
@@ -1184,13 +1008,12 @@ export const persistUpdateTask = async (
 
 /**
  * Bulk Reschedule Tasks (Super Admin operation)
- * Modifies scheduledDate while keeping original due date and auditing each task.
  */
 export interface BulkRescheduleResult {
   updatedCount: number;
   successCount: number;
   failureCount: number;
-  partialFailures: Array<{ taskId: string; backend: 'firestore' | 'd1'; error: string }>;
+  partialFailures: Array<{ taskId: string; error: string }>;
 }
 
 export const bulkRescheduleTasks = async (
@@ -1223,61 +1046,37 @@ export const bulkRescheduleTasks = async (
 
   setCachedTasks(updatedList);
 
-  const partialFailures: Array<{ taskId: string; backend: 'firestore' | 'd1'; error: string }> = [];
+  const partialFailures: Array<{ taskId: string; error: string }> = [];
   let successCount = 0;
   let failureCount = 0;
 
-  const writePromises = tasksToPersist.map(async (target) => {
-    const writeRes = await persistTaskDualWrite(target, 'update');
-    if (writeRes.success) {
+  await Promise.allSettled(tasksToPersist.map(async (target) => {
+    try {
+      await cfUpdateTask(target.id, target);
       successCount++;
-      if (writeRes.partialFailure) {
-        partialFailures.push({
-          taskId: target.id,
-          backend: writeRes.d1Status === 'failed' ? 'd1' : 'firestore',
-          error: writeRes.d1Error || writeRes.firestoreError || 'Partial sync failure'
-        });
-      }
-    } else {
+    } catch (err) {
+      enqueueTaskSyncRetry(target, 'update', err);
       failureCount++;
+      partialFailures.push({ taskId: target.id, error: String(err) });
     }
+  }));
 
-    addDoc(collection(db, 'activityLogs'), {
-      userId: userProfile?.uid || '',
-      userName: userProfile?.name || 'Super Admin',
-      action: `rescheduled task "${target.title}" to ${newScheduledDate}`,
-      details: `Original Scheduled: ${target.originalScheduledDate || 'N/A'} · Due: ${target.dueDate}`,
-      createdAt: nowIso,
-    }).catch(() => {});
-  });
-
-  await Promise.allSettled(writePromises);
-
-  return {
-    updatedCount,
-    successCount,
-    failureCount,
-    partialFailures
-  };
+  return { updatedCount, successCount, failureCount, partialFailures };
 };
 
 export interface TaskTransitionResult {
   success: boolean;
   task: Task | null;
   message: string;
-  allBackendsSynced?: boolean;
-  partialFailure?: boolean;
-  backendSync?: {
-    firestore: 'success' | 'failed';
-    d1: 'success' | 'failed';
-    firestoreError?: string;
-    d1Error?: string;
-  };
+  d1Synced?: boolean;
+  retryQueued?: boolean;
+  d1Error?: string;
 }
 
 /**
  * Canonical Single Status Transition Engine
  * Used by Arrows, Drag-and-Drop, Dropdowns, My Day, Calendar, and Approvals.
+ * Cloudflare D1 is the authoritative backend.
  */
 export const transitionTaskStatus = async (
   taskId: string,
@@ -1295,13 +1094,12 @@ export const transitionTaskStatus = async (
   const newStatus = normalizeTaskStatus(targetStatus);
 
   if (previousStatus === newStatus) {
-    return { 
-      success: true, 
-      task: targetTask, 
+    return {
+      success: true,
+      task: targetTask,
       message: 'Status unchanged',
-      allBackendsSynced: true,
-      partialFailure: false,
-      backendSync: { firestore: 'success', d1: 'success' }
+      d1Synced: true,
+      retryQueued: false,
     };
   }
 
@@ -1318,7 +1116,6 @@ export const transitionTaskStatus = async (
       completed_at: targetTask.completedAt || nowIso,
     } : {}),
     ...(wasDone && !isNowDone ? {
-      // Reopening task: record history and remove active completion
       completedAt: undefined,
       completed_at: undefined,
       lastCompletedAt: targetTask.completedAt || targetTask.completed_at,
@@ -1329,45 +1126,30 @@ export const transitionTaskStatus = async (
     } : {}),
   });
 
-  // 1. Optimistic local cache update
+  // 1. Optimistic local cache update IMMEDIATELY
   const updatedList = currentCached.map(t => t.id === taskId ? updatedTask : t);
   setCachedTasks(updatedList);
 
-  // 2. Reliable Dual-Backend Persistence
-  const writeRes = await persistTaskDualWrite(updatedTask, 'update');
+  // 2. Persist to Cloudflare D1
+  const writeRes = await persistTaskToD1(updatedTask, 'update');
 
-  // If both backends fail to persist, rollback local cache and report error explicitly
-  if (!writeRes.success) {
-    console.error('Failed to persist task status to server database:', writeRes.firestoreError, writeRes.d1Error);
+  // If D1 is completely unreachable (not even queued), rollback local cache
+  if (!writeRes.success && !writeRes.retryQueued) {
+    console.error('[TaskStorage] D1 write failed and could not be queued. Rolling back.');
     setCachedTasks(currentCached);
     return {
       success: false,
       task: targetTask,
-      message: 'Failed to persist status change to server database',
-      allBackendsSynced: false,
-      partialFailure: false,
-      backendSync: {
-        firestore: writeRes.firestoreStatus,
-        d1: writeRes.d1Status,
-        firestoreError: writeRes.firestoreError,
-        d1Error: writeRes.d1Error
-      }
+      message: 'Failed to persist status change — please try again',
+      d1Synced: false,
+      retryQueued: false,
+      d1Error: writeRes.d1Error,
     };
   }
 
-  // 3. Audit Log & Workspace Event
+  // 3. Emit workspace event (fire and forget)
   try {
-    await addDoc(collection(db, 'activityLogs'), {
-      userId: userProfile?.uid || '',
-      userName: userProfile?.name || 'Team Member',
-      action: wasDone && !isNowDone
-        ? `reopened task "${updatedTask.title}" from Done to ${newStatus} (${source})`
-        : `moved task "${updatedTask.title}" from ${previousStatus} to ${newStatus} (${source})`,
-      details: `Client: ${updatedTask.clientName} · Assignee: ${updatedTask.assigneeName}`,
-      createdAt: nowIso,
-    });
-
-    await WorkspaceEventService.emit({
+    WorkspaceEventService.emit({
       eventType: isNowDone ? 'task.completed' : 'task.status_changed',
       entityType: 'task',
       entityId: updatedTask.id,
@@ -1387,10 +1169,10 @@ export const transitionTaskStatus = async (
       customDescription: wasDone && !isNowDone
         ? `Task "${updatedTask.title}" was reopened to ${newStatus} by ${userProfile?.name || 'User'}`
         : `Task "${updatedTask.title}" moved from ${previousStatus} to ${newStatus} (${source}) by ${userProfile?.name || 'User'}`
-    });
+    }).catch(() => {});
   } catch (e) {}
 
-  // 4. Handle Done -> Work Log idempotent synchronization
+  // 4. Handle Done -> Work Log synchronization
   if (isNowDone) {
     try {
       const { syncTaskCompletionToWorkLog } = await import('./taskWorkLogSync');
@@ -1416,7 +1198,6 @@ export const transitionTaskStatus = async (
       console.warn('Work Log sync notice:', workLogErr);
     }
   } else if (wasDone && !isNowDone) {
-    // Reopening task: update linked work logs
     try {
       const { syncTaskReopenedState } = await import('./taskWorkLogSync');
       await syncTaskReopenedState(taskId);
@@ -1429,9 +1210,9 @@ export const transitionTaskStatus = async (
   if (newStatus === 'In Review') {
     try {
       const { createOrUpdateApprovalFromSource } = await import('./approvalStorage');
-      await createOrUpdateApprovalFromSource('task', updatedTask, { 
-        userId: userProfile?.uid, 
-        name: userProfile?.name 
+      await createOrUpdateApprovalFromSource('task', updatedTask, {
+        userId: userProfile?.uid,
+        name: userProfile?.name
       });
     } catch (apprErr) {
       console.warn('Approvals sync notice:', apprErr);
@@ -1448,38 +1229,31 @@ export const transitionTaskStatus = async (
     }
   }
 
-  let statusMessage = isNowDone 
-    ? 'Task completed & Work Log synced' 
+  let statusMessage = isNowDone
+    ? 'Task completed & Work Log synced'
     : (wasDone && !isNowDone ? `Task reopened to ${newStatus}` : `Moved to ${newStatus}`);
 
-  if (writeRes.partialFailure) {
-    const failedBackend = writeRes.d1Status === 'failed' ? 'Cloudflare D1' : 'Firestore';
-    statusMessage += ` (${failedBackend} sync queued for background retry)`;
+  if (writeRes.retryQueued) {
+    statusMessage += ' (D1 sync queued — will retry automatically)';
   }
 
-  return { 
-    success: true, 
-    task: updatedTask, 
+  return {
+    success: true,
+    task: updatedTask,
     message: statusMessage,
-    allBackendsSynced: writeRes.allBackendsSynced,
-    partialFailure: writeRes.partialFailure,
-    backendSync: {
-      firestore: writeRes.firestoreStatus,
-      d1: writeRes.d1Status,
-      firestoreError: writeRes.firestoreError,
-      d1Error: writeRes.d1Error
-    }
+    d1Synced: writeRes.d1Status === 'success',
+    retryQueued: writeRes.retryQueued,
+    d1Error: writeRes.d1Error,
   };
 };
 
 /**
  * Safely Archives or Soft-Deletes a task with audit event emission.
- * Preserves historical Work Logs and audit history.
  */
 export const persistDeleteTask = async (
   taskId: string,
   userProfile?: { uid?: string; name?: string; role?: string },
-  options?: { softDelete?: boolean }
+  _options?: { softDelete?: boolean }
 ): Promise<boolean> => {
   const currentCached = getCachedTasks();
   const targetTask = currentCached.find(t => t.id === taskId);
@@ -1492,64 +1266,37 @@ export const persistDeleteTask = async (
   const actorRole = userProfile?.role || 'employee';
 
   try {
-    const [d1Res, fsRes] = await Promise.allSettled([
-      cfDeleteTask(taskId),
-      options?.softDelete !== false
-        ? setDoc(doc(db, 'tasks', taskId), sanitizeFirestorePayload({
-            is_deleted: true,
-            isArchived: true,
-            deleted_at: nowIso,
-            deleted_by: actorName,
-            deleted_by_id: actorId,
-            updatedAt: nowIso
-          }), { merge: true })
-        : deleteDoc(doc(db, 'tasks', taskId))
-    ]);
-
-    if (d1Res.status === 'rejected') {
-      enqueueTaskSyncRetry({ id: taskId } as Task, 'd1', 'delete', d1Res.reason);
-    }
-    if (fsRes.status === 'rejected') {
-      enqueueTaskSyncRetry({ id: taskId } as Task, 'firestore', 'delete', fsRes.reason);
-    }
-
-    // Audit Event: task.deleted and activityLog
-    try {
-      await addDoc(collection(db, 'activityLogs'), {
-        userId: actorId,
-        userName: actorName,
-        action: `deleted task "${targetTask?.title || taskId}"`,
-        details: `Client: ${targetTask?.clientName || 'N/A'} · Assignee: ${targetTask?.assigneeName || 'N/A'}`,
-        createdAt: nowIso,
-      });
-
-      await WorkspaceEventService.emit({
-        eventType: 'task.deleted',
-        entityType: 'task',
-        entityId: taskId,
-        actorId,
-        actorName,
-        actorRole,
-        clientId: targetTask?.clientId,
-        targetMemberIds: targetTask?.assigneeId ? [targetTask.assigneeId] : [],
-        metadata: {
-          taskId,
-          taskTitle: targetTask?.title || 'Task',
-          clientName: targetTask?.clientName,
-          assigneeName: targetTask?.assigneeName,
-          deletedAt: nowIso,
-        },
-        customDescription: `Task "${targetTask?.title || taskId}" was deleted by ${actorName}`
-      });
-    } catch (e) {
-      console.warn('Task delete audit warning:', e);
-    }
-
-    return true;
+    await cfDeleteTask(taskId);
   } catch (err) {
-    console.warn('Firestore delete error for task (removed locally):', err);
-    return false;
+    enqueueTaskSyncRetry({ id: taskId } as Task, 'delete', err);
+    console.warn('[TaskStorage] D1 delete queued for retry:', err);
   }
+
+  // Emit audit event (fire and forget)
+  try {
+    WorkspaceEventService.emit({
+      eventType: 'task.deleted',
+      entityType: 'task',
+      entityId: taskId,
+      actorId,
+      actorName,
+      actorRole,
+      clientId: targetTask?.clientId,
+      targetMemberIds: targetTask?.assigneeId ? [targetTask.assigneeId] : [],
+      metadata: {
+        taskId,
+        taskTitle: targetTask?.title || 'Task',
+        clientName: targetTask?.clientName,
+        assigneeName: targetTask?.assigneeName,
+        deletedAt: nowIso,
+      },
+      customDescription: `Task "${targetTask?.title || taskId}" was deleted by ${actorName}`
+    }).catch(() => {});
+  } catch (e) {
+    console.warn('Task delete audit warning:', e);
+  }
+
+  return true;
 };
 
 /**
@@ -1590,151 +1337,124 @@ export const duplicateTask = async (
 };
 
 /**
- * Sets up a live Firestore snapshot listener with local cache fallback & automatic hydration
+ * Live task subscription backed ONLY by Cloudflare D1.
+ * No Firestore listener — no stale-data rollbacks.
+ * Flow: local cache (instant) → D1 fetch (authoritative) → rollover evaluation.
  */
 export const subscribeToCanonicalTasks = (
   onUpdate: (tasks: Task[]) => void
 ): (() => void) => {
-  // 1. Emit initial cached tasks immediately with date normalization
+  let cancelled = false;
+
+  // 1. Emit initial cached tasks immediately (0ms latency)
   let currentTasks = getCachedTasks();
   onUpdate(currentTasks);
 
-  // Safely process any pending retries from prior offline/failed operations
+  // 2. Process any pending D1 retries from previous sessions
   processTaskSyncQueue().catch(console.warn);
 
-  // 2. Evaluate rollovers on initial load safely (once per business day)
+  // 3. Evaluate rollovers on initial load
   evaluateTaskRollovers(currentTasks).then(({ updatedTasks, rolledOverCount }) => {
+    if (cancelled) return;
     if (rolledOverCount > 0) {
       currentTasks = updatedTasks;
       onUpdate(currentTasks);
     }
   }).catch(console.warn);
 
-  // 3. Live Sync from Cloudflare D1 database with deterministic conflict resolution
+  // 4. Fetch authoritative list from Cloudflare D1 and merge
   cfGetTasks().then((cfList) => {
+    if (cancelled) return;
     if (!Array.isArray(cfList) || cfList.length === 0) return;
 
     const cachedBefore = getCachedTasks();
     const taskMap = new Map<string, Task>();
+
     for (const t of cachedBefore) {
       taskMap.set(t.id, t);
     }
 
     const tasksToHealInD1: Task[] = [];
-    const tasksToHealInFirestore: Task[] = [];
 
     for (const rawCf of cfList) {
       const cfTask = normalizeTaskDateModel(rawCf);
       const existing = taskMap.get(cfTask.id);
 
       if (!existing) {
+        // Task from D1 not in local cache — add it
         taskMap.set(cfTask.id, cfTask);
       } else {
-        const { merged, shouldSyncToD1, shouldSyncToFirestore } = mergeTaskRecords(existing, cfTask);
+        const { merged, shouldSyncToD1 } = mergeTaskRecords(existing, cfTask);
         taskMap.set(cfTask.id, merged);
         if (shouldSyncToD1) {
           tasksToHealInD1.push(merged);
         }
-        if (shouldSyncToFirestore) {
-          tasksToHealInFirestore.push(merged);
-        }
       }
     }
 
-    const reconciledList = Array.from(taskMap.values());
+    const reconciledList = Array.from(taskMap.values())
+      .filter(t => !t.isArchived && !t.is_deleted && t.status !== 'Cancelled');
+
     setCachedTasks(reconciledList);
     currentTasks = reconciledList;
-    onUpdate(reconciledList);
 
-    // Heal stale records in D1 in the background with retry fallback
+    if (!cancelled) onUpdate(reconciledList);
+
+    // Heal stale records in D1 in background
     if (tasksToHealInD1.length > 0) {
       for (const t of tasksToHealInD1) {
         cfUpdateTask(t.id, t).catch((err) => {
-          enqueueTaskSyncRetry(t, 'd1', 'update', err);
-        });
-      }
-    }
-    // Heal stale records in Firestore in the background with retry fallback
-    if (tasksToHealInFirestore.length > 0) {
-      for (const t of tasksToHealInFirestore) {
-        setDoc(doc(db, 'tasks', t.id), sanitizeFirestorePayload(t), { merge: true }).catch((err) => {
-          enqueueTaskSyncRetry(t, 'firestore', 'update', err);
+          enqueueTaskSyncRetry(t, 'update', err);
         });
       }
     }
   }).catch(console.warn);
 
-  // 4. Real-time Firestore Snapshot Listener with deterministic merging
-  const unsub = onSnapshot(collection(db, 'tasks'), async (snapshot) => {
-    if (!snapshot.empty) {
+  // 5. Set up periodic D1 polling to pick up changes from other devices/browsers
+  //    (replaces the Firestore onSnapshot listener)
+  const POLL_INTERVAL_MS = 30_000; // 30 seconds
+  const pollInterval = setInterval(async () => {
+    if (cancelled) return;
+    try {
+      const cfList = await cfGetTasks();
+      if (!Array.isArray(cfList) || cfList.length === 0 || cancelled) return;
+
       const cachedBefore = getCachedTasks();
       const taskMap = new Map<string, Task>();
-      for (const t of cachedBefore) {
-        taskMap.set(t.id, t);
-      }
+      for (const t of cachedBefore) taskMap.set(t.id, t);
 
       const tasksToHealInD1: Task[] = [];
-      const tasksToHealInFirestore: Task[] = [];
 
-      snapshot.forEach(docSnap => {
-        const d = docSnap.data();
-        if (!d.isArchived && !d.is_deleted && d.status !== 'Cancelled') {
-          const fsTask = normalizeTaskDateModel({ id: docSnap.id, taskId: docSnap.id, ...d });
-          const existing = taskMap.get(fsTask.id);
-          if (!existing) {
-            taskMap.set(fsTask.id, fsTask);
-          } else {
-            const { merged, shouldSyncToD1, shouldSyncToFirestore } = mergeTaskRecords(existing, fsTask);
-            taskMap.set(fsTask.id, merged);
-            if (shouldSyncToD1) {
-              tasksToHealInD1.push(merged);
-            }
-            if (shouldSyncToFirestore) {
-              tasksToHealInFirestore.push(merged);
-            }
-          }
-        }
-      });
-
-      const reconciledList = Array.from(taskMap.values());
-      const { updatedTasks } = await evaluateTaskRollovers(reconciledList);
-      setCachedTasks(updatedTasks);
-      currentTasks = updatedTasks;
-      onUpdate(updatedTasks);
-
-      // Heal stale records in D1 in background with retry fallback
-      if (tasksToHealInD1.length > 0) {
-        for (const t of tasksToHealInD1) {
-          cfUpdateTask(t.id, t).catch((err) => {
-            enqueueTaskSyncRetry(t, 'd1', 'update', err);
-          });
+      for (const rawCf of cfList) {
+        const cfTask = normalizeTaskDateModel(rawCf);
+        const existing = taskMap.get(cfTask.id);
+        if (!existing) {
+          taskMap.set(cfTask.id, cfTask);
+        } else {
+          const { merged, shouldSyncToD1 } = mergeTaskRecords(existing, cfTask);
+          taskMap.set(cfTask.id, merged);
+          if (shouldSyncToD1) tasksToHealInD1.push(merged);
         }
       }
-      // Heal stale records in Firestore in background with retry fallback
-      if (tasksToHealInFirestore.length > 0) {
-        for (const t of tasksToHealInFirestore) {
-          setDoc(doc(db, 'tasks', t.id), sanitizeFirestorePayload(t), { merge: true }).catch((err) => {
-            enqueueTaskSyncRetry(t, 'firestore', 'update', err);
-          });
-        }
+
+      const reconciledList = Array.from(taskMap.values())
+        .filter(t => !t.isArchived && !t.is_deleted && t.status !== 'Cancelled');
+
+      setCachedTasks(reconciledList);
+      currentTasks = reconciledList;
+      if (!cancelled) onUpdate(reconciledList);
+
+      for (const t of tasksToHealInD1) {
+        cfUpdateTask(t.id, t).catch((err) => enqueueTaskSyncRetry(t, 'update', err));
       }
-      return;
+    } catch (pollErr) {
+      console.warn('[TaskStorage] D1 poll notice:', pollErr);
     }
+  }, POLL_INTERVAL_MS);
 
-    // If Firestore collection is empty, check cache or seed
-    const cached = getCachedTasks();
-    if (cached.length > 0) {
-      onUpdate(cached);
-    } else {
-      const seeded = DEFAULT_MASTER_TASKS.map(normalizeTaskDateModel);
-      setCachedTasks(seeded);
-      onUpdate(seeded);
-    }
-  }, (err) => {
-    console.warn('Tasks listener notice (using resilient local cache):', err);
-    const cached = getCachedTasks();
-    onUpdate(cached);
-  });
-
-  return unsub;
+  // Return unsubscribe / cleanup function
+  return () => {
+    cancelled = true;
+    clearInterval(pollInterval);
+  };
 };

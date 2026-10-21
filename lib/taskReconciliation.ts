@@ -2,9 +2,8 @@
  * DigiExplodeAI — Task & Work Log Historical Reconciliation Utility
  * 
  * Safely analyzes and reconciles task states across:
- * - Cloudflare D1 database
+ * - Cloudflare D1 database (authoritative)
  * - LocalStorage persistent caches
- * - Firestore database (when available)
  * - Work Logs historical deliverable records
  * 
  * Non-destructive: Analysis runs in read-only mode by default.
@@ -17,11 +16,9 @@ import {
   setCachedTasks, 
   normalizeTaskDateModel, 
   normalizeTaskStatus,
-  persistTaskDualWrite 
+  persistTaskToD1
 } from './taskStorage';
-import { cfGetTasks, cfGetWorkLogs, cfUpdateTask } from './cloudflareApi';
-import { db, sanitizeFirestorePayload } from './firebase';
-import { doc, setDoc, addDoc, collection } from 'firebase/firestore';
+import { cfGetTasks, cfGetWorkLogs } from './cloudflareApi';
 
 export interface TaskCandidateRecovery {
   taskId: string;
@@ -251,34 +248,20 @@ export async function applyApprovedTaskRecovery(
         updatedAt: new Date().toISOString(),
       });
 
-      // 1. Reliable Dual-Backend Persistence
-      const writeRes = await persistTaskDualWrite(recoveredTask, 'update');
+      // Persist to Cloudflare D1
+      const writeRes = await persistTaskToD1(recoveredTask, 'update');
 
       if (writeRes.success) {
         recoveredCount++;
-        if (writeRes.partialFailure) {
-          const failedBackend = writeRes.d1Status === 'failed' ? 'Cloudflare D1' : 'Firestore';
-          details.push(`⚠ Recovered "${t.title}" (ID: ${t.id}) to Done (Partial: ${failedBackend} sync queued for retry)`);
+        if (writeRes.retryQueued) {
+          details.push(`⚠ Recovered "${t.title}" (ID: ${t.id}) to Done (D1 sync queued for retry)`);
         } else {
-          details.push(`✓ Recovered "${t.title}" (ID: ${t.id}) to Done across all backends`);
+          details.push(`✓ Recovered "${t.title}" (ID: ${t.id}) to Done in Cloudflare D1`);
         }
-
-        try {
-          await addDoc(collection(db, 'activityLogs'), {
-            userId: userProfile?.uid || 'admin',
-            userName: userProfile?.name || 'Admin',
-            action: `reconciled task "${t.title}" to Done from historical Work Log record`,
-            details: `Completed timestamp: ${completionTime}`,
-            createdAt: new Date().toISOString(),
-          });
-        } catch (err) {
-          console.warn('[Recovery] Activity log notice:', err);
-        }
-
         updatedTasksList.push(recoveredTask);
       } else {
         failedCount++;
-        details.push(`✗ Failed to recover "${t.title}" (ID: ${t.id}): ${writeRes.firestoreError || writeRes.d1Error}`);
+        details.push(`✗ Failed to recover "${t.title}" (ID: ${t.id}): ${writeRes.d1Error}`);
         updatedTasksList.push(t);
       }
     } else {

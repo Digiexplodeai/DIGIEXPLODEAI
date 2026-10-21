@@ -20,7 +20,7 @@ import {
   enqueueTaskSyncRetry,
   dequeueTaskSyncRetry,
   processTaskSyncQueue,
-  persistTaskDualWrite,
+  persistTaskToD1,
   bulkRescheduleTasks,
   getCachedTasks,
   setCachedTasks,
@@ -302,43 +302,40 @@ async function runAllTests() {
   });
 
   // Test 7A: Enqueueing partial failure
-  enqueueTaskSyncRetry(failureTask, 'd1', 'update', new Error('Cloudflare D1 503 Service Unavailable'));
+  enqueueTaskSyncRetry(failureTask, 'update', new Error('Cloudflare D1 503 Service Unavailable'));
   let queue = getTaskSyncQueue();
   assert(queue.length === 1, 'Failed write successfully enqueued in retry queue');
-  assert(queue[0].targetBackend === 'd1', 'Enqueued item targets failed backend (D1)');
+  assert(queue[0].action === 'update', 'Enqueued item has correct action');
   assert(queue[0].lastError?.includes('503') === true, 'Error message recorded in retry queue item');
 
   // Test 7B: Idempotent Deduplication (No Duplicated Operations)
-  // When task is updated to Done before retry fires, newer payload supersedes older payload
   const failureTaskDone: Task = normalizeTaskDateModel({
     ...failureTask,
     status: 'Done',
     completedAt: `${kolkataDate}T12:00:00.000Z`,
     updatedAt: `${kolkataDate}T12:00:00.000Z`,
   });
-  enqueueTaskSyncRetry(failureTaskDone, 'd1', 'update', new Error('Cloudflare D1 Network Timeout'));
+  enqueueTaskSyncRetry(failureTaskDone, 'update', new Error('Cloudflare D1 Network Timeout'));
   queue = getTaskSyncQueue();
   assert(queue.length === 1, 'Queue deduplicated: 0 duplicate entries created for same task');
   assert(queue[0].taskPayload.status === 'Done', 'Latest verified task payload preserved in queue');
 
   // Test 7C: Dequeue on Successful Sync
-  dequeueTaskSyncRetry(failureTask.id, 'd1');
+  dequeueTaskSyncRetry(failureTask.id);
   assert(getTaskSyncQueue().length === 0, 'Dequeued successfully after authoritative synchronization');
 
-  // Test 7D: Dual-Write Result Contract Structure
+  // Test 7D: D1 Write Result Contract Structure
   const writeResultTestTask = normalizeTaskDateModel({
     id: 'contract_test_task',
-    title: 'Dual Write Contract Test',
+    title: 'D1 Write Contract Test',
     status: 'Done',
     scheduledDate: kolkataDate,
     dueDate: kolkataDate,
   });
-  const dualResult = await persistTaskDualWrite(writeResultTestTask, 'update');
-  assert(typeof dualResult.success === 'boolean', 'persistTaskDualWrite returns boolean success');
-  assert(typeof dualResult.allBackendsSynced === 'boolean', 'persistTaskDualWrite returns allBackendsSynced');
-  assert(typeof dualResult.partialFailure === 'boolean', 'persistTaskDualWrite returns partialFailure');
-  assert(dualResult.firestoreStatus === 'success' || dualResult.firestoreStatus === 'failed', 'firestoreStatus is valid status');
-  assert(dualResult.d1Status === 'success' || dualResult.d1Status === 'failed', 'd1Status is valid status');
+  const d1Result = await persistTaskToD1(writeResultTestTask, 'update');
+  assert(typeof d1Result.success === 'boolean', 'persistTaskToD1 returns boolean success');
+  assert(typeof d1Result.retryQueued === 'boolean', 'persistTaskToD1 returns retryQueued');
+  assert(d1Result.d1Status === 'success' || d1Result.d1Status === 'failed', 'd1Status is valid status');
 
   // ---------------------------------------------------------------
   // 8. Concurrent Updates & Race-Condition Tests

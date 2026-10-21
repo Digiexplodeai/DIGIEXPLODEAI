@@ -1,6 +1,10 @@
-import { collection, query, where, getDocs, setDoc, updateDoc, doc, addDoc } from 'firebase/firestore';
-import { db, sanitizeFirestorePayload } from './firebase';
-import { ensureActiveFirebaseAuth } from './calendarStorage';
+/**
+ * DigiExplodeAI — Task Work Log Sync
+ * Database Backend: Cloudflare D1 (via Cloudflare Worker API)
+ *
+ * FIRESTORE IS NOT USED FOR DATA STORAGE.
+ */
+
 import { cfCreateWorkLog, cfUpdateWorkLog } from './cloudflareApi';
 
 export interface TaskSyncData {
@@ -29,8 +33,7 @@ export interface SyncResult {
 
 /**
  * Idempotently syncs a completed task into the Work Log collection.
- * Uses canonical schema supporting both snake_case and camelCase fields.
- * Updates local cache and UI instantly (0ms), then persists to Cloudflare D1 & Firestore.
+ * Persists to local cache (instant) and Cloudflare D1 (authoritative).
  */
 export async function syncTaskCompletionToWorkLog(
   task: TaskSyncData,
@@ -68,7 +71,7 @@ export async function syncTaskCompletionToWorkLog(
     auto_generated: true,
     task_reopened: false,
     video_production_id: videoProdId,
-    
+
     // CamelCase compatibility aliases
     taskId: task.taskId,
     clientId: task.clientId || '',
@@ -87,7 +90,7 @@ export async function syncTaskCompletionToWorkLog(
     videoProductionId: videoProdId,
   };
 
-  // 1. INSTANT LOCAL UPDATE & BROADCAST (0ms latency, zero waiting)
+  // 1. INSTANT LOCAL UPDATE & BROADCAST (0ms latency)
   try {
     const cachedLogsRaw = localStorage.getItem('digi_persisted_worklogs_v2');
     const cachedLogs = cachedLogsRaw ? JSON.parse(cachedLogsRaw) : [];
@@ -104,37 +107,8 @@ export async function syncTaskCompletionToWorkLog(
     console.warn('Local workLog cache notice:', e);
   }
 
-  // 2. Persist to Cloudflare D1 immediately
-  cfCreateWorkLog(canonicalPayload).catch(e => console.warn('Cloudflare workLog save notice:', e));
-
-  // 3. Persist to Firestore in background without blocking
-  (async () => {
-    try {
-      const sanitized = sanitizeFirestorePayload(canonicalPayload);
-      await setDoc(doc(db, 'workLogs', docId), sanitized, { merge: true });
-    } catch (err: any) {
-      try {
-        await ensureActiveFirebaseAuth();
-        const sanitized = sanitizeFirestorePayload(canonicalPayload);
-        await setDoc(doc(db, 'workLogs', docId), sanitized, { merge: true });
-      } catch (retryErr) {
-        // Safe: already in local cache and Cloudflare D1
-      }
-    }
-  })().catch(console.warn);
-
-  // 4. Write activity log in background
-  (async () => {
-    try {
-      await addDoc(collection(db, 'activityLogs'), {
-        userId: userId || fallbackEmpId,
-        userName: fallbackEmpName,
-        action: `completed deliverable: "${task.title}" (Work Log synced)`,
-        details: `Client: ${task.clientName || 'Direct'} · ID: ${task.taskId}${videoProdId ? ` · Video: ${videoProdId}` : ''}`,
-        createdAt: nowIso,
-      });
-    } catch (e) {}
-  })().catch(() => {});
+  // 2. Persist to Cloudflare D1 (fire and forget — local cache is already updated)
+  cfCreateWorkLog(canonicalPayload).catch(e => console.warn('[WorkLogSync] D1 save notice:', e));
 
   return { success: true, id: docId, action: 'created' };
 }
@@ -147,7 +121,7 @@ export async function syncTaskReopenedState(taskId: string): Promise<void> {
   const docId = `worklog_task_${taskId}`;
   const nowIso = new Date().toISOString();
 
-  // 1. Update local cache
+  // 1. Update local cache immediately
   try {
     const cachedLogsRaw = localStorage.getItem('digi_persisted_worklogs_v2');
     if (cachedLogsRaw) {
@@ -163,28 +137,5 @@ export async function syncTaskReopenedState(taskId: string): Promise<void> {
   } catch (e) {}
 
   // 2. Update Cloudflare D1
-  cfUpdateWorkLog(docId, { task_reopened: true }).catch(() => {});
-
-  // 3. Update Firestore
-  try {
-    await updateDoc(doc(db, 'workLogs', docId), {
-      taskReopened: true,
-      task_reopened: true,
-      reopenedAt: nowIso,
-      lastReopenedAt: nowIso,
-    });
-  } catch (err) {
-    // Also check for legacy doc IDs by query
-    try {
-      const snap = await getDocs(query(collection(db, 'workLogs'), where('taskId', '==', taskId)));
-      if (!snap.empty) {
-        await updateDoc(doc(db, 'workLogs', snap.docs[0].id), {
-          taskReopened: true,
-          task_reopened: true,
-          reopenedAt: nowIso,
-        });
-      }
-    } catch (e) {}
-  }
+  cfUpdateWorkLog(docId, { task_reopened: true, task_id: taskId }).catch(() => {});
 }
-

@@ -1,9 +1,12 @@
-import { 
-  collection, doc, getDocs, setDoc, updateDoc, deleteDoc, 
-  onSnapshot, query, where, orderBy 
-} from 'firebase/firestore';
+/**
+ * DigiExplodeAI — Social Media Content Calendar Storage
+ * Database Backend: Cloudflare D1 (via Cloudflare Worker API) + Local Cache
+ *
+ * FIRESTORE IS NOT USED FOR DATA STORAGE.
+ */
+
+import { auth } from './firebase';
 import { signInAnonymously } from 'firebase/auth';
-import { db, auth } from './firebase';
 import { persistNewTask, persistUpdateTask, persistDeleteTask } from './taskStorage';
 
 export interface CalendarEntry {
@@ -71,8 +74,8 @@ export const setCachedCalendarEntries = (data: CalendarEntry[]) => {
 };
 
 /**
- * Ensures that Firebase Auth has an active session and that
- * the user profile document is properly configured with superAdmin / admin role.
+ * Ensures a Firebase Auth session exists (for auth-gated features only).
+ * NO Firestore writes — data goes to Cloudflare D1.
  */
 export const ensureActiveFirebaseAuth = async (): Promise<string> => {
   let currentUser = auth.currentUser;
@@ -81,36 +84,18 @@ export const ensureActiveFirebaseAuth = async (): Promise<string> => {
       const cred = await signInAnonymously(auth);
       currentUser = cred.user;
     } catch (e) {
-      console.warn("Auto-auth anonymous attempt:", e);
+      console.warn('Auto-auth anonymous attempt:', e);
     }
   }
-
-  const activeUid = currentUser?.uid || 'admin_session';
-
-  if (currentUser) {
-    try {
-      // Upsert superAdmin profile document for active auth UID so security rules succeed
-      await setDoc(doc(db, 'users', currentUser.uid), {
-        userId: currentUser.uid,
-        name: 'Digiexplode Super Admin',
-        email: currentUser.email || 'admin@digiexplode.ai',
-        role: 'superAdmin',
-        status: 'active',
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
-    } catch (err) {
-      console.warn("User profile sync notice:", err);
-    }
-  }
-
-  return activeUid;
+  return currentUser?.uid || 'admin_session';
 };
 
 /**
  * Persists a new Calendar Entry:
+/**
+ * Persists a new Calendar Entry:
  * 1. Updates LocalStorage cache immediately (optimistic UI)
- * 2. Synchronizes with Tasks collection & Video production
- * 3. Persists to Firestore contentCalendar collection
+ * 2. Synchronizes with Tasks collection
  */
 export const persistNewCalendarEntry = async (entry: CalendarEntry, userProfile?: any): Promise<CalendarEntry> => {
   const nowIso = new Date().toISOString();
@@ -132,7 +117,6 @@ export const persistNewCalendarEntry = async (entry: CalendarEntry, userProfile?
 
   // 2. Cross-module task sync
   try {
-    const isVideo = ['Reel', 'Video', 'YouTube Short'].includes(normalizedEntry.contentType);
     await persistNewTask({
       id: taskId,
       taskId,
@@ -140,7 +124,7 @@ export const persistNewCalendarEntry = async (entry: CalendarEntry, userProfile?
       description: normalizedEntry.caption || `Scheduled via Content Calendar for ${normalizedEntry.clientName}. Platform: ${normalizedEntry.platform}`,
       clientId: normalizedEntry.clientId,
       clientName: normalizedEntry.clientName,
-      category: isVideo ? 'Reel Editing' : 'Social Media',
+      category: ['Reel', 'Video', 'YouTube Short'].includes(normalizedEntry.contentType) ? 'Reel Editing' : 'Social Media',
       platform: normalizedEntry.platform,
       assigneeId: normalizedEntry.assigneeId || '',
       assigneeName: normalizedEntry.assigneeName || 'Unassigned',
@@ -149,44 +133,19 @@ export const persistNewCalendarEntry = async (entry: CalendarEntry, userProfile?
       status: normalizedEntry.status === 'Posted' ? 'Done' : (['Idea', 'Planned'].includes(normalizedEntry.status) ? 'To Do' : 'In Progress'),
       createdAt: nowIso,
     }, { uid: userProfile?.userId || userProfile?.uid, name: userProfile?.name });
-
-    // Video production tracker link if video
-    if (isVideo) {
-      const videoId = `vid_${contentId}`;
-      await setDoc(doc(db, 'videoTracker', videoId), {
-        id: videoId,
-        clientName: normalizedEntry.clientName,
-        videoCount: 1,
-        shotDate: normalizedEntry.date,
-        status: 'Pending',
-        editorName: normalizedEntry.assigneeName || '',
-        shotTakenBy: userProfile?.name || 'Producer',
-        editorAssigned: normalizedEntry.assigneeName || '',
-        notes: `Auto-linked from Calendar: ${normalizedEntry.topic}`,
-        createdAt: nowIso
-      }, { merge: true }).catch(() => {});
-    }
   } catch (taskErr) {
-    console.warn("Task synchronization notice:", taskErr);
+    console.warn('Task synchronization notice:', taskErr);
   }
 
-  // 3. Ensure Auth session and persist to Firestore
-  try {
-    await ensureActiveFirebaseAuth();
-    await setDoc(doc(db, 'contentCalendar', contentId), normalizedEntry, { merge: true });
-
-    // 4. Auto-sync to Approvals Queue if status requires review
-    const isUnderReview = normalizedEntry.status === 'Sent for Approval' || normalizedEntry.clientApprovalStatus === 'Pending';
-    if (isUnderReview) {
-      try {
-        const { createOrUpdateApprovalFromSource } = await import('./approvalStorage');
-        await createOrUpdateApprovalFromSource('content', normalizedEntry, { userId: userProfile?.userId || userProfile?.uid, name: userProfile?.name });
-      } catch (apprErr) {
-        console.warn("Approvals auto-sync notice for content:", apprErr);
-      }
+  // 3. Auto-sync to Approvals Queue if status requires review
+  const isUnderReview = normalizedEntry.status === 'Sent for Approval' || normalizedEntry.clientApprovalStatus === 'Pending';
+  if (isUnderReview) {
+    try {
+      const { createOrUpdateApprovalFromSource } = await import('./approvalStorage');
+      await createOrUpdateApprovalFromSource('content', normalizedEntry, { userId: userProfile?.userId || userProfile?.uid, name: userProfile?.name });
+    } catch (apprErr) {
+      console.warn('Approvals auto-sync notice for content:', apprErr);
     }
-  } catch (firestoreErr: any) {
-    console.warn("Firestore sync notice for contentCalendar (cached locally):", firestoreErr);
   }
 
   return normalizedEntry;
@@ -240,23 +199,15 @@ export const persistUpdateCalendarEntry = async (contentId: string, updates: Par
     }
   }
 
-  // 3. Persist to Firestore
-  try {
-    await ensureActiveFirebaseAuth();
-    await setDoc(doc(db, 'contentCalendar', contentId), updatedEntry, { merge: true });
-
-    // 4. Auto-sync to Approvals Queue if status requires review
-    const isUnderReview = updatedEntry.status === 'Sent for Approval' || updatedEntry.clientApprovalStatus === 'Pending';
-    if (isUnderReview) {
-      try {
-        const { createOrUpdateApprovalFromSource } = await import('./approvalStorage');
-        await createOrUpdateApprovalFromSource('content', updatedEntry, { userId: userProfile?.userId || userProfile?.uid, name: userProfile?.name });
-      } catch (apprErr) {
-        console.warn("Approvals auto-sync notice on content update:", apprErr);
-      }
+  // 3. Auto-sync to Approvals Queue if status requires review
+  const isUnderReview = updatedEntry.status === 'Sent for Approval' || updatedEntry.clientApprovalStatus === 'Pending';
+  if (isUnderReview) {
+    try {
+      const { createOrUpdateApprovalFromSource } = await import('./approvalStorage');
+      await createOrUpdateApprovalFromSource('content', updatedEntry, { userId: userProfile?.userId || userProfile?.uid, name: userProfile?.name });
+    } catch (apprErr) {
+      console.warn('Approvals auto-sync notice on content update:', apprErr);
     }
-  } catch (err) {
-    console.warn("Firestore update notice for contentCalendar (cached locally):", err);
   }
 
   return updatedEntry;
@@ -275,13 +226,7 @@ export const persistDeleteCalendarEntry = async (contentId: string): Promise<voi
     try {
       await persistDeleteTask(target.taskId);
     } catch (e) {
-      console.warn("Task delete sync notice:", e);
+      console.warn('Task delete sync notice:', e);
     }
-  }
-
-  try {
-    await deleteDoc(doc(db, 'contentCalendar', contentId));
-  } catch (err) {
-    console.warn("Firestore delete notice:", err);
   }
 };

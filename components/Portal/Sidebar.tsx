@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard, Sun, Users, Briefcase, CalendarDays, Film,
@@ -7,6 +7,7 @@ import {
   Wifi, Search, PanelLeftClose, PanelLeft, Shield, Zap, Clock,
   ClipboardList, FileText, CreditCard, ShieldCheck, Lock
 } from 'lucide-react';
+import { PermissionService } from '../../lib/controlPlane/PermissionService';
 
 interface SidebarProps {
   activeTab: string;
@@ -28,13 +29,31 @@ interface NavGroup {
   items: NavItem[];
 }
 
+const TAB_MODULE_MAP: Record<string, string> = {
+  'clients': 'Clients',
+  'tasks': 'Tasks & Work',
+  'worklog': 'Work Log',
+  'calendar': 'Content Calendar',
+  'videos': 'Video Production',
+  'approvals': 'Approvals',
+  'admins': 'Employees',
+  'attendance': 'Attendance & Leaves',
+  'performance': 'Performance',
+  'reports': 'Reports',
+  'hr-docs': 'HR Documents',
+  'payroll': 'Payroll',
+  'seo': 'SEO Studio',
+  'files': 'Files & Assets',
+  'settings': 'Settings',
+};
+
 const getNavGroups = (role: string, notifCount: number): NavGroup[] => {
   const all: NavGroup[] = [
     {
       label: 'Overview',
       items: [
         { id: 'dashboard',        label: 'Command Center', icon: LayoutDashboard, roles: ['superAdmin','admin'] },
-        { id: 'myday',            label: role === 'employee' ? 'Employee Workspace' : 'Employee View (My Day)', icon: Sun, roles: ['superAdmin','admin','employee'] },
+        { id: 'myday',            label: role === 'employee' ? 'Employee Workspace' : 'Employee View (My Day)', icon: Sun, roles: ['superAdmin','admin','employee','teamLeader','hr','accounts'] },
         { id: 'client-workspace', label: 'My Workspace',    icon: LayoutDashboard, roles: ['client'] },
       ]
     },
@@ -42,40 +61,40 @@ const getNavGroups = (role: string, notifCount: number): NavGroup[] => {
       label: 'Operations',
       items: [
         { id: 'clients',   label: 'Clients',         icon: Briefcase,    roles: ['superAdmin','admin'] },
-        { id: 'tasks',     label: 'Tasks & Work',     icon: CheckSquare,  roles: ['superAdmin','admin','employee'] },
-        { id: 'worklog',   label: 'Work Log',         icon: ClipboardList,roles: ['superAdmin','admin','employee'] },
-        { id: 'calendar',  label: 'Content Calendar', icon: CalendarDays, roles: ['superAdmin','admin','employee'] },
-        { id: 'videos',    label: 'Video Production', icon: Film,         roles: ['superAdmin','admin','employee'] },
-        { id: 'approvals', label: 'Approvals',        icon: CheckSquare,  roles: ['superAdmin','admin','client'] },
+        { id: 'tasks',     label: 'Tasks & Work',     icon: CheckSquare,  roles: ['superAdmin','admin','employee','teamLeader'] },
+        { id: 'worklog',   label: 'Work Log',         icon: ClipboardList,roles: ['superAdmin','admin','employee','teamLeader'] },
+        { id: 'calendar',  label: 'Content Calendar', icon: CalendarDays, roles: ['superAdmin','admin','employee','teamLeader'] },
+        { id: 'videos',    label: 'Video Production', icon: Film,         roles: ['superAdmin','admin','employee','teamLeader'] },
+        { id: 'approvals', label: 'Approvals',        icon: CheckSquare,  roles: ['superAdmin','admin','teamLeader','client'] },
       ]
     },
     {
       label: 'People',
       items: [
-        { id: 'admins',      label: 'Employees',           icon: Users,      roles: ['superAdmin','admin'] },
-        { id: 'attendance',  label: 'Attendance & Leaves',  icon: UserCheck,  roles: ['superAdmin','admin','employee'] },
-        { id: 'performance', label: 'Performance',          icon: TrendingUp, roles: ['superAdmin','admin'] },
-        { id: 'hr-docs',     label: 'HR Documents',         icon: FileText,   roles: ['superAdmin','admin'] },
-        { id: 'payroll',     label: 'Payroll',              icon: CreditCard, roles: ['superAdmin','admin'] },
+        { id: 'admins',      label: 'Employees',           icon: Users,      roles: ['superAdmin','admin','hr'] },
+        { id: 'attendance',  label: 'Attendance & Leaves',  icon: UserCheck,  roles: ['superAdmin','admin','employee','teamLeader','hr'] },
+        { id: 'performance', label: 'Performance',          icon: TrendingUp, roles: ['superAdmin','admin','employee','teamLeader'] },
+        { id: 'hr-docs',     label: 'HR Documents',         icon: FileText,   roles: ['superAdmin','admin','hr'] },
+        { id: 'payroll',     label: 'Payroll',              icon: CreditCard, roles: ['superAdmin','admin','hr','accounts'] },
       ]
     },
     {
       label: 'Analytics',
       items: [
-        { id: 'reports', label: 'Reports', icon: BarChart3, roles: ['superAdmin','admin','client'] },
+        { id: 'reports', label: 'Reports', icon: BarChart3, roles: ['superAdmin','admin','employee','teamLeader','accounts','client'] },
       ]
     },
     {
       label: 'Tools',
       items: [
         { id: 'seo',   label: 'SEO & Meta Studio', icon: Globe,      roles: ['superAdmin','admin'] },
-        { id: 'files', label: 'Files & Assets',    icon: FolderOpen, roles: ['superAdmin','admin','employee'] },
+        { id: 'files', label: 'Files & Assets',    icon: FolderOpen, roles: ['superAdmin','admin','employee','teamLeader'] },
       ]
     },
     {
       label: 'System',
       items: [
-        { id: 'notifications', label: 'Notifications',     icon: Bell,        roles: ['superAdmin','admin','employee','client'], badge: notifCount },
+        { id: 'notifications', label: 'Notifications',     icon: Bell,        roles: ['superAdmin','admin','employee','teamLeader','client','hr','accounts'], badge: notifCount },
         { id: 'audit-log',     label: 'Audit Log',          icon: ShieldCheck, roles: ['superAdmin'] },
         { id: 'permissions',   label: 'Roles & Permissions',icon: Lock,        roles: ['superAdmin'] },
         { id: 'settings',      label: 'Settings',           icon: Settings,    roles: ['superAdmin','admin'] },
@@ -85,7 +104,19 @@ const getNavGroups = (role: string, notifCount: number): NavGroup[] => {
 
   return all.map(group => ({
     ...group,
-    items: group.items.filter(item => !item.roles || item.roles.includes(role))
+    items: group.items.filter(item => {
+      // Super Admin retains full unrestricted platform access
+      if (role === 'superAdmin') return true;
+
+      // If item maps to a canonical platform module, check dynamic PermissionService matrix
+      const moduleName = TAB_MODULE_MAP[item.id];
+      if (moduleName) {
+        return PermissionService.can(moduleName, 'view', role as any);
+      }
+
+      // Standalone workspace items
+      return !item.roles || item.roles.includes(role);
+    })
   })).filter(group => group.items.length > 0);
 };
 
@@ -99,14 +130,27 @@ const roleMeta: Record<string, { label: string; color: string; icon: React.Eleme
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isOpen, setIsOpen }) => {
   const { profile, signOutUser } = useAuth();
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebar_collapsed') === 'true');
+  const [permsVersion, setPermsVersion] = useState(0);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({
     Overview: true, Operations: true, People: true, Analytics: true, Tools: false, System: false
   });
   const [searchQuery, setSearchQuery] = useState('');
 
-  const role = profile?.role || 'admin';
-  const meta = roleMeta[role] || roleMeta.admin;
-  const navGroups = getNavGroups(role, 0);
+  const rawRole = profile?.role || 'admin';
+  const role = PermissionService.getEffectiveRole(rawRole as any);
+  const meta = roleMeta[role] || roleMeta[rawRole] || roleMeta.admin;
+  const navGroups = useMemo(() => getNavGroups(role, 0), [role, permsVersion]);
+
+  // Reactive listener for permissions matrix and preview role changes
+  useEffect(() => {
+    const handler = () => setPermsVersion(v => v + 1);
+    window.addEventListener('digi_permissions_updated', handler);
+    window.addEventListener('digi_preview_role_changed', handler);
+    return () => {
+      window.removeEventListener('digi_permissions_updated', handler);
+      window.removeEventListener('digi_preview_role_changed', handler);
+    };
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('sidebar_collapsed', String(collapsed));

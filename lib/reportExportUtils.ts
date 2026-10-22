@@ -10,6 +10,7 @@
 
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { formatDurationHours } from './taskTimerService';
 
 export interface ReportSummaryCard {
   label: string;
@@ -397,3 +398,329 @@ function downloadBlob(blob: Blob, filename: string): void {
     URL.revokeObjectURL(url);
   }, 300);
 }
+
+/**
+ * 5. Modern Employee Daily Report 2.0 PDF Generator
+ * Renders A4 Landscape layout, DigiExplode AI purple/neutral branding,
+ * compact summary KPI cards, date-wise classified sections, color-coded priority badges,
+ * page numbers ("Page X of Y"), and confidentiality footer.
+ * 
+ * Returns the jsPDF instance for live modal preview and/or triggers direct download.
+ */
+export async function generateDailyReport2PDF(
+  report: import('./dailyReportClassifier').ClassifiedDailyReport,
+  meta: {
+    employeeName?: string;
+    employeeRole?: string;
+    department?: string;
+    generatedBy?: string;
+    filterSummary?: string;
+  },
+  options: { download?: boolean; filename?: string } = { download: true }
+): Promise<jsPDF> {
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: 'a4'
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();   // 297mm
+  const pageHeight = doc.internal.pageSize.getHeight(); // 210mm
+  const nowIso = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+
+  // ── Top Brand Accent Bar ─────────────────────────────────────────────
+  doc.setFillColor(91, 75, 255); // #5B4BFF
+  doc.rect(0, 0, pageWidth, 4.5, 'F');
+
+  // ── Header Title & Employee Metadata ──────────────────────────────────
+  doc.setTextColor(15, 23, 42); // #0F172A
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.text('DIGIEXPLODE AI — EMPLOYEE DAILY REPORT', 14, 14);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.setTextColor(100, 116, 139); // #64748B
+  const periodText = report.isRange 
+    ? `Date Range: ${report.targetDate} to ${report.endDate}`
+    : `Report Date: ${report.targetDate} (Asia/Kolkata)`;
+  const employeeLabel = meta.employeeName || 'All Team Members';
+  const roleLabel = meta.employeeRole ? ` (${meta.employeeRole})` : '';
+  doc.text(`Employee: ${employeeLabel}${roleLabel}  •  ${periodText}`, 14, 20);
+
+  if (meta.filterSummary) {
+    doc.setFontSize(8);
+    doc.setTextColor(148, 163, 184);
+    doc.text(`Applied Filters: ${meta.filterSummary}`, 14, 25);
+  }
+
+  // Right Header Meta
+  doc.setFontSize(8.5);
+  doc.setTextColor(91, 75, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.text('AUTHORITATIVE OPERATIONS OS', pageWidth - 14, 13, { align: 'right' });
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Generated: ${nowIso} IST`, pageWidth - 14, 18, { align: 'right' });
+  doc.text(`By: ${meta.generatedBy || 'Supervisor / Admin'}`, pageWidth - 14, 23, { align: 'right' });
+
+  let currentY = meta.filterSummary ? 29 : 27;
+
+  // ── 5 Compact Summary Metric Cards ────────────────────────────────────
+  const cards = [
+    { label: 'COMPLETED TODAY', value: report.summary.completedTodayCount, color: [22, 163, 74] },   // green
+    { label: 'WORKED ON TODAY', value: report.summary.workedOnTodayCount, color: [37, 99, 235] },    // blue
+    { label: 'PENDING TASKS', value: report.summary.pendingCount, color: [217, 119, 6] },            // amber
+    { label: 'OVERDUE', value: report.summary.overdueCount, color: [220, 38, 38] },                  // red
+    { label: 'TOTAL TIME LOGGED', value: report.summary.totalTimeLoggedFormatted, color: [91, 75, 255] } // purple
+  ];
+
+  const totalCardWidth = pageWidth - 28;
+  const cardGap = 3.5;
+  const cardWidth = (totalCardWidth - (cardGap * 4)) / 5;
+  const cardHeight = 14;
+
+  cards.forEach((c, idx) => {
+    const x = 14 + (idx * (cardWidth + cardGap));
+    // Card background
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(x, currentY, cardWidth, cardHeight, 1.8, 1.8, 'FD');
+
+    // Label
+    doc.setFontSize(6.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(100, 116, 139);
+    doc.text(c.label, x + 3, currentY + 4.5);
+
+    // Value
+    doc.setFontSize(10.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(c.color[0], c.color[1], c.color[2]);
+    doc.text(String(c.value), x + 3, currentY + 11);
+  });
+
+  currentY += cardHeight + 4;
+
+  // Factual Daily Summary Banner (Step 9)
+  if (report.summary.factualDailySummary) {
+    doc.setFillColor(241, 245, 249);
+    doc.setDrawColor(203, 213, 225);
+    doc.roundedRect(14, currentY, pageWidth - 28, 6.5, 1.2, 1.2, 'FD');
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'italic');
+    doc.setTextColor(51, 65, 85);
+    doc.text(`Summary: ${report.summary.factualDailySummary}`, 17, currentY + 4.2);
+    currentY += 9;
+  }
+
+  // ── Helper to Render Section Table with autoTable ──────────────────────
+  const renderSectionTable = (
+    sectionTitle: string,
+    headers: string[],
+    rows: (string | number)[][],
+    columnStyles?: any
+  ) => {
+    // If table is too close to bottom, add new page
+    if (currentY > pageHeight - 35) {
+      doc.addPage();
+      currentY = 16;
+    }
+
+    doc.setFontSize(9.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 41, 59);
+    doc.text(sectionTitle, 14, currentY);
+    currentY += 2.5;
+
+    autoTable(doc, {
+      startY: currentY,
+      head: [headers],
+      body: rows.length > 0 ? rows : [['No records in this section for the evaluated period.']],
+      theme: 'striped',
+      showHead: 'everyPage',
+      margin: { left: 14, right: 14 },
+      styles: {
+        fontSize: 7.5,
+        cellPadding: 1.8,
+        overflow: 'linebreak',
+        textColor: [15, 23, 42]
+      },
+      headStyles: {
+        fillColor: [91, 75, 255],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 7.5
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252]
+      },
+      columnStyles: columnStyles || {},
+      didDrawCell: (data) => {
+        // Optional priority badge color highlights
+        if (data.section === 'body' && data.column.index === 3) {
+          const val = String(data.cell.raw);
+          if (val === 'Urgent') data.cell.styles.textColor = [220, 38, 38];
+          else if (val === 'High') data.cell.styles.textColor = [234, 88, 12];
+          else if (val === 'Medium') data.cell.styles.textColor = [217, 119, 6];
+          else if (val === 'Low') data.cell.styles.textColor = [22, 163, 74];
+        }
+      }
+    });
+
+    const lastTable = (doc as any).lastAutoTable;
+    if (lastTable && lastTable.finalY) {
+      currentY = lastTable.finalY + 6;
+    }
+  };
+
+  // ── Section 1 — Completed Today ───────────────────────────────────────
+  const completedRows = report.completedToday.map(i => [
+    i.task.title,
+    i.task.clientName || 'General',
+    i.task.category || 'Deliverable',
+    i.task.priority,
+    i.durationFormatted,
+    i.completedDateKolkata || report.targetDate
+  ]);
+  renderSectionTable(
+    `Section 1 — Completed Today (${report.completedToday.length} tasks · Total Time: ${formatDurationHours(report.completedTodayTotalHours)})`,
+    ['Task Title', 'Client', 'Category', 'Priority', 'Active Time Spent', 'Completed Date'],
+    completedRows,
+    {
+      0: { cellWidth: 90, fontStyle: 'bold' },
+      1: { cellWidth: 40 },
+      2: { cellWidth: 38 },
+      3: { cellWidth: 26, fontStyle: 'bold' },
+      4: { cellWidth: 40, fontStyle: 'bold' },
+      5: { cellWidth: 35 }
+    }
+  );
+
+  // ── Section 2 — Worked On Today (Ongoing / In-Progress) ───────────────
+  const workedOnRows = report.workedOnToday.map(i => [
+    i.task.title,
+    i.task.clientName || 'General',
+    i.task.category || 'Deliverable',
+    i.task.status,
+    i.task.priority,
+    i.durationFormatted
+  ]);
+  renderSectionTable(
+    `Section 2 — Worked On Today (${report.workedOnToday.length} ongoing tasks · Active Logged: ${formatDurationHours(report.workedOnTodayTotalHours)})`,
+    ['Task Title', 'Client', 'Category', 'Current Status', 'Priority', 'Today Tracked Time'],
+    workedOnRows,
+    {
+      0: { cellWidth: 90, fontStyle: 'bold' },
+      1: { cellWidth: 40 },
+      2: { cellWidth: 38 },
+      3: { cellWidth: 35, fontStyle: 'bold' },
+      4: { cellWidth: 26, fontStyle: 'bold' },
+      5: { cellWidth: 40, fontStyle: 'bold' }
+    }
+  );
+
+  // ── Section 3 — New Pending Tasks Assigned Today ───────────────────────
+  const newPendingRows = report.newPending.map(i => [
+    i.task.title,
+    i.task.clientName || 'General',
+    i.task.category || 'Deliverable',
+    i.task.priority,
+    i.dueDateKolkata || 'Not Set',
+    'Created Today'
+  ]);
+  renderSectionTable(
+    `Section 3 — New Pending Tasks Assigned Today (${report.newPending.length})`,
+    ['Task Title', 'Client', 'Category', 'Priority', 'Due Date', 'Pending Age'],
+    newPendingRows,
+    {
+      0: { cellWidth: 95, fontStyle: 'bold' },
+      1: { cellWidth: 40 },
+      2: { cellWidth: 40 },
+      3: { cellWidth: 28, fontStyle: 'bold' },
+      4: { cellWidth: 36 },
+      5: { cellWidth: 30 }
+    }
+  );
+
+  // ── Section 4 — Previous Pending & Overdue Tasks ──────────────────────
+  const previousAndOverdueRows = [
+    ...report.overdue.map(i => [
+      i.task.title,
+      i.task.clientName || 'General',
+      i.task.category || 'General',
+      i.task.priority,
+      i.dueDateKolkata || 'Overdue',
+      `OVERDUE (${i.daysOverdue}d)`,
+      i.isBlocked ? 'Blocked' : 'Active'
+    ]),
+    ...report.previousPending.map(i => [
+      i.task.title,
+      i.task.clientName || 'General',
+      i.task.category || 'General',
+      i.task.priority,
+      i.dueDateKolkata || 'No Deadline',
+      `${i.daysPending} days pending`,
+      i.isBlocked ? 'Blocked' : 'Active'
+    ])
+  ];
+  renderSectionTable(
+    `Section 4 — Previous Pending & Overdue Tasks (${report.overdue.length} overdue · ${report.previousPending.length} carried forward)`,
+    ['Task Title', 'Client', 'Category', 'Priority', 'Due Date', 'Status / Ageing', 'Blocked Status'],
+    previousAndOverdueRows,
+    {
+      0: { cellWidth: 85, fontStyle: 'bold' },
+      1: { cellWidth: 38 },
+      2: { cellWidth: 34 },
+      3: { cellWidth: 26, fontStyle: 'bold' },
+      4: { cellWidth: 30 },
+      5: { cellWidth: 35, fontStyle: 'bold' },
+      6: { cellWidth: 21 }
+    }
+  );
+
+  // ── Section 5 — Daily Time Summary ────────────────────────────────────
+  const timeRows = report.timeBreakdown.map(tb => [
+    tb.taskTitle,
+    tb.clientName,
+    tb.category,
+    tb.status,
+    tb.formatted
+  ]);
+  renderSectionTable(
+    `Section 5 — Time Summary (Total Logged: ${report.summary.totalTimeLoggedFormatted})`,
+    ['Task / Activity Description', 'Client', 'Category', 'Status', 'Active Duration'],
+    timeRows,
+    {
+      0: { cellWidth: 105, fontStyle: 'bold' },
+      1: { cellWidth: 50 },
+      2: { cellWidth: 44 },
+      3: { cellWidth: 35 },
+      4: { cellWidth: 35, fontStyle: 'bold' }
+    }
+  );
+
+  // ── Page Numbers & Confidentiality Footer across all pages ───────────
+  const totalPages = doc.getNumberOfPages();
+  for (let i = 1; i <= totalPages; i++) {
+    doc.setPage(i);
+    doc.setFontSize(7.5);
+    doc.setTextColor(148, 163, 184); // slate-400
+    doc.text(
+      'Digiexplode AI • Agency Work & Operations System • Confidential Employee Daily Report',
+      14,
+      pageHeight - 7
+    );
+    doc.text(`Page ${i} of ${totalPages}`, pageWidth - 14, pageHeight - 7, { align: 'right' });
+  }
+
+  if (options.download) {
+    const safeEmp = (meta.employeeName || 'employee').toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const safeDate = report.targetDate.replace(/[^0-9-]/g, '_');
+    const defaultFilename = options.filename || `Digiexplode_Daily_Report_${safeEmp}_${safeDate}.pdf`;
+    doc.save(defaultFilename);
+  }
+
+  return doc;
+}
+

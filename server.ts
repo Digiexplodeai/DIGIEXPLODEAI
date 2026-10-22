@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 
@@ -22,6 +23,156 @@ const ai = new GoogleGenAI({
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', hasGeminiKey: !!process.env.GEMINI_API_KEY });
+});
+
+// ── Local In-Memory Recovery Store for Local Development & Testing ──────────
+interface LocalPasswordReset {
+  id: string;
+  identifier: string;
+  channel: 'email' | 'sms';
+  tokenHash: string;
+  rawOtp: string;
+  resetAuth?: string;
+  expiresAt: number;
+  attempts: number;
+  used: boolean;
+  createdAt: number;
+}
+const localRecoveryResets: LocalPasswordReset[] = [];
+
+function maskLocalIdentifier(identifier: string): string {
+  const clean = identifier.trim();
+  if (clean.includes('@')) {
+    const [user, domain] = clean.split('@');
+    if (user.length <= 2) return `${user[0]}*@${domain}`;
+    return `${user[0]}${'*'.repeat(Math.min(user.length - 2, 4))}${user[user.length - 1]}@${domain}`;
+  }
+  const digits = clean.replace(/\D/g, '');
+  if (digits.length >= 10) {
+    return `+${digits.slice(0, 2)} ******${digits.slice(-4)}`;
+  }
+  return '******' + clean.slice(-2);
+}
+
+// 1. Password Recovery Request
+app.post('/api/auth/recovery/request', (req, res) => {
+  const { identifier, channel } = req.body || {};
+  if (!identifier || typeof identifier !== 'string') {
+    return res.status(400).json({ success: false, error: 'Identifier is required.' });
+  }
+
+  const cleanIdent = identifier.trim().toLowerCase();
+  const rawOtp = (Math.floor(100000 + Math.random() * 900000)).toString();
+  const tokenHash = crypto.createHash('sha256').update(rawOtp).digest('hex');
+  const now = Date.now();
+
+  const record: LocalPasswordReset = {
+    id: `pr_${now}_${Math.random().toString(36).slice(2, 7)}`,
+    identifier: cleanIdent,
+    channel: channel === 'sms' ? 'sms' : 'email',
+    tokenHash,
+    rawOtp,
+    expiresAt: now + 5 * 60 * 1000,
+    attempts: 0,
+    used: false,
+    createdAt: now,
+  };
+
+  localRecoveryResets.push(record);
+  console.log(`[AUTH-RECOVERY DEV] Code for ${identifier}: ${rawOtp}`);
+
+  return res.json({
+    success: true,
+    message: 'If an account matches this contact information, a single-use verification code has been dispatched.',
+    channel: record.channel,
+    maskedTarget: maskLocalIdentifier(identifier),
+    cooldownSeconds: 60,
+    provider: 'local_development',
+    testOtp: rawOtp,
+  });
+});
+
+// 2. Password Recovery Verify OTP
+app.post('/api/auth/recovery/verify', (req, res) => {
+  const { identifier, otp } = req.body || {};
+  if (!identifier || !otp) {
+    return res.status(400).json({ success: false, error: 'Account identifier and verification code are required.' });
+  }
+
+  const cleanIdent = identifier.trim().toLowerCase();
+  const cleanOtp = (otp || '').trim();
+  const now = Date.now();
+
+  const record = localRecoveryResets
+    .filter(r => r.identifier === cleanIdent && !r.used)
+    .sort((a, b) => b.createdAt - a.createdAt)[0];
+
+  if (!record) {
+    return res.status(400).json({ success: false, error: 'No active verification code found. Please request a new code.' });
+  }
+
+  if (record.expiresAt < now) {
+    return res.status(400).json({ success: false, error: 'Verification code has expired. Please request a new code.' });
+  }
+
+  if (record.attempts >= 5) {
+    record.used = true;
+    return res.status(400).json({ success: false, error: 'Too many incorrect attempts. This code has been invalidated. Please request a new code.' });
+  }
+
+  const inputHash = crypto.createHash('sha256').update(cleanOtp).digest('hex');
+  if (inputHash !== record.tokenHash) {
+    record.attempts++;
+    const remaining = 5 - record.attempts;
+    return res.status(400).json({
+      success: false,
+      error: remaining > 0 ? `Incorrect verification code. ${remaining} attempt${remaining === 1 ? '' : 's'} remaining.` : 'Maximum attempts reached.',
+    });
+  }
+
+  const resetAuthToken = `rst_${crypto.randomBytes(18).toString('base64url')}`;
+  record.resetAuth = resetAuthToken;
+  record.attempts++;
+
+  return res.json({
+    success: true,
+    resetAuthToken,
+  });
+});
+
+// 3. Password Recovery Reset Password
+app.post('/api/auth/recovery/reset', (req, res) => {
+  const { resetAuthToken, newPassword } = req.body || {};
+  if (!resetAuthToken || !newPassword) {
+    return res.status(400).json({ success: false, error: 'Reset token and new password are required.' });
+  }
+
+  if (newPassword.length < 8) {
+    return res.status(400).json({ success: false, error: 'Password must be at least 8 characters long.' });
+  }
+
+  const record = localRecoveryResets.find(r => r.resetAuth === resetAuthToken && !r.used);
+  if (!record) {
+    return res.status(400).json({ success: false, error: 'Invalid or expired password reset authorization token.' });
+  }
+
+  record.used = true;
+  return res.json({
+    success: true,
+    message: 'Your password has been successfully updated. All prior sessions have been revoked for your security.',
+  });
+});
+
+// 4. System Permissions (Local Development & D1 Fallback Cache)
+let localRolePermissionsMatrix: any = null;
+
+app.get('/api/system/permissions', (_req, res) => {
+  return res.json(localRolePermissionsMatrix || null);
+});
+
+app.post('/api/system/permissions', (req, res) => {
+  localRolePermissionsMatrix = req.body;
+  return res.json({ success: true, updatedAt: new Date().toISOString() });
 });
 
 

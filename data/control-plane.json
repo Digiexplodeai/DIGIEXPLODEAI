@@ -1,6 +1,78 @@
 {
   "auditLogs": [
     {
+      "audit_id": "audit_1792676007835_vg5ek",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792676007835_hjrtx8",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "action": "Updated",
+      "module": "Roles & Permissions",
+      "entity_type": "permissions",
+      "entity_id": "canonical_role_matrix",
+      "description": "Updated platform role permissions matrix across 15 modules",
+      "metadata": {
+        "updatedAt": "2026-10-22T13:33:27.835Z",
+        "activeModule": "Tasks & Work"
+      },
+      "created_at": "2026-10-22T13:33:27.835Z"
+    },
+    {
+      "audit_id": "audit_1792675995519_foe9o",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792675995519_l4ypua",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "action": "Updated",
+      "module": "Roles & Permissions",
+      "entity_type": "permissions",
+      "entity_id": "canonical_role_matrix",
+      "description": "Updated platform role permissions matrix across 15 modules",
+      "metadata": {
+        "updatedAt": "2026-10-22T13:33:15.519Z",
+        "activeModule": "Attendance & Leaves"
+      },
+      "created_at": "2026-10-22T13:33:15.519Z"
+    },
+    {
+      "audit_id": "audit_1792675962686_cas1l",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792675962686_fjns4q",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "action": "Updated",
+      "module": "Roles & Permissions",
+      "entity_type": "permissions",
+      "entity_id": "canonical_role_matrix",
+      "description": "Updated platform role permissions matrix across 15 modules",
+      "metadata": {
+        "updatedAt": "2026-10-22T13:32:42.686Z",
+        "activeModule": "Reports"
+      },
+      "created_at": "2026-10-22T13:32:42.686Z"
+    },
+    {
+      "audit_id": "audit_1792675848918_k8xxa",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792675848918_5mzud1",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "action": "Updated",
+      "module": "Roles & Permissions",
+      "entity_type": "permissions",
+      "entity_id": "canonical_role_matrix",
+      "description": "Updated platform role permissions matrix across 15 modules",
+      "metadata": {
+        "updatedAt": "2026-10-22T13:30:48.917Z",
+        "activeModule": "Reports"
+      },
+      "created_at": "2026-10-22T13:30:48.918Z"
+    },
+    {
       "audit_id": "audit_1792591053264_e7lq7",
       "workspace_id": "default_workspace",
       "event_id": "evt_1792591053264_pu1kft",
@@ -372,11 +444,11 @@
       },
       "employee": {
         "view": true,
-        "create": false,
+        "create": true,
         "edit": true,
-        "delete": false,
-        "approve": false,
-        "export": false
+        "delete": true,
+        "approve": true,
+        "export": true
       },
       "hr": {
         "view": false,
@@ -712,19 +784,19 @@
       },
       "teamLeader": {
         "view": true,
-        "create": false,
-        "edit": false,
-        "delete": false,
+        "create": true,
+        "edit": true,
+        "delete": true,
         "approve": false,
-        "export": false
+        "export": true
       },
       "employee": {
         "view": true,
-        "create": false,
-        "edit": false,
-        "delete": false,
+        "create": true,
+        "edit": true,
+        "delete": true,
         "approve": false,
-        "export": false
+        "export": true
       },
       "hr": {
         "view": true,
@@ -827,20 +899,20 @@
         "export": true
       },
       "teamLeader": {
-        "view": false,
-        "create": false,
-        "edit": false,
-        "delete": false,
-        "approve": false,
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": true,
+        "approve": true,
         "export": true
       },
       "employee": {
-        "view": false,
-        "create": false,
-        "edit": false,
-        "delete": false,
-        "approve": false,
-        "export": false
+        "view": true,
+        "create": true,
+        "edit": true,
+        "delete": true,
+        "approve": true,
+        "export": true
       },
       "hr": {
         "view": false,
@@ -1160,6 +1232,74 @@
   },
   "settings": {},
   "events": [
+    {
+      "event_id": "evt_1792676007835_hjrtx8",
+      "event_type": "permissions.updated",
+      "workspace_id": "default_workspace",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "entity_type": "permissions",
+      "entity_id": "canonical_role_matrix",
+      "target_member_ids": [],
+      "timestamp": "2026-10-22T13:33:27.835Z",
+      "metadata": {
+        "updatedAt": "2026-10-22T13:33:27.835Z",
+        "activeModule": "Tasks & Work"
+      },
+      "idempotency_key": "permissions.updated_canonical_role_matrix_1792676007835"
+    },
+    {
+      "event_id": "evt_1792675995519_l4ypua",
+      "event_type": "permissions.updated",
+      "workspace_id": "default_workspace",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "entity_type": "permissions",
+      "entity_id": "canonical_role_matrix",
+      "target_member_ids": [],
+      "timestamp": "2026-10-22T13:33:15.519Z",
+      "metadata": {
+        "updatedAt": "2026-10-22T13:33:15.519Z",
+        "activeModule": "Attendance & Leaves"
+      },
+      "idempotency_key": "permissions.updated_canonical_role_matrix_1792675995519"
+    },
+    {
+      "event_id": "evt_1792675962686_fjns4q",
+      "event_type": "permissions.updated",
+      "workspace_id": "default_workspace",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "entity_type": "permissions",
+      "entity_id": "canonical_role_matrix",
+      "target_member_ids": [],
+      "timestamp": "2026-10-22T13:32:42.686Z",
+      "metadata": {
+        "updatedAt": "2026-10-22T13:32:42.686Z",
+        "activeModule": "Reports"
+      },
+      "idempotency_key": "permissions.updated_canonical_role_matrix_1792675962686"
+    },
+    {
+      "event_id": "evt_1792675848918_5mzud1",
+      "event_type": "permissions.updated",
+      "workspace_id": "default_workspace",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "entity_type": "permissions",
+      "entity_id": "canonical_role_matrix",
+      "target_member_ids": [],
+      "timestamp": "2026-10-22T13:30:48.918Z",
+      "metadata": {
+        "updatedAt": "2026-10-22T13:30:48.917Z",
+        "activeModule": "Reports"
+      },
+      "idempotency_key": "permissions.updated_canonical_role_matrix_1792675848918"
+    },
     {
       "event_id": "evt_1792591053264_pu1kft",
       "event_type": "task.completed",

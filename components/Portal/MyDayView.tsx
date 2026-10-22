@@ -69,6 +69,7 @@ const CATEGORIES = [
   'Meta Ads',
   'Google Ads',
   'SEO',
+  'Website Development',
   'Website Update',
   'Blog',
   'Client Coordination',
@@ -82,7 +83,6 @@ const DELIVERABLE_SUGGESTIONS: { label: string; category: string }[] = [
   { label: 'Instagram Post Design', category: 'Graphic Design' },
   { label: 'Instagram Carousel (Multi-Slide)', category: 'Graphic Design' },
   { label: 'Instagram Story Creative', category: 'Graphic Design' },
-  { label: 'Facebook Ad Creative', category: 'Graphic Design' },
   { label: 'Flyer / Brochure Design', category: 'Graphic Design' },
   { label: 'Banner & Poster Design', category: 'Graphic Design' },
   { label: 'YouTube Thumbnail Design', category: 'Graphic Design' },
@@ -104,12 +104,14 @@ const DELIVERABLE_SUGGESTIONS: { label: string; category: string }[] = [
   { label: 'Case Study / Whitepaper Copy', category: 'Script Writing' },
 
   // Web & SEO
+  { label: 'Website Development & Features', category: 'Website Development' },
   { label: 'Website Page Update', category: 'Website Update' },
-  { label: 'Landing Page Design & Build', category: 'Website Update' },
+  { label: 'Landing Page Design & Build', category: 'Website Development' },
   { label: 'Technical SEO Optimization', category: 'SEO' },
   { label: 'Google Business Profile (GMB) Post', category: 'Social Media' },
 
   // Performance & Ads
+  { label: 'Facebook Ad Creative', category: 'Meta Ads' },
   { label: 'Meta Ads Campaign Setup & Launch', category: 'Meta Ads' },
   { label: 'Google Search Ads Optimization', category: 'Google Ads' },
   { label: 'Ad Performance Reporting & Analytics', category: 'Reporting' },
@@ -118,14 +120,25 @@ const DELIVERABLE_SUGGESTIONS: { label: string; category: string }[] = [
 
 function inferCategoryFromDeliverable(text: string): string | null {
   const lower = text.toLowerCase();
+  // 1. Meta Ads & Paid Media (checked first so "Meta Ad Creative" is not misclassified as Graphic Design)
+  if (/meta ads?|facebook ads?|fb ads?|fb ad\b|insta ads?|instagram ads?|ad campaign|audience targeting|roas|lead gen ads?|cpc/i.test(lower)) return 'Meta Ads';
+  if (/google ads?|adwords|sem|ppc|search ads/i.test(lower)) return 'Google Ads';
+  
+  // 2. Video Shoot & Camera Production (checked before video editing)
+  if (/video shoot|shoot footage|bts shoot|camera shoot|on-site shoot|film shoot|\bshoot\b/i.test(lower)) return 'Video Shoot';
   if (/reel|short/i.test(lower)) return 'Reel Editing';
-  if (/shoot/i.test(lower)) return 'Video Shoot';
-  if (/video|clip|testimonial/i.test(lower)) return 'Video Editing';
-  if (/carousel|post|banner|flyer|story|poster|thumbnail|graphic|logo|branding|creative/i.test(lower)) return 'Graphic Design';
-  if (/website|webpage|landing page|web/i.test(lower)) return 'Website Update';
+  if (/video|clip|testimonial|b-roll|voiceover|footage|davinci|premiere|after effects/i.test(lower)) return 'Video Editing';
+  
+  // 3. Web & Development
+  if (/web dev|website dev|website development|frontend|backend|wordpress|shopify|full-stack/i.test(lower)) return 'Website Development';
+  if (/website|webpage|landing page|web update/i.test(lower)) return 'Website Update';
   if (/seo|keyword|gmb|google business/i.test(lower)) return 'SEO';
-  if (/meta ad|facebook ad|instagram ad/i.test(lower)) return 'Meta Ads';
-  if (/google ad|search ad|ppc/i.test(lower)) return 'Google Ads';
+  
+  // 4. Social Media
+  if (/social media|social calendar|smm|community management|page management/i.test(lower)) return 'Social Media';
+  
+  // 5. Graphic Design & Creative Assets
+  if (/carousel|post|banner|flyer|story|poster|thumbnail|graphic|logo|branding|creative/i.test(lower)) return 'Graphic Design';
   if (/script|copy|caption|blog|article|content/i.test(lower)) return 'Script Writing';
   if (/report|analytic|margin|kpi/i.test(lower)) return 'Reporting';
   if (/meeting|call|client|coordination/i.test(lower)) return 'Client Coordination';

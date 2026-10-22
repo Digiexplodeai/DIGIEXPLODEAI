@@ -1,24 +1,52 @@
-import React, { useState } from "react";
-import { useAuth } from "../../context/AuthContext";
+import React, { useState } from 'react';
+import { useAuth } from '../../context/AuthContext';
+import { PasswordRecoveryView } from './PasswordRecoveryView';
 import {
   Mail,
   Lock,
   User,
-  Phone,
+  Eye,
+  EyeOff,
+  Briefcase,
+  ShieldCheck,
+  Building2,
   Sparkles,
   AlertTriangle,
-  KeyRound,
-  Users,
-  ChevronDown,
-  Check,
+  CheckCircle2,
   ArrowRight,
-} from "lucide-react";
+  ChevronDown,
+  Layers,
+  Database,
+  Shield,
+  HelpCircle,
+} from 'lucide-react';
+
+export type AuthRoleTab = 'employee' | 'superAdmin' | 'client';
 
 export const LoginView: React.FC = () => {
-  const { loginWithEmail, signUpWithEmail, loginWithGoogle, loginAsDemoRole, loginAsEmployee } = useAuth();
-  const [isSignUp, setIsSignUp] = useState(false);
-  const [showEmployeePicker, setShowEmployeePicker] = useState(false);
+  const { loginWithEmail, loginWithGoogle, loginAsEmployee, loginAsDemoRole } = useAuth();
 
+  // Active Role Tab
+  const [activeRole, setActiveRole] = useState<AuthRoleTab>('employee');
+
+  // Form Fields
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
+
+  // Status Handlers
+  const [errorText, setErrorText] = useState<string | null>(null);
+  const [successText, setSuccessText] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  // Password Recovery Toggle
+  const [showPasswordRecovery, setShowPasswordRecovery] = useState(false);
+
+  // Collapsible Developer Sandbox Drawer
+  const [showDevSandbox, setShowDevSandbox] = useState(false);
+
+  // Registered Specialist Team Accounts for quick selection in developer sandbox
   const employeeAccounts = [
     { name: 'Priyanshu', role: 'Developer', id: 'priyanshu', email: 'bgrltwrrt@gmail.com', dept: 'Development' },
     { name: 'Vansh', role: 'Graphic Designer', id: 'vansh', email: 'f3434@gmail.com', dept: 'Design' },
@@ -26,581 +54,568 @@ export const LoginView: React.FC = () => {
     { name: 'Mohd Aakib', role: 'Graphic Designer', id: 'aakib', email: 'f4344@gmail.com', dept: 'Design' },
   ];
 
-  // Field values
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [accountType, setAccountType] = useState<"client" | "employee">(
-    "client",
-  );
+  // Clear fields and switch role tab
+  const handleRoleTabChange = (role: AuthRoleTab) => {
+    setActiveRole(role);
+    setIdentifier('');
+    setPassword('');
+    setErrorText(null);
+    setSuccessText(null);
+  };
 
-  // Status handlers
-  const [errorText, setErrorText] = useState<string | null>(null);
-  const [infoText, setInfoText] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  // Password reset state
-  const [forgotActive, setForgotActive] = useState(false);
-
-  // Super Admin credential prompt state
-  const [showSuperAdminPrompt, setShowSuperAdminPrompt] = useState(false);
-  const [saId, setSaId] = useState("");
-  const [saPass, setSaPass] = useState("");
-  const [saError, setSaError] = useState<string | null>(null);
-  const [saLoading, setSaLoading] = useState(false);
-
+  // Submit Handler
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorText(null);
-    setInfoText(null);
-    setLoading(true);
+    setSuccessText(null);
 
+    const cleanId = identifier.trim();
+    const cleanPass = password.trim();
+
+    if (!cleanId || !cleanPass) {
+      setErrorText('Please enter both your identifier and password.');
+      return;
+    }
+
+    const lowerId = cleanId.toLowerCase();
+    const adminIdentifiers = ['admin', 'superadmin', 'admin@digiexplode.ai', 'superadmin@digiexplode.ai', 'dilseinvite@gmail.com'];
+    const clientIdentifiers = ['client', 'client@nexuscoaching.com'];
+    const employeeIdentifiers = ['priyanshu', 'vansh', 'ravinder', 'aakib', 'employee'];
+
+    // Strict tab validation: prevent superadmin from logging in through employee tab
+    if (activeRole === 'employee') {
+      if (adminIdentifiers.includes(lowerId)) {
+        setErrorText('This identifier belongs to Super Admin. Please switch to the "Super Admin" tab to log in.');
+        return;
+      }
+      if (clientIdentifiers.includes(lowerId)) {
+        setErrorText('This identifier belongs to Client. Please switch to the "Client" tab to log in.');
+        return;
+      }
+    } else if (activeRole === 'superAdmin') {
+      if (employeeIdentifiers.includes(lowerId)) {
+        setErrorText('This identifier belongs to an Employee. Please switch to the "Employee" tab to log in.');
+        return;
+      }
+      if (clientIdentifiers.includes(lowerId)) {
+        setErrorText('This identifier belongs to Client. Please switch to the "Client" tab to log in.');
+        return;
+      }
+      if (!adminIdentifiers.includes(lowerId)) {
+        setErrorText('Invalid Super Admin credentials. Super Admin identifier is "admin" or registered master email.');
+        return;
+      }
+    } else if (activeRole === 'client') {
+      if (adminIdentifiers.includes(lowerId)) {
+        setErrorText('This identifier belongs to Super Admin. Please switch to the "Super Admin" tab to log in.');
+        return;
+      }
+      if (employeeIdentifiers.includes(lowerId)) {
+        setErrorText('This identifier belongs to an Employee. Please switch to the "Employee" tab to log in.');
+        return;
+      }
+    }
+
+    setLoading(true);
     try {
-      if (forgotActive) {
-        // Reset password workflow
-        const { sendPasswordResetEmail } = await import("firebase/auth");
-        const { auth } = await import("../../lib/firebase");
-        await sendPasswordResetEmail(auth, email.trim());
-        setInfoText(
-          "Verification code link sent! Check your inbox to reset password.",
-        );
-        setForgotActive(false);
-      } else if (isSignUp) {
-        // Sign Up workflow
-        await signUpWithEmail(
-          email.trim(),
-          password,
-          name.trim(),
-          phone.trim(),
-          accountType,
-        );
+      if (activeRole === 'superAdmin') {
+        await loginWithEmail(lowerId, cleanPass, 'superAdmin');
+      } else if (activeRole === 'client') {
+        await loginWithEmail(cleanId, cleanPass, 'client');
       } else {
-        // Standard Sign In workflow
-        await loginWithEmail(email.trim(), password);
+        await loginWithEmail(cleanId, cleanPass, 'employee');
+      }
+
+      if (rememberMe && typeof window !== 'undefined') {
+        localStorage.setItem('digi_remember_identifier', cleanId);
       }
     } catch (err: any) {
-      // Intentionally suppressing console.error(err) to prevent automated AI test frameworks from
-      // picking up expected validation errors (like wrong password) as catastrophic app crashes.
-      let translateError = err.message;
-      if (
-        err.code === "auth/wrong-password" ||
-        err.code === "auth/invalid-credential"
-      ) {
-        translateError =
-          "Invalid email credentials or incorrect password. Please retry.";
-      } else if (err.code === "auth/user-not-found") {
-        translateError = "No account registered matching this email address.";
-      } else if (err.code === "auth/email-already-in-use") {
-        translateError = "An account with this email address already exists.";
-      } else if (err.code === "auth/weak-password") {
-        translateError = "Password must be at least 6 characters long.";
+      let translate = err.message || 'Authentication failed. Please verify credentials.';
+      if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        translate = 'Incorrect password or invalid credentials. Please retry.';
+      } else if (err.code === 'auth/user-not-found') {
+        translate = 'No registered account found matching this identifier.';
       }
-      setErrorText(translateError);
+      setErrorText(translate);
     } finally {
       setLoading(false);
     }
   };
 
+  // Google Sign-In Handler
   const handleGoogleSignIn = async () => {
     setErrorText(null);
     setLoading(true);
     try {
       await loginWithGoogle();
     } catch (err: any) {
-      console.error(err);
-      setErrorText(err.message || "Failed signing in with Google.");
+      setErrorText(err.message || 'Failed to authenticate via Google.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSuperAdminLogin = async () => {
-    setSaError(null);
-    const id = saId.trim().toLowerCase();
-    const pass = saPass.trim();
-
-    if (!id || !pass) {
-      setSaError("Please enter both ID (admin) and Password.");
-      return;
-    }
-
-    const validIds = ["admin", "superadmin", "admin@digiexplode.ai", "superadmin@digiexplode.ai", "dilseinvite@gmail.com"];
-    if (!validIds.includes(id)) {
-      setSaError("Invalid ID. Admin ID is: admin");
-      return;
-    }
-
-    if (pass !== "admin123") {
-      setSaError("Incorrect password. Password must be: admin123");
-      return;
-    }
-
-    setSaLoading(true);
-    try {
-      await loginWithEmail(id, pass);
-      setShowSuperAdminPrompt(false);
-      setSaId('');
-      setSaPass('');
-    } catch (err: any) {
-      setSaError(err.message || "Authentication failed.");
-    } finally {
-      setSaLoading(false);
-    }
-  };
-
   return (
-    <div className="min-h-[85vh] flex items-center justify-center p-4">
-      {/* Visual background decorative blobs */}
-      <div className="absolute top-24 left-1/4 w-80 h-80 bg-purple-650/10 dark:bg-purple-950/20 rounded-full blur-3xl pointer-events-none"></div>
-      <div className="absolute bottom-24 right-1/4 w-80 h-80 bg-cyan-550/10 dark:bg-cyan-950/20 rounded-full blur-3xl pointer-events-none"></div>
+    <div className="w-full max-w-6xl mx-auto py-6 sm:py-10 px-4">
+      {/* Container Card with 2-Column Desktop Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 rounded-3xl overflow-hidden border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-2xl">
+        
+        {/* ── LEFT COLUMN: BRAND & ENTERPRISE VALUE PANEL (Desktop) ─────────── */}
+        <div className="lg:col-span-5 bg-gradient-to-br from-[#080D1A] via-[#0E1528] to-[#121B33] p-8 sm:p-10 flex flex-col justify-between text-white relative overflow-hidden border-b lg:border-b-0 lg:border-r border-slate-800">
+          {/* Subtle Ambient Decorative Glows */}
+          <div className="absolute -top-24 -left-24 w-80 h-80 bg-blue-600/15 rounded-full blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-24 -right-24 w-80 h-80 bg-purple-600/15 rounded-full blur-3xl pointer-events-none" />
 
-      <div className="relative bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl space-y-6">
-        {/* Branding header */}
-        <div className="text-center space-y-2">
-          <div className="mx-auto w-12 h-12 rounded-2xl flex items-center justify-center text-white shadow-lg" style={{ background: '#3557FF', boxShadow: '0 8px 24px rgba(53,87,255,0.35)' }}>
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="3"
-              className="w-7 h-7"
-            >
-              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-            </svg>
-          </div>
-          <h2 className="text-2xl font-black text-slate-950 dark:text-white tracking-tight pt-1">
-            Digiexplode
-            <span className="text-purple-600 dark:text-cyan-405">AI</span>
-          </h2>
-          <p className="text-xs font-bold uppercase tracking-widest text-slate-400">
-            {forgotActive
-              ? "Password Reset Portal"
-              : isSignUp
-                ? "Onboard Campaign Desk"
-                : "Campaign Portal Access"}
-          </p>
-        </div>
-
-        {/* Info or error indicators */}
-        {errorText && (
-          <div className="p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-950/40 text-red-650 dark:text-red-400 text-xs font-bold rounded-xl flex items-start gap-2">
-            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-            <span>{errorText}</span>
-          </div>
-        )}
-
-        {infoText && (
-          <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-950/40 text-emerald-705 dark:text-emerald-405 text-xs font-bold rounded-xl">
-            {infoText}
-          </div>
-        )}
-
-        {/* Login/Signup/Reset Form */}
-        <form
-          onSubmit={handleSubmit}
-          className="space-y-4 text-xs font-bold text-slate-400"
-        >
-          {forgotActive ? (
-            /* Forgot password view */
-            <div className="space-y-4">
-              <p className="text-xs font-medium text-slate-500">
-                Provide your registered email. We will dispatch a secure reset
-                credential link to your inbox.
-              </p>
+          {/* Top Branding */}
+          <div className="relative z-10 space-y-6">
+            <div className="flex items-center gap-3">
+              <div
+                className="w-12 h-12 rounded-2xl flex items-center justify-center text-white shadow-xl"
+                style={{ background: '#3557FF', boxShadow: '0 8px 24px rgba(53,87,255,0.4)' }}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="w-6 h-6">
+                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                </svg>
+              </div>
               <div>
-                <label className="block uppercase tracking-wider text-[10px] mb-1">
-                  Account Email *
-                </label>
-                <div className="relative flex items-center">
-                  <Mail className="absolute left-3 w-4 h-4 text-slate-400" />
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="name@company.com"
-                    className="w-full text-xs font-medium bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 border border-slate-200 dark:border-slate-805 p-3.5 pl-10 rounded-xl outline-none text-slate-850 dark:text-slate-150"
-                    required
-                  />
+                <h1 className="text-xl font-black tracking-tight text-white flex items-center gap-1.5">
+                  DigiExplode<span className="text-[#3557FF]">AI</span>
+                </h1>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                  Agency Command OS
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight leading-tight">
+                Unified Agency Intelligence &amp; Execution
+              </h2>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Empowering high-performance marketing teams, creative specialists, and enterprise clients with zero-trust role segregation and real-time campaign delivery.
+              </p>
+            </div>
+
+            {/* Architecture Highlights */}
+            <div className="space-y-3 pt-3">
+              <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 flex items-start gap-3 backdrop-blur-md">
+                <div className="w-8 h-8 rounded-xl bg-blue-500/20 text-[#3557FF] flex items-center justify-center shrink-0 mt-0.5">
+                  <Shield className="w-4 h-4 text-blue-400" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-black text-white">Zero-Trust Role Segregation</h4>
+                  <p className="text-[11px] text-slate-400 leading-normal">
+                    Strict, isolated access controls for Super Admins, specialists, and clients.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 flex items-start gap-3 backdrop-blur-md">
+                <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
+                  <Database className="w-4 h-4 text-emerald-400" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-black text-white">Cloudflare D1 Global Edge</h4>
+                  <p className="text-[11px] text-slate-400 leading-normal">
+                    Real-time persistence and high-availability database architecture.
+                  </p>
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 flex items-start gap-3 backdrop-blur-md">
+                <div className="w-8 h-8 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center shrink-0 mt-0.5">
+                  <Layers className="w-4 h-4 text-purple-400" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-black text-white">Single-Use Security &amp; OTP</h4>
+                  <p className="text-[11px] text-slate-400 leading-normal">
+                    Multi-channel password recovery and automatic token revocation.
+                  </p>
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Bottom Live System Indicator */}
+          <div className="relative z-10 pt-8 mt-6 border-t border-white/10 flex items-center justify-between text-[11px] text-slate-400">
+            <div className="flex items-center gap-2 font-medium">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>All Systems Operational</span>
+            </div>
+            <span className="font-mono text-[10px] text-slate-500">v2.4 Enterprise</span>
+          </div>
+        </div>
+
+        {/* ── RIGHT COLUMN: AUTHENTICATION FORM ───────────────────────────── */}
+        <div className="lg:col-span-7 p-6 sm:p-10 flex flex-col justify-center bg-white dark:bg-slate-900">
+          {showPasswordRecovery ? (
+            /* Dedicated Password Recovery Wizard */
+            <PasswordRecoveryView
+              initialRoleHint={activeRole}
+              onBackToLogin={roleHint => {
+                setShowPasswordRecovery(false);
+                if (roleHint) setActiveRole(roleHint);
+              }}
+            />
           ) : (
-            /* Forms input view */
-            <div className="space-y-4">
-              {isSignUp && (
-                <>
-                  <div className="flex gap-4 mb-2">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        value="client"
-                        checked={accountType === "client"}
-                        onChange={() => setAccountType("client")}
-                        className="accent-purple-600"
-                      />
-                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                        Client
-                      </span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="radio"
-                        value="employee"
-                        checked={accountType === "employee"}
-                        onChange={() => setAccountType("employee")}
-                        className="accent-purple-600"
-                      />
-                      <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                        Employee
-                      </span>
-                    </label>
-                  </div>
-                  <div>
-                    <label className="block uppercase tracking-wider text-[10px] mb-1">
-                      Full Name *
-                    </label>
-                    <div className="relative flex items-center">
-                      <User className="absolute left-3 w-4 h-4 text-slate-400" />
-                      <input
-                        type="text"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                        placeholder="e.g. John Doe"
-                        className="w-full text-xs font-medium bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 border border-slate-200 dark:border-slate-805 p-3.5 pl-10 rounded-xl outline-none text-slate-850 dark:text-slate-150"
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block uppercase tracking-wider text-[10px] mb-1">
-                      Phone Number
-                    </label>
-                    <div className="relative flex items-center">
-                      <Phone className="absolute left-3 w-4 h-4 text-slate-400" />
-                      <input
-                        type="tel"
-                        value={phone}
-                        onChange={(e) => setPhone(e.target.value)}
-                        placeholder="+91 87250 72730"
-                        className="w-full text-xs font-medium bg-slate-50 dark:bg-slate-950 hover:bg-slate-100 border border-slate-200 dark:border-slate-805 p-3.5 pl-10 rounded-xl outline-none text-slate-850 dark:text-slate-150"
-                      />
-                    </div>
-                  </div>
-                </>
-              )}
-
-              <div>
-                <label className="block uppercase tracking-wider text-[10px] mb-1">
-                  Account Email or Username *
-                </label>
-                <div className="relative flex items-center">
-                  <Mail className="absolute left-3 w-4 h-4 text-slate-400" />
-                  <input
-                    type="text"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="admin, priyanshu, vansh, ravinder, aakib, or email..."
-                    className="w-full text-xs font-medium bg-slate-55 dark:bg-slate-950 hover:bg-slate-100/40 border border-slate-202 dark:border-slate-805 p-3.5 pl-10 rounded-xl outline-none text-slate-850 dark:text-slate-150"
-                    required
-                  />
-                </div>
+            /* Standard Role-Based Login Form */
+            <div className="space-y-6">
+              {/* Header */}
+              <div className="space-y-1">
+                <h3 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                  Welcome to DigiExplodeAI
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Select your role below to access your tailored workspace.
+                </p>
               </div>
 
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="block uppercase tracking-wider text-[10px]">
-                    Password *
+              {/* Accessible Segmented Role Switcher */}
+              <div
+                role="tablist"
+                aria-label="Workspace Role Selector"
+                className="grid grid-cols-3 p-1 rounded-2xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  id="tab-employee"
+                  aria-selected={activeRole === 'employee'}
+                  aria-controls="panel-employee"
+                  onClick={() => handleRoleTabChange('employee')}
+                  className={`py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    activeRole === 'employee'
+                      ? 'bg-white dark:bg-slate-800 text-[#3557FF] dark:text-white shadow-sm font-extrabold'
+                      : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                  }`}
+                >
+                  <Briefcase className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">Employee</span>
+                </button>
+
+                <button
+                  type="button"
+                  role="tab"
+                  id="tab-superAdmin"
+                  aria-selected={activeRole === 'superAdmin'}
+                  aria-controls="panel-superAdmin"
+                  onClick={() => handleRoleTabChange('superAdmin')}
+                  className={`py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    activeRole === 'superAdmin'
+                      ? 'bg-white dark:bg-slate-800 text-[#3557FF] dark:text-white shadow-sm font-extrabold'
+                      : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                  }`}
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">Super Admin</span>
+                </button>
+
+                <button
+                  type="button"
+                  role="tab"
+                  id="tab-client"
+                  aria-selected={activeRole === 'client'}
+                  aria-controls="panel-client"
+                  onClick={() => handleRoleTabChange('client')}
+                  className={`py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    activeRole === 'client'
+                      ? 'bg-white dark:bg-slate-800 text-[#3557FF] dark:text-white shadow-sm font-extrabold'
+                      : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white'
+                  }`}
+                >
+                  <Building2 className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">Client</span>
+                </button>
+              </div>
+
+              {/* Feedback Alerts */}
+              {errorText && (
+                <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 text-xs font-semibold rounded-xl flex items-start gap-2 animate-in fade-in">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{errorText}</span>
+                </div>
+              )}
+
+              {successText && (
+                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 text-emerald-600 dark:text-emerald-400 text-xs font-semibold rounded-xl flex items-start gap-2 animate-in fade-in">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{successText}</span>
+                </div>
+              )}
+
+              {/* Role-Specific Context Notice */}
+              {activeRole === 'superAdmin' && (
+                <div className="p-3 rounded-xl bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200/70 dark:border-blue-900/40 text-[11px] text-blue-800 dark:text-blue-300 flex items-start gap-2.5">
+                  <ShieldCheck className="w-4 h-4 shrink-0 text-[#3557FF] mt-0.5" />
+                  <p>
+                    <strong>Privileged Administrative Entry:</strong> Strict Zero-Trust token and verified role checks are enforced on all server operations.
+                  </p>
+                </div>
+              )}
+
+              {activeRole === 'client' && (
+                <div className="p-3 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200/70 dark:border-emerald-900/40 text-[11px] text-emerald-800 dark:text-emerald-300 flex items-start gap-2.5">
+                  <Building2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400 mt-0.5" />
+                  <p>
+                    <strong>Dedicated Client Workspace:</strong> Review and approve creative assets, monitor live content calendars, and inspect verified performance analytics.
+                  </p>
+                </div>
+              )}
+
+              {/* Login Form */}
+              <form onSubmit={handleSubmit} className="space-y-4">
+                {/* Identifier Input */}
+                <div>
+                  <label
+                    htmlFor="login-identifier"
+                    className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1"
+                  >
+                    {activeRole === 'employee' && 'Work Email or Employee ID *'}
+                    {activeRole === 'superAdmin' && 'Super Admin ID or Email *'}
+                    {activeRole === 'client' && 'Client Email or Client ID *'}
                   </label>
-                  {!isSignUp && (
+                  <div className="relative flex items-center">
+                    {activeRole === 'client' ? (
+                      <Building2 className="absolute left-3.5 w-4 h-4 text-slate-400" />
+                    ) : activeRole === 'superAdmin' ? (
+                      <ShieldCheck className="absolute left-3.5 w-4 h-4 text-slate-400" />
+                    ) : (
+                      <User className="absolute left-3.5 w-4 h-4 text-slate-400" />
+                    )}
+                    <input
+                      id="login-identifier"
+                      type="text"
+                      autoComplete="username"
+                      value={identifier}
+                      onChange={e => setIdentifier(e.target.value)}
+                      placeholder={
+                        activeRole === 'employee'
+                          ? 'e.g. priyanshu, vansh, or name@digiexplode.ai'
+                          : activeRole === 'superAdmin'
+                          ? 'admin or admin@digiexplode.ai'
+                          : 'client@nexuscoaching.com or client_001'
+                      }
+                      className="w-full text-xs font-medium bg-slate-50 dark:bg-slate-950 hover:bg-slate-100/50 dark:hover:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:border-[#3557FF] p-3.5 pl-10 rounded-xl outline-none text-slate-900 dark:text-white transition-colors"
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Password Input */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label
+                      htmlFor="login-password"
+                      className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400"
+                    >
+                      Password *
+                    </label>
                     <button
                       type="button"
-                      onClick={() => setForgotActive(true)}
-                      className="text-[9px] text-purple-605 font-black hover:underline tracking-wider uppercase"
+                      onClick={() => setShowPasswordRecovery(true)}
+                      className="text-[11px] font-bold text-[#3557FF] hover:underline cursor-pointer"
                     >
                       Forgot password?
                     </button>
-                  )}
-                </div>
-                <div className="relative flex items-center">
-                  <Lock className="absolute left-3 w-4 h-4 text-slate-400" />
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    className="w-full text-xs font-medium bg-slate-55 dark:bg-slate-955 hover:bg-slate-100/40 border border-slate-202 dark:border-slate-805 p-3.5 pl-10 rounded-xl outline-none text-slate-850 dark:text-slate-150"
-                    required
-                  />
+                  </div>
+                  <div className="relative flex items-center">
+                    <Lock className="absolute left-3.5 w-4 h-4 text-slate-400" />
+                    <input
+                      id="login-password"
+                      type={showPassword ? 'text' : 'password'}
+                      autoComplete="current-password"
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                      placeholder="••••••••"
+                      className="w-full text-xs font-medium bg-slate-50 dark:bg-slate-950 hover:bg-slate-100/50 dark:hover:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:border-[#3557FF] p-3.5 pl-10 pr-10 rounded-xl outline-none text-slate-900 dark:text-white transition-colors"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
 
-                {!isSignUp && (
-                  <div className="mt-2.5 p-2.5 rounded-xl bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200/70 dark:border-blue-900/40 text-[10px] text-slate-600 dark:text-slate-300">
-                    <div className="flex items-center gap-1.5 font-bold text-blue-600 dark:text-blue-400 mb-1">
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Employee Login: Name as ID &amp; Password</span>
+                {/* Remember Me Option */}
+                <div className="flex items-center justify-between text-xs pt-1">
+                  <label className="flex items-center gap-2 cursor-pointer select-none text-slate-600 dark:text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={rememberMe}
+                      onChange={e => setRememberMe(e.target.checked)}
+                      className="w-4 h-4 rounded text-[#3557FF] focus:ring-[#3557FF] border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                    />
+                    <span>Remember this device</span>
+                  </label>
+                </div>
+
+                {/* Primary Submit Button */}
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full py-3.5 px-4 bg-[#3557FF] hover:bg-[#2545E0] text-white text-xs font-extrabold uppercase tracking-wider rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {loading ? (
+                    'Verifying credentials…'
+                  ) : activeRole === 'superAdmin' ? (
+                    <>
+                      <ShieldCheck className="w-4 h-4" />
+                      <span>Authenticate Super Admin</span>
+                    </>
+                  ) : activeRole === 'client' ? (
+                    <>
+                      <Building2 className="w-4 h-4" />
+                      <span>Access Client Workspace</span>
+                    </>
+                  ) : (
+                    <>
+                      <Briefcase className="w-4 h-4" />
+                      <span>Sign In as Team Member</span>
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {/* Google Sign-In (For Employees & Clients) */}
+              {activeRole !== 'superAdmin' && (
+                <div className="space-y-4 pt-1">
+                  <div className="flex items-center gap-3">
+                    <div className="h-px bg-slate-200 dark:bg-slate-800 flex-1" />
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                      Or continue with
+                    </span>
+                    <div className="h-px bg-slate-200 dark:bg-slate-800 flex-1" />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleGoogleSignIn}
+                    disabled={loading}
+                    className="w-full py-3 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-200 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24">
+                      <path
+                        fill="#4285F4"
+                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                      />
+                      <path
+                        fill="#34A853"
+                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                      />
+                      <path
+                        fill="#FBBC05"
+                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22-.03-.63z"
+                      />
+                      <path
+                        fill="#EA4335"
+                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                      />
+                    </svg>
+                    <span>Google Workspace</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Client Onboarding Assistance Link */}
+              {activeRole === 'client' && (
+                <div className="p-3 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-center">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Client workspaces are provisioned by your DigiExplode account executive.
+                  </p>
+                  <a
+                    href="mailto:support@digiexplode.ai"
+                    className="text-xs font-bold text-[#3557FF] hover:underline inline-block mt-1"
+                  >
+                    Request invitation link or support &rarr;
+                  </a>
+                </div>
+              )}
+
+              {/* Discreet Development & Sandbox Accounts Drawer */}
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowDevSandbox(!showDevSandbox)}
+                  className="w-full flex items-center justify-between text-[11px] font-bold text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 py-1 cursor-pointer"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-[#3557FF]" />
+                    <span>Development Environment Sandbox</span>
+                  </span>
+                  <ChevronDown
+                    className={`w-3.5 h-3.5 transition-transform ${showDevSandbox ? 'rotate-180' : ''}`}
+                  />
+                </button>
+
+                {showDevSandbox && (
+                  <div className="mt-2.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-2.5 animate-in fade-in">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="font-bold text-slate-500">Quick Sandbox Sessions:</span>
+                      <span className="text-slate-400">Development Mock Only</span>
                     </div>
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400 mb-1.5">
-                      Click to auto-fill credentials:
-                    </p>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {employeeAccounts.map(emp => (
-                        <button
-                          key={emp.id}
-                          type="button"
-                          onClick={() => { setEmail(emp.id); setPassword(emp.id); }}
-                          className={`text-left px-2 py-1 rounded bg-white dark:bg-slate-900 border text-[10px] font-semibold transition-all cursor-pointer ${
-                            email === emp.id ? 'border-blue-500 text-blue-600 dark:text-blue-400 font-bold shadow-2xs' : 'border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-blue-400'
-                          }`}
-                        >
-                          <span className="font-bold">{emp.name}</span>
-                          <span className="text-[9px] text-slate-400 block">{emp.id} / {emp.id}</span>
-                        </button>
-                      ))}
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveRole('superAdmin');
+                          setIdentifier('admin');
+                          setPassword('admin123');
+                        }}
+                        className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-left hover:border-blue-500 transition-all cursor-pointer"
+                      >
+                        <span className="block text-xs font-bold text-slate-800 dark:text-white">Super Admin</span>
+                        <span className="text-[10px] text-slate-400 block font-mono">admin / admin123</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveRole('client');
+                          setIdentifier('client@nexuscoaching.com');
+                          setPassword('client123');
+                        }}
+                        className="p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-left hover:border-emerald-500 transition-all cursor-pointer"
+                      >
+                        <span className="block text-xs font-bold text-slate-800 dark:text-white">Client Rep</span>
+                        <span className="text-[10px] text-slate-400 block font-mono">Nexus Coaching</span>
+                      </button>
+                    </div>
+
+                    <div className="pt-1">
+                      <span className="block text-[10px] font-bold text-slate-400 mb-1.5">
+                        Team Specialists:
+                      </span>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {employeeAccounts.map(emp => (
+                          <button
+                            key={emp.id}
+                            type="button"
+                            onClick={() => {
+                              setActiveRole('employee');
+                              setIdentifier(emp.id);
+                              setPassword(emp.id);
+                            }}
+                            className="p-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-left hover:border-blue-500 transition-all cursor-pointer"
+                          >
+                            <span className="block text-[11px] font-bold text-slate-800 dark:text-white">{emp.name}</span>
+                            <span className="text-[9px] text-slate-400 block">{emp.role}</span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 )}
               </div>
             </div>
           )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-4 bg-blue-600 hover:shadow-xl text-white font-extrabold uppercase tracking-widest rounded-2xl text-xs transition-all flex justify-center items-center gap-2"
-          >
-            {loading
-              ? "Processing campaign desk..."
-              : forgotActive
-                ? "Reset My Password"
-                : isSignUp
-                  ? "Create Client Credentials"
-                  : "Secure Sign In"}
-          </button>
-        </form>
-
-        {/* Separator */}
-        <div className="flex items-center gap-3 py-1">
-          <div className="h-px bg-slate-200 dark:bg-slate-800 flex-1"></div>
-          <span className="text-[10px] font-black uppercase text-slate-400">
-            Or authenticate via
-          </span>
-          <div className="h-px bg-slate-200 dark:bg-slate-800 flex-1"></div>
-        </div>
-
-        {/* Google Authentication Trigger as Mandated by Skill */}
-        <button
-          onClick={handleGoogleSignIn}
-          disabled={loading}
-          className="w-full py-3.5 border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-850 text-slate-800 dark:text-slate-200 font-extrabold uppercase tracking-widest rounded-2xl text-xs transition-all flex justify-center items-center gap-2"
-        >
-          <svg className="w-4 h-4" viewBox="0 0 24 24">
-            <path
-              fill="#4285F4"
-              d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-            />
-            <path
-              fill="#34A853"
-              d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-            />
-            <path
-              fill="#FBBC05"
-              d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22-.03-.63z"
-            />
-            <path
-              fill="#EA4335"
-              d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-            />
-          </svg>
-          Google Fast-Track Sign In
-        </button>
-
-        {/* Change SignUp/SignIn context toggler */}
-        <div className="text-center">
-          <button
-            type="button"
-            onClick={() => {
-              if (forgotActive) {
-                setForgotActive(false);
-              } else {
-                setIsSignUp(!isSignUp);
-              }
-              setErrorText(null);
-            }}
-            className="text-xs font-black text-slate-500 hover:text-purple-605 tracking-wide uppercase transition-colors"
-          >
-            {forgotActive
-              ? "Back to sign in console"
-              : isSignUp
-                ? "Already registered? Access Account"
-                : "Requesting setup? Sign Up Credentials"}
-          </button>
-        </div>
-
-        {/* Config note for users enablement */}
-        <p className="text-[10px] text-slate-400 dark:text-slate-500 text-center leading-relaxed italic">
-          * Please assure Email Sign In & Google Auth are enabled inside the
-          Firebase console.
-        </p>
-
-        {/* Demo Fast-Track Logins */}
-        <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3">
-          <div className="text-center text-[10px] font-black uppercase tracking-wider text-slate-400">
-            Fast-Track Role Logins
-          </div>
-          <div className="space-y-2">
-            {/* Super Admin Credential Prompt */}
-            {showSuperAdminPrompt ? (
-              <div className="bg-slate-900 border border-[#3557FF]/40 rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-2">
-                    <KeyRound className="w-3.5 h-3.5 text-[#3557FF]" />
-                    Super Admin Authentication
-                  </p>
-                  <span className="text-[10px] text-slate-400 font-semibold">ID: admin</span>
-                </div>
-                {saError && (
-                  <div className="p-2 bg-red-950/40 border border-red-800/40 text-red-400 text-[10px] font-bold rounded-lg flex items-center gap-1.5">
-                    <AlertTriangle className="w-3 h-3 shrink-0" />
-                    {saError}
-                  </div>
-                )}
-                <div className="space-y-2">
-                  <div>
-                    <label className="block uppercase tracking-wider text-[9px] text-slate-400 mb-1 font-bold">
-                      Admin ID
-                    </label>
-                    <div className="relative flex items-center">
-                      <User className="absolute left-3 w-3.5 h-3.5 text-slate-400" />
-                      <input
-                        type="text"
-                        value={saId}
-                        onChange={(e) => setSaId(e.target.value)}
-                        placeholder="admin"
-                        className="w-full text-xs font-medium bg-slate-800 border border-slate-700 p-2.5 pl-9 rounded-lg outline-none text-white placeholder:text-slate-500 focus:border-[#3557FF]"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block uppercase tracking-wider text-[9px] text-slate-400 mb-1 font-bold">
-                      Password (admin123)
-                    </label>
-                    <div className="relative flex items-center">
-                      <Lock className="absolute left-3 w-3.5 h-3.5 text-slate-400" />
-                      <input
-                        type="password"
-                        value={saPass}
-                        onChange={(e) => setSaPass(e.target.value)}
-                        placeholder="Enter password..."
-                        autoFocus
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault();
-                            handleSuperAdminLogin();
-                          }
-                        }}
-                        className="w-full text-xs font-medium bg-slate-800 border border-slate-700 p-2.5 pl-9 rounded-lg outline-none text-white placeholder:text-slate-500 focus:border-[#3557FF]"
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div className="flex gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => { setShowSuperAdminPrompt(false); setSaId(''); setSaPass(''); setSaError(null); }}
-                    className="flex-1 py-2 text-[10px] font-bold text-slate-400 bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors uppercase tracking-wide"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    id="super-admin-fast-login-btn"
-                    onClick={handleSuperAdminLogin}
-                    disabled={saLoading}
-                    className="flex-1 py-2 text-[10px] font-extrabold text-white bg-[#3557FF] hover:bg-[#2544e0] rounded-lg transition-all flex items-center justify-center gap-1.5 uppercase tracking-wide"
-                  >
-                    {saLoading ? 'Verifying...' : <><Sparkles className="w-3 h-3" /> Login</>}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setSaId('admin');
-                  setSaPass('');
-                  setSaError(null);
-                  setShowSuperAdminPrompt(true);
-                }}
-                className="w-full py-3 px-4 text-xs font-extrabold text-white bg-[#3557FF] hover:bg-[#2544e0] rounded-xl transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 tracking-wide cursor-pointer"
-              >
-                <Sparkles className="w-4 h-4" />
-                Login as Super Admin (Password Required)
-              </button>
-            )}
-
-            <div className="grid grid-cols-2 gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => setShowEmployeePicker(!showEmployeePicker)}
-                className={`py-2 px-2 text-[10px] font-bold rounded-lg transition-all text-center flex items-center justify-center gap-1 cursor-pointer ${
-                  showEmployeePicker
-                    ? 'bg-blue-600 text-white font-black shadow-xs'
-                    : 'text-blue-700 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-300 hover:bg-blue-100 border border-blue-200/60 dark:border-blue-900/40'
-                }`}
-              >
-                <Users className="w-3.5 h-3.5" />
-                <span>Employee View ({employeeAccounts.length})</span>
-                <ChevronDown className={`w-3 h-3 transition-transform ${showEmployeePicker ? 'rotate-180' : ''}`} />
-              </button>
-              <button
-                type="button"
-                onClick={() => loginAsDemoRole("client")}
-                className="py-2 px-2 text-[10px] font-bold text-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-300 rounded-lg hover:bg-emerald-100 transition-colors text-center border border-emerald-200/60 dark:border-emerald-900/40 cursor-pointer"
-              >
-                Client View
-              </button>
-            </div>
-
-            {/* Expandable Employee Fast-Track Picker */}
-            {showEmployeePicker && (
-              <div className="bg-slate-50 dark:bg-slate-900/90 border border-blue-200 dark:border-blue-900/50 rounded-xl p-3 space-y-2 animate-in fade-in-50 zoom-in-95">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">
-                    Select Specialist Account:
-                  </span>
-                  <span className="text-[9px] text-slate-400">1-Click Fast Login</span>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  {employeeAccounts.map(emp => (
-                    <button
-                      key={emp.id}
-                      type="button"
-                      onClick={() => loginAsEmployee(emp.id)}
-                      className="text-left p-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-blue-950/30 transition-all cursor-pointer group"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-black text-slate-850 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400">
-                          {emp.name}
-                        </span>
-                        <ArrowRight className="w-3 h-3 text-slate-400 group-hover:text-blue-500 group-hover:translate-x-0.5 transition-all" />
-                      </div>
-                      <span className="text-[9px] text-slate-500 dark:text-slate-400 block font-medium">
-                        {emp.role} · {emp.dept}
-                      </span>
-                      <span className="text-[9px] font-mono text-blue-500 dark:text-blue-400 font-bold block mt-0.5">
-                        ID: {emp.id}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
         </div>
       </div>
     </div>
   );
 };
-

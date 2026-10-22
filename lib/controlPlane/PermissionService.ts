@@ -1,5 +1,4 @@
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { cfGetPermissions, cfSavePermissions } from '../cloudflareApi';
 import { CanonicalRole, CanonicalAction, RolePermissions } from './types';
 
 const PERMISSIONS_STORAGE_KEY = 'digi_role_permissions_v1';
@@ -112,15 +111,22 @@ export class PermissionService {
       console.warn('PermissionService cache error:', e);
     }
 
-    // Load from Firestore
-    getDoc(doc(db, 'system', 'rolePermissions')).then(snap => {
-      if (snap.exists()) {
-        this.matrix = { ...DEFAULT_ROLE_PERMISSIONS, ...(snap.data() as RolePermissions) };
+    // Load from Cloudflare D1 / Worker backend
+    cfGetPermissions().then(data => {
+      if (data && typeof data === 'object') {
+        this.matrix = { ...DEFAULT_ROLE_PERMISSIONS, ...data };
         this.persistCache();
         window.dispatchEvent(new CustomEvent('digi_permissions_updated', { detail: this.matrix }));
       }
     }).catch(err => {
-      console.warn('Could not load remote permissions:', err);
+      // Fallback: direct local API
+      fetch('/api/system/permissions').then(r => r.json()).then(data => {
+        if (data && typeof data === 'object') {
+          this.matrix = { ...DEFAULT_ROLE_PERMISSIONS, ...data };
+          this.persistCache();
+          window.dispatchEvent(new CustomEvent('digi_permissions_updated', { detail: this.matrix }));
+        }
+      }).catch(() => {});
     });
   }
 
@@ -145,21 +151,19 @@ export class PermissionService {
     this.persistCache();
     window.dispatchEvent(new CustomEvent('digi_permissions_updated', { detail: this.matrix }));
 
-    // Persist to Firestore
+    // Persist to Cloudflare Worker D1
     try {
-      await setDoc(doc(db, 'system', 'rolePermissions'), sanitizedMatrix);
+      await cfSavePermissions(sanitizedMatrix);
     } catch (e) {
-      console.warn('Firestore setDoc rolePermissions fallback:', e);
+      // Fallback to local server API
+      try {
+        await fetch('/api/system/permissions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(sanitizedMatrix)
+        });
+      } catch (err) {}
     }
-
-    // Persist to server API
-    try {
-      fetch('/api/system/permissions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(sanitizedMatrix)
-      }).catch(() => {});
-    } catch (e) {}
   }
 
   public static getEffectiveRole(userRealRole: CanonicalRole = 'admin'): CanonicalRole {

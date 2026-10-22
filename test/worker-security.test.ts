@@ -78,7 +78,8 @@ class MockD1Database {
       { userId: 'uid_nexus_client', name: 'Nexus Rep', email: 'nexus@nexuscoaching.com', role: 'client', clientId: 'client_nexus', status: 'active' },
       { userId: 'uid_inactive', name: 'Deactivated User', email: 'inactive@digiexplode.ai', role: 'employee', status: 'inactive' },
       { userId: 'uid_revoked_user', name: 'Revoked User', email: 'revoked@digiexplode.ai', role: 'employee', employeeId: 'emp_priyanshu', status: 'active', tokensValidAfter: '2026-10-22T08:00:00Z' },
-    ]
+    ],
+    passwordResets: [] as any[],
   };
 
   prepare(sql: string) {
@@ -196,6 +197,28 @@ class MockD1Database {
       return { results: filtered };
     }
 
+    // SELECT passwordResets
+    if (s.includes('FROM passwordResets')) {
+      if (s.includes('COUNT(*)')) {
+        const ident = binds[0];
+        const count = this.tables.passwordResets.filter(r => r.identifier === ident).length;
+        return { results: [{ count }] };
+      }
+      if (s.includes('WHERE resetAuth = ?')) {
+        const token = binds[0];
+        const res = this.tables.passwordResets.filter(r => r.resetAuth === token && r.usedAt === 0);
+        return { results: res };
+      }
+      if (s.includes('WHERE identifier = ?')) {
+        const ident = binds[0];
+        const res = this.tables.passwordResets
+          .filter(r => r.identifier === ident && r.usedAt === 0)
+          .sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1));
+        return { results: res };
+      }
+      return { results: [...this.tables.passwordResets] };
+    }
+
     return { results: [] };
   }
 
@@ -217,6 +240,43 @@ class MockD1Database {
     }
     if (s.startsWith('INSERT INTO payslips')) {
       this.tables.payslips.push({ id: binds[0], employeeId: binds[1], month: binds[3], grossPay: binds[5], netPay: binds[6] });
+      return { success: true };
+    }
+    if (s.startsWith('INSERT INTO passwordResets')) {
+      this.tables.passwordResets.push({
+        id: binds[0],
+        identifier: binds[1],
+        targetType: binds[2],
+        tokenHash: binds[3],
+        role: binds[4],
+        resetAuth: binds[5] || '',
+        expiresAt: binds[6],
+        usedAt: 0,
+        attempts: 0,
+        createdAt: binds[7],
+      });
+      return { success: true };
+    }
+    if (s.startsWith('UPDATE passwordResets')) {
+      if (s.includes('SET resetAuth = ?')) {
+        const resetAuth = binds[0];
+        const id = binds[1];
+        const rec = this.tables.passwordResets.find(r => r.id === id);
+        if (rec) rec.resetAuth = resetAuth;
+      } else if (s.includes('attempts = attempts + 1')) {
+        const id = binds[0];
+        const rec = this.tables.passwordResets.find(r => r.id === id);
+        if (rec) rec.attempts++;
+      } else if (s.includes('SET usedAt = ?')) {
+        const usedAt = binds[0];
+        const id = binds[1];
+        const rec = this.tables.passwordResets.find(r => r.id === id);
+        if (rec) rec.usedAt = usedAt;
+      } else if (s.includes('SET usedAt = -1')) {
+        const id = binds[0];
+        const rec = this.tables.passwordResets.find(r => r.id === id);
+        if (rec) rec.usedAt = -1;
+      }
       return { success: true };
     }
     return { success: true };
@@ -663,6 +723,106 @@ async function runAllSecurityTests() {
     const res = await worker.fetch(req, env);
     const body: any = await res.json();
     assert(res.status === 403 && body.error.includes('deactivated'), 'Test 24: Deactivated employee in D1 employees table is immediately denied with 403 Forbidden');
+  }
+
+  // 25. Password recovery: Requesting recovery for verified employee returns safe generic message and dispatches OTP
+  let recoveryOtp: string = '';
+  {
+    const req = new Request('https://api.digiexplode.ai/api/auth/recovery/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: 'priyanshu@digiexplode.ai', channel: 'email' }),
+    });
+    const res = await worker.fetch(req, { ...env, ENVIRONMENT: 'test' });
+    const body: any = await res.json();
+    assert(
+      res.status === 200 &&
+      body.success === true &&
+      body.maskedTarget.includes('@') &&
+      typeof body.testOtp === 'string',
+      'Test 25: Password recovery request dispatches OTP and returns generic confirmation'
+    );
+    recoveryOtp = body.testOtp;
+  }
+
+  // 26. Account enumeration protection: Non-existent account returns the identical generic success confirmation
+  {
+    const req = new Request('https://api.digiexplode.ai/api/auth/recovery/request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: 'nonexistent_ghost@example.com', channel: 'email' }),
+    });
+    const res = await worker.fetch(req, env);
+    const body: any = await res.json();
+    assert(
+      res.status === 200 &&
+      body.success === true &&
+      body.message.includes('If an account matches'),
+      'Test 26: Unknown account recovery returns identical enumeration-safe message'
+    );
+  }
+
+  // 27. OTP verification security: Invalid OTP is rejected and attempt counter increments
+  {
+    const req = new Request('https://api.digiexplode.ai/api/auth/recovery/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: 'priyanshu@digiexplode.ai', otp: '000000' }),
+    });
+    const res = await worker.fetch(req, env);
+    const body: any = await res.json();
+    assert(
+      res.status === 400 &&
+      body.success === false &&
+      body.error.includes('Incorrect code'),
+      'Test 27: Invalid OTP is rejected and increments attempt limit'
+    );
+  }
+
+  // 28. Valid OTP verification: Generates single-use resetAuthToken
+  let resetAuthToken: string = '';
+  {
+    const req = new Request('https://api.digiexplode.ai/api/auth/recovery/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: 'priyanshu@digiexplode.ai', otp: recoveryOtp }),
+    });
+    const res = await worker.fetch(req, env);
+    const body: any = await res.json();
+    assert(
+      res.status === 200 &&
+      body.success === true &&
+      typeof body.resetAuthToken === 'string' &&
+      body.resetAuthToken.startsWith('rst_'),
+      'Test 28: Valid OTP returns single-use password reset authorization token'
+    );
+    resetAuthToken = body.resetAuthToken;
+  }
+
+  // 29. Password reset completion: Requires strong password, consumes token, updates revocation timestamp
+  {
+    const req = new Request('https://api.digiexplode.ai/api/auth/recovery/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ resetAuthToken, newPassword: 'NewSecurePassword2026!' }),
+    });
+    const res = await worker.fetch(req, env);
+    const body: any = await res.json();
+    assert(
+      res.status === 200 &&
+      body.success === true &&
+      body.message.includes('successfully updated'),
+      'Test 29: Password reset succeeds, invalidates token, and revokes older sessions'
+    );
+
+    // Verify token cannot be reused
+    const reuseReq = new Request('https://api.digiexplode.ai/api/auth/recovery/reset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ resetAuthToken, newPassword: 'AnotherPassword2026!' }),
+    });
+    const reuseRes = await worker.fetch(reuseReq, env);
+    assert(reuseRes.status === 400, 'Test 29b: Reused reset authorization token is strictly rejected');
   }
 
   console.log('='.repeat(68));

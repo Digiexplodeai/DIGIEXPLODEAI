@@ -8,7 +8,8 @@ import {
   AlertTriangle, ArrowRight, Video, CheckSquare, Layers, Clock, X,
   ExternalLink, Search, ShieldCheck, Briefcase, Copy, FileCheck,
   ChevronLeft, ChevronRight, Bookmark, FileSpreadsheet, Send, MessageSquare,
-  HelpCircle, UserCheck, UserX, AlertOctagon, User, ArrowUpRight
+  HelpCircle, UserCheck, UserX, AlertOctagon, User, ArrowUpRight,
+  Play, Pause, Square, Timer
 } from 'lucide-react';
 import {
   collection, onSnapshot, addDoc, doc, setDoc
@@ -47,8 +48,26 @@ import {
   exportReportToPDF,
   exportReportToXLSX,
   exportReportToCSV,
-  triggerPrintReport
+  triggerPrintReport,
+  generateDailyReport2PDF
 } from '../../lib/reportExportUtils';
+import {
+  classifyDailyReport,
+  ClassifiedDailyReport,
+  ClassifiedTaskItem,
+  PRIORITY_COLORS,
+  PRIORITY_BG_COLORS,
+  PRIORITY_BORDER_COLORS
+} from '../../lib/dailyReportClassifier';
+import {
+  startTaskTimer,
+  pauseTaskTimer,
+  stopAndLogTaskTimer,
+  getTaskTimerSession,
+  getTaskTimerSeconds,
+  formatDurationMinutes,
+  formatDurationHours
+} from '../../lib/taskTimerService';
 import {
   generateMonthlyPDFReport,
   DEFAULT_AGENCY_BRANDING
@@ -158,9 +177,18 @@ export const ReportsView: React.FC = () => {
   const { user, profile } = useAuth();
   const isSuperAdmin = profile?.role === 'super_admin' || profile?.role === 'superAdmin' || profile?.role === 'admin' || !profile?.role;
   const isManager = isSuperAdmin || profile?.role === 'manager' || profile?.role === 'team_lead';
+  const isEmployeeRole = profile?.role === 'employee';
 
   // ── 1. PRIMARY NAVIGATION ──────────────────────────────────────────
-  const [activeMainTab, setActiveMainTab] = useState<MainReportTab>('overview');
+  const [activeMainTab, setActiveMainTab] = useState<MainReportTab>(() => {
+    return profile?.role === 'employee' ? 'daily' : 'overview';
+  });
+
+  useEffect(() => {
+    if (isEmployeeRole && (activeMainTab === 'overview' || activeMainTab === 'client' || activeMainTab === 'submission_tracker')) {
+      setActiveMainTab('daily');
+    }
+  }, [isEmployeeRole]);
 
   // ── 2. LIVE DATASETS CONNECTED TO AUTHORITATIVE SYSTEM ─────────────
   const [clients, setClients] = useState<ClientData[]>(() => getCachedClients());
@@ -224,6 +252,7 @@ export const ReportsView: React.FC = () => {
   const [customEndDate, setCustomEndDate] = useState<string>(todayKolkata);
 
   // ── 4. FILTER CONTROLS ─────────────────────────────────────────────
+  const [dailyMode, setDailyMode] = useState<'daily' | 'range'>('daily');
   const [filterEmployeeId, setFilterEmployeeId] = useState<string>('');
   const [filterClientId, setFilterClientId] = useState<string>('');
   const [filterTeam, setFilterTeam] = useState<string>('All');
@@ -231,6 +260,11 @@ export const ReportsView: React.FC = () => {
   const [filterPriority, setFilterPriority] = useState<string>('All');
   const [filterCategory, setFilterCategory] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Daily Report 2.0 State
+  const [pdfPreviewBlobUrl, setPdfPreviewBlobUrl] = useState<string | null>(null);
+  const [isGeneratingDailyPdf, setIsGeneratingDailyPdf] = useState(false);
+  const [activeTimersTick, setActiveTimersTick] = useState<number>(0);
 
   // ── 5. CLIENT MONTHLY REPORT STATE (PRESENTS EXISTING WORKING GENERATOR) ──
   const [selectedClientId, setSelectedClientId] = useState<string>('');
@@ -287,6 +321,13 @@ export const ReportsView: React.FC = () => {
       }
     }, () => {});
 
+    // Sync active task timers and work logs local events
+    const handleTimerChange = () => setActiveTimersTick(t => t + 1);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('digi_task_timer_updated', handleTimerChange);
+      window.addEventListener('worklogs_updated', handleTimerChange);
+    }
+
     return () => {
       unsubClients();
       unsubEmployees();
@@ -295,6 +336,10 @@ export const ReportsView: React.FC = () => {
       unsubDaily();
       unsubWorkLogs();
       unsubSaved();
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('digi_task_timer_updated', handleTimerChange);
+        window.removeEventListener('worklogs_updated', handleTimerChange);
+      }
     };
   }, []);
 
@@ -333,52 +378,65 @@ export const ReportsView: React.FC = () => {
     return t.dueDate < todayKolkata;
   };
 
-  // B. Selected Daily Date Operational Records
+  // Active target employee id for filtering: if logged-in user is employee role, lock to their ID
+  const effectiveDailyEmployeeId = useMemo(() => {
+    if (isEmployeeRole && currentEmployee) {
+      return currentEmployee.id || currentEmployee.employeeId;
+    }
+    return filterEmployeeId;
+  }, [isEmployeeRole, currentEmployee, filterEmployeeId]);
+
+  // B. Classified Daily Report 2.0 (Single Source of Truth)
+  const classifiedDaily = useMemo(() => {
+    return classifyDailyReport({
+      tasks,
+      workLogs,
+      targetDate: selectedDailyDate,
+      endDate: dailyMode === 'range' ? customEndDate : undefined,
+      filterEmployeeId: effectiveDailyEmployeeId,
+      filterClientId,
+      filterPriority,
+      filterCategory,
+      filterStatus
+    });
+  }, [
+    tasks,
+    workLogs,
+    selectedDailyDate,
+    customEndDate,
+    dailyMode,
+    effectiveDailyEmployeeId,
+    filterClientId,
+    filterPriority,
+    filterCategory,
+    filterStatus,
+    activeTimersTick
+  ]);
+
+  // Backward-compatible dailyRecords view
   const dailyRecords = useMemo(() => {
-    const targetDate = selectedDailyDate;
-
-    // Filter tasks scheduled or completed on this date
-    const dayTasks = tasks.filter(t => {
-      if (t.status === 'Cancelled') return false;
-      const matchDate = t.scheduledDate === targetDate || t.completedAt?.startsWith(targetDate);
-      const matchEmp = !filterEmployeeId || t.assigneeId === filterEmployeeId;
-      const matchClient = !filterClientId || t.clientId === filterClientId;
-      return matchDate && matchEmp && matchClient;
-    });
-
-    // Filter work logs on this date
-    const dayWorkLogs = workLogs.filter(wl => {
-      const d = (wl.work_date || wl.date || wl.completedAt || wl.createdAt || '').slice(0, 10);
-      const matchDate = d === targetDate;
-      const matchEmp = !filterEmployeeId || wl.employeeId === filterEmployeeId;
-      const matchClient = !filterClientId || wl.clientId === filterClientId;
-      return matchDate && matchEmp && matchClient;
-    });
-
-    // Filter calendar deliverables on this date
-    const dayDeliverables = calendarEntries.filter(c => {
-      const d = (c.date || c.createdAt || '').slice(0, 10);
-      const matchDate = d === targetDate;
-      const matchEmp = !filterEmployeeId || c.assigneeId === filterEmployeeId;
-      const matchClient = !filterClientId || c.clientId === filterClientId;
-      return matchDate && matchEmp && matchClient;
-    });
-
-    const completedTasks = dayTasks.filter(t => t.status === 'Done');
-    const pendingTasks = dayTasks.filter(t => t.status !== 'Done');
-    const totalHours = dayWorkLogs.reduce((acc, wl) => acc + (Number(wl.hours) || Number(wl.durationHours) || 0), 0);
-    const publishedContent = dayDeliverables.filter(c => c.status === 'Posted' || c.postedStatus === 'Posted');
+    const allClassifiedTasks = [
+      ...classifiedDaily.completedToday.map(i => i.task),
+      ...classifiedDaily.workedOnToday.map(i => i.task),
+      ...classifiedDaily.newPending.map(i => i.task),
+      ...classifiedDaily.previousPending.map(i => i.task),
+      ...classifiedDaily.overdue.map(i => i.task)
+    ];
 
     return {
-      tasks: dayTasks,
-      completedTasks,
-      pendingTasks,
-      workLogs: dayWorkLogs,
-      deliverables: dayDeliverables,
-      publishedContent,
-      totalHours: Math.round(totalHours * 10) / 10
+      tasks: allClassifiedTasks,
+      completedTasks: classifiedDaily.completedToday.map(i => i.task),
+      pendingTasks: [
+        ...classifiedDaily.newPending.map(i => i.task),
+        ...classifiedDaily.previousPending.map(i => i.task),
+        ...classifiedDaily.overdue.map(i => i.task)
+      ],
+      workLogs: classifiedDaily.timeBreakdown,
+      deliverables: [],
+      publishedContent: [],
+      totalHours: classifiedDaily.summary.totalTimeLoggedHours
     };
-  }, [tasks, workLogs, calendarEntries, selectedDailyDate, filterEmployeeId, filterClientId]);
+  }, [classifiedDaily]);
 
   // C. Weekly Operational Records
   const weeklyRecords = useMemo(() => {
@@ -488,7 +546,8 @@ export const ReportsView: React.FC = () => {
 
   // E. Employee Performance Metrics Table
   const employeePerformanceList = useMemo(() => {
-    return employees.map(emp => {
+    const targetPool = isEmployeeRole && currentEmployee ? [currentEmployee] : employees;
+    return targetPool.map(emp => {
       const empTasks = tasks.filter(t => t.assigneeId === emp.id || t.assigneeId === emp.employeeId);
       const completed = empTasks.filter(t => t.status === 'Done');
       const pending = empTasks.filter(t => t.status !== 'Done' && t.status !== 'Cancelled');
@@ -528,12 +587,13 @@ export const ReportsView: React.FC = () => {
         dailyReportsCount: submissions.length
       };
     });
-  }, [employees, tasks, workLogs, calendarEntries, dailyReports, todayKolkata]);
+  }, [employees, tasks, workLogs, calendarEntries, dailyReports, todayKolkata, isEmployeeRole, currentEmployee]);
 
   // F. Daily Submission Tracker Statuses
   const dailyTrackerRecords = useMemo(() => {
     const targetDate = selectedDailyDate;
-    return employees.map(emp => {
+    const targetPool = isEmployeeRole && currentEmployee ? [currentEmployee] : employees;
+    return targetPool.map(emp => {
       const submission = dailyReports.find(r => r.employeeId === emp.id && r.date === targetDate);
       let status: 'Submitted' | 'Reviewed' | 'Returned' | 'Pending' | 'Late' = 'Pending';
       if (submission) {
@@ -653,40 +713,184 @@ export const ReportsView: React.FC = () => {
     showToast('success', `Exported Overview as ${format.toUpperCase()}`);
   };
 
-  // Daily Report Export
-  const handleExportDaily = (format: 'pdf' | 'xlsx' | 'csv') => {
-    const config = {
-      reportTitle: `Digiexplode AI — Daily Operations Report (${selectedDailyDate})`,
-      reportSubtitle: 'Cross-Module Daily Deliverables, Tasks & Recorded Work Logs',
-      periodLabel: selectedDailyDate,
-      generatedBy: profile?.name || 'Super Admin',
-      filterSummary: `Employee: ${filterEmployeeId ? employees.find(e => e.id === filterEmployeeId)?.name : 'All'} | Client: ${filterClientId ? clients.find(c => c.id === filterClientId)?.clientName : 'All'}`,
-      summaryCards: [
-        { label: 'Tasks Completed', value: dailyRecords.completedTasks.length },
-        { label: 'Tasks Pending', value: dailyRecords.pendingTasks.length },
-        { label: 'Hours Logged', value: `${dailyRecords.totalHours} hrs` },
-        { label: 'Published Deliverables', value: dailyRecords.publishedContent.length }
-      ],
-      tables: [
-        {
-          title: `Daily Operational Tasks (${dailyRecords.tasks.length})`,
-          headers: ['Task Title', 'Client', 'Assignee', 'Category', 'Status', 'Priority'],
-          rows: dailyRecords.tasks.map(t => [t.title, t.clientName || 'General', t.assigneeName || 'Unassigned', t.category, t.status, t.priority])
-        },
-        {
-          title: `Daily Time & Work Logs (${dailyRecords.workLogs.length})`,
-          headers: ['Employee', 'Client', 'Work Description', 'Hours Logged'],
-          rows: dailyRecords.workLogs.map(wl => [wl.employeeName || wl.employee_name || 'Team Member', wl.clientName || wl.client_name || 'Client', wl.workDone || wl.work_description || '', wl.hours || wl.durationHours || 1])
-        }
-      ],
-      filenameBase: `DigiexplodeAI_Daily_Report_${selectedDailyDate}`
-    };
+  // Daily Report 2.0 Export Handlers
+  const handleExportDaily = async (format: 'pdf' | 'xlsx' | 'csv') => {
+    const empName = effectiveDailyEmployeeId ? employees.find(e => e.id === effectiveDailyEmployeeId || e.employeeId === effectiveDailyEmployeeId)?.name : 'All Employees';
+    const clientName = filterClientId ? clients.find(c => (c.id || c.clientId) === filterClientId)?.clientName : 'All Clients';
+    const filterDesc = `Employee: ${empName} | Client: ${clientName}${filterPriority !== 'All' ? ` | Priority: ${filterPriority}` : ''}${filterCategory !== 'All' ? ` | Category: ${filterCategory}` : ''}`;
 
-    if (format === 'pdf') exportReportToPDF(config);
-    else if (format === 'xlsx') exportReportToXLSX(config);
-    else exportReportToCSV(config);
+    if (format === 'pdf') {
+      setIsGeneratingDailyPdf(true);
+      try {
+        await generateDailyReport2PDF(classifiedDaily, {
+          employeeName: empName,
+          employeeRole: effectiveDailyEmployeeId ? employees.find(e => e.id === effectiveDailyEmployeeId || e.employeeId === effectiveDailyEmployeeId)?.role : undefined,
+          generatedBy: profile?.name || 'Supervisor / Admin',
+          filterSummary: filterDesc
+        }, { download: true });
+        showToast('success', 'Downloaded Official Daily Report 2.0 (A4 Landscape PDF)');
+      } catch (err: any) {
+        showToast('error', `Failed to generate PDF: ${err?.message || 'Error'}`);
+      } finally {
+        setIsGeneratingDailyPdf(false);
+      }
+    } else if (format === 'xlsx') {
+      const config = {
+        reportTitle: `Digiexplode AI — Daily Operations Report (${classifiedDaily.targetDate})`,
+        reportSubtitle: 'Authoritative Date-Wise Deliverables, Tracked Durations & Time Summary',
+        periodLabel: classifiedDaily.isRange ? `${classifiedDaily.targetDate} to ${classifiedDaily.endDate}` : classifiedDaily.targetDate,
+        generatedBy: profile?.name || 'Supervisor / Admin',
+        filterSummary: filterDesc,
+        summaryCards: [
+          { label: 'Completed Today', value: classifiedDaily.summary.completedTodayCount },
+          { label: 'Worked On Today', value: classifiedDaily.summary.workedOnTodayCount },
+          { label: 'Pending Tasks', value: classifiedDaily.summary.pendingCount },
+          { label: 'Overdue', value: classifiedDaily.summary.overdueCount },
+          { label: 'Total Time Logged', value: classifiedDaily.summary.totalTimeLoggedFormatted }
+        ],
+        tables: [
+          {
+            title: `Completed Today (${classifiedDaily.completedToday.length} tasks)`,
+            headers: ['Task Title', 'Client', 'Category', 'Priority', 'Active Duration', 'Completed Date'],
+            rows: classifiedDaily.completedToday.map(i => [
+              i.task.title,
+              i.task.clientName || 'General',
+              i.task.category || 'Deliverable',
+              i.task.priority,
+              i.durationFormatted,
+              i.completedDateKolkata || classifiedDaily.targetDate
+            ])
+          },
+          {
+            title: `Worked On Today (${classifiedDaily.workedOnToday.length} ongoing tasks)`,
+            headers: ['Task Title', 'Client', 'Category', 'Status', 'Priority', 'Today Tracked Time'],
+            rows: classifiedDaily.workedOnToday.map(i => [
+              i.task.title,
+              i.task.clientName || 'General',
+              i.task.category || 'Deliverable',
+              i.task.status,
+              i.task.priority,
+              i.durationFormatted
+            ])
+          },
+          {
+            title: `New Pending Tasks Assigned Today (${classifiedDaily.newPending.length})`,
+            headers: ['Task Title', 'Client', 'Category', 'Priority', 'Due Date'],
+            rows: classifiedDaily.newPending.map(i => [
+              i.task.title,
+              i.task.clientName || 'General',
+              i.task.category || 'Deliverable',
+              i.task.priority,
+              i.dueDateKolkata || 'Not Set'
+            ])
+          },
+          {
+            title: `Previous Pending & Overdue Tasks (${classifiedDaily.overdue.length} overdue · ${classifiedDaily.previousPending.length} carried forward)`,
+            headers: ['Task Title', 'Client', 'Category', 'Priority', 'Due Date', 'Status / Ageing', 'Blocked Status'],
+            rows: [
+              ...classifiedDaily.overdue.map(i => [i.task.title, i.task.clientName || 'General', i.task.category || 'General', i.task.priority, i.dueDateKolkata || 'Overdue', `OVERDUE (${i.daysOverdue}d)`, i.isBlocked ? 'Blocked' : 'Active']),
+              ...classifiedDaily.previousPending.map(i => [i.task.title, i.task.clientName || 'General', i.task.category || 'General', i.task.priority, i.dueDateKolkata || 'No Deadline', `${i.daysPending} days pending`, i.isBlocked ? 'Blocked' : 'Active'])
+            ]
+          },
+          {
+            title: `Daily Time Summary (${classifiedDaily.timeBreakdown.length} records · Total: ${classifiedDaily.summary.totalTimeLoggedFormatted})`,
+            headers: ['Task / Activity Description', 'Client', 'Category', 'Status', 'Active Duration'],
+            rows: classifiedDaily.timeBreakdown.map(tb => [tb.taskTitle, tb.clientName, tb.category, tb.status, tb.formatted])
+          }
+        ],
+        filenameBase: `Digiexplode_Daily_Report_${classifiedDaily.targetDate}`
+      };
+      exportReportToXLSX(config);
+      showToast('success', 'Exported Daily Report as Excel');
+    } else {
+      const config = {
+        reportTitle: `Digiexplode AI — Daily Operations Report (${classifiedDaily.targetDate})`,
+        periodLabel: classifiedDaily.targetDate,
+        generatedBy: profile?.name || 'Supervisor / Admin',
+        filterSummary: filterDesc,
+        summaryCards: [
+          { label: 'Completed Today', value: classifiedDaily.summary.completedTodayCount },
+          { label: 'Worked On Today', value: classifiedDaily.summary.workedOnTodayCount },
+          { label: 'Pending', value: classifiedDaily.summary.pendingCount },
+          { label: 'Overdue', value: classifiedDaily.summary.overdueCount },
+          { label: 'Total Hours', value: classifiedDaily.summary.totalTimeLoggedFormatted }
+        ],
+        tables: [
+          {
+            title: 'Completed Today',
+            headers: ['Task Title', 'Client', 'Category', 'Priority', 'Duration'],
+            rows: classifiedDaily.completedToday.map(i => [i.task.title, i.task.clientName || 'General', i.task.category || 'General', i.task.priority, i.durationFormatted])
+          },
+          {
+            title: 'Pending & Overdue',
+            headers: ['Task Title', 'Client', 'Category', 'Priority', 'Due Date', 'Status'],
+            rows: [
+              ...classifiedDaily.overdue.map(i => [i.task.title, i.task.clientName || 'General', i.task.category || 'General', i.task.priority, i.dueDateKolkata || 'Overdue', `Overdue ${i.daysOverdue}d`]),
+              ...classifiedDaily.previousPending.map(i => [i.task.title, i.task.clientName || 'General', i.task.category || 'General', i.task.priority, i.dueDateKolkata || 'Active', `${i.daysPending}d Pending`])
+            ]
+          }
+        ],
+        filenameBase: `Digiexplode_Daily_Report_${classifiedDaily.targetDate}`
+      };
+      exportReportToCSV(config);
+      showToast('success', 'Exported Daily Report as CSV');
+    }
+  };
 
-    showToast('success', `Exported Daily Report as ${format.toUpperCase()}`);
+  // Live PDF Preview Handler (Identical Data Engine)
+  const handlePreviewDailyPDF = async () => {
+    setIsGeneratingDailyPdf(true);
+    try {
+      const empName = effectiveDailyEmployeeId ? employees.find(e => e.id === effectiveDailyEmployeeId || e.employeeId === effectiveDailyEmployeeId)?.name : 'All Employees';
+      const clientName = filterClientId ? clients.find(c => (c.id || c.clientId) === filterClientId)?.clientName : 'All Clients';
+      const filterDesc = `Employee: ${empName} | Client: ${clientName}${filterPriority !== 'All' ? ` | Priority: ${filterPriority}` : ''}${filterCategory !== 'All' ? ` | Category: ${filterCategory}` : ''}`;
+
+      const doc = await generateDailyReport2PDF(classifiedDaily, {
+        employeeName: empName,
+        employeeRole: effectiveDailyEmployeeId ? employees.find(e => e.id === effectiveDailyEmployeeId || e.employeeId === effectiveDailyEmployeeId)?.role : undefined,
+        generatedBy: profile?.name || 'Supervisor / Admin',
+        filterSummary: filterDesc
+      }, { download: false });
+
+      const blobUrl = doc.output('bloburl');
+      setPdfPreviewBlobUrl(blobUrl.toString());
+    } catch (err: any) {
+      showToast('error', `Failed to render PDF preview: ${err?.message || 'Error'}`);
+    } finally {
+      setIsGeneratingDailyPdf(false);
+    }
+  };
+
+  // Lightweight Task Timer Handlers
+  const handleToggleTimer = async (task: Task) => {
+    const current = getTaskTimerSession(task.id);
+    if (current?.isRunning) {
+      pauseTaskTimer(task.id);
+      setActiveTimersTick(t => t + 1);
+      showToast('info', `Paused timer for "${task.title}"`);
+    } else {
+      startTaskTimer({
+        id: task.id,
+        title: task.title,
+        employeeId: currentEmployee?.id || user?.uid || 'emp_active',
+        employeeName: currentEmployee?.name || profile?.name || 'Team Member',
+        clientId: task.clientId,
+        clientName: task.clientName,
+        category: task.category
+      });
+      setActiveTimersTick(t => t + 1);
+      showToast('success', `Started active timer for "${task.title}"`);
+    }
+  };
+
+  const handleStopTimer = async (taskId: string) => {
+    const res = await stopAndLogTaskTimer(taskId, profile);
+    setActiveTimersTick(t => t + 1);
+    if (res.loggedMinutes > 0) {
+      showToast('success', `Logged ${formatDurationMinutes(res.loggedMinutes)} active time to official Work Log!`);
+    } else {
+      showToast('info', 'Timer stopped (less than 30s session discarded).');
+    }
   };
 
   // Weekly Report Export
@@ -950,16 +1154,28 @@ export const ReportsView: React.FC = () => {
   };
 
   // ── 11. NAVIGATION TAB CONFIGS ──────────────────────────────────────
-  const TABS: { id: MainReportTab; label: string; icon: any; count?: number }[] = [
-    { id: 'overview', label: 'Agency Pulse', icon: BarChart3 },
-    { id: 'daily', label: 'Daily Reports', icon: FileCheck },
-    { id: 'weekly', label: 'Weekly Sprints', icon: TrendingUp },
-    { id: 'monthly', label: 'Monthly Operations', icon: Calendar },
-    { id: 'employee', label: 'Employee Performance', icon: Award },
-    { id: 'client', label: 'Client Reporting', icon: Briefcase },
-    { id: 'submission_tracker', label: 'Submission Tracker', icon: ShieldCheck, count: dailyTrackerRecords.filter(r => r.status === 'Pending' || r.status === 'Late').length },
-    { id: 'custom', label: 'Custom Reports', icon: Filter }
-  ];
+  const TABS: { id: MainReportTab; label: string; icon: any; count?: number }[] = useMemo(() => {
+    if (isEmployeeRole) {
+      return [
+        { id: 'daily', label: 'My Daily Reports', icon: FileCheck },
+        { id: 'employee', label: 'My Delivery & Performance', icon: Award },
+        { id: 'weekly', label: 'Weekly Sprints', icon: TrendingUp },
+        { id: 'monthly', label: 'Monthly Operations', icon: Calendar },
+        { id: 'custom', label: 'Custom Reports', icon: Filter }
+      ];
+    }
+
+    return [
+      { id: 'overview', label: 'Agency Pulse', icon: BarChart3 },
+      { id: 'daily', label: 'Daily Reports', icon: FileCheck },
+      { id: 'weekly', label: 'Weekly Sprints', icon: TrendingUp },
+      { id: 'monthly', label: 'Monthly Operations', icon: Calendar },
+      { id: 'employee', label: 'Employee Performance', icon: Award },
+      { id: 'client', label: 'Client Reporting', icon: Briefcase },
+      { id: 'submission_tracker', label: 'Submission Tracker', icon: ShieldCheck, count: dailyTrackerRecords.filter(r => r.status === 'Pending' || r.status === 'Late').length },
+      { id: 'custom', label: 'Custom Reports', icon: Filter }
+    ];
+  }, [isEmployeeRole, dailyTrackerRecords]);
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] dark:bg-[#0B0F19] text-[#101828] dark:text-[#F8FAFC] p-4 sm:p-6 lg:p-8 font-sans">
@@ -1168,110 +1384,790 @@ export const ReportsView: React.FC = () => {
         </div>
       )}
 
-      {/* ── TAB 2: DAILY REPORTS ─────────────────────────────────────── */}
+      {/* ── TAB 2: DAILY REPORTS 2.0 (AUTHORITATIVE SYSTEM) ─────────── */}
       {activeMainTab === 'daily' && (
         <div className="space-y-6 animate-in fade-in">
-          {/* Daily Date & Filter Selector */}
-          <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-xs flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="flex items-center gap-2 bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-3 py-1.5">
-                <Calendar className="w-4 h-4 text-[#5B4BFF]" />
-                <input
-                  type="date"
-                  value={selectedDailyDate}
-                  onChange={e => setSelectedDailyDate(e.target.value)}
-                  className="bg-transparent text-xs font-bold outline-none text-[#101828] dark:text-white cursor-pointer"
-                />
+          {/* ── 1. REPORT CONTROLS BAR ─────────────────────────────────── */}
+          <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-xs space-y-3.5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              {/* Daily / Date Range Toggle */}
+              <div className="flex items-center gap-1.5 p-1 bg-[#F1F5F9] dark:bg-[#161B31] rounded-xl border border-[#E2E8F0] dark:border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setDailyMode('daily')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    dailyMode === 'daily'
+                      ? 'bg-white dark:bg-[#5B4BFF] text-[#101828] dark:text-white shadow-2xs font-black'
+                      : 'text-[#64748B] dark:text-[#94A3B8] hover:text-[#101828]'
+                  }`}
+                >
+                  Daily Report
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDailyMode('range')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    dailyMode === 'range'
+                      ? 'bg-white dark:bg-[#5B4BFF] text-[#101828] dark:text-white shadow-2xs font-black'
+                      : 'text-[#64748B] dark:text-[#94A3B8] hover:text-[#101828]'
+                  }`}
+                >
+                  Custom Date Range
+                </button>
               </div>
 
-              <button
-                onClick={() => setSelectedDailyDate(todayKolkata)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all ${
-                  selectedDailyDate === todayKolkata ? 'bg-[#5B4BFF] text-white' : 'bg-slate-100 dark:bg-white/5 text-[#475467] dark:text-[#CBD5E1]'
-                }`}
-              >
-                Today
-              </button>
-              <button
-                onClick={() => {
-                  const d = new Date();
-                  d.setDate(d.getDate() - 1);
-                  setSelectedDailyDate(d.toISOString().split('T')[0]);
-                }}
-                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-white/5 text-[#475467] dark:text-[#CBD5E1] hover:bg-slate-200 cursor-pointer"
-              >
-                Yesterday
-              </button>
+              {/* Action Controls: PDF Preview, Download PDF, Print, Excel, CSV */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={handlePreviewDailyPDF}
+                  disabled={isGeneratingDailyPdf}
+                  className="px-3.5 py-1.5 rounded-xl bg-purple-500/10 text-[#5B4BFF] dark:text-[#806CFF] text-xs font-black hover:bg-[#5B4BFF] hover:text-white transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                  title="Live A4 Landscape PDF Preview"
+                >
+                  {isGeneratingDailyPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5" />}
+                  <span>PDF Preview</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleExportDaily('pdf')}
+                  disabled={isGeneratingDailyPdf}
+                  className="px-3.5 py-1.5 rounded-xl bg-[#5B4BFF] text-white text-xs font-black hover:bg-[#4E3FE6] transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-[#5B4BFF]/25"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download PDF</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => triggerPrintReport()}
+                  className="px-3 py-1.5 rounded-xl bg-white dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 text-xs font-bold text-[#475467] dark:text-[#CBD5E1] hover:bg-slate-50 transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleExportDaily('xlsx')}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-black hover:bg-emerald-600 hover:text-white transition-all flex items-center gap-1 cursor-pointer"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" /> Excel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleExportDaily('csv')}
+                  className="px-3 py-1.5 rounded-xl bg-slate-500/10 text-slate-700 dark:text-slate-300 text-xs font-black hover:bg-slate-700 hover:text-white transition-all flex items-center gap-1 cursor-pointer"
+                >
+                  <FileText className="w-3.5 h-3.5" /> CSV
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Pickers Row */}
+            <div className="flex items-center gap-2.5 flex-wrap pt-2 border-t border-[#F1F5F9] dark:border-white/5">
+              {/* Date Input */}
+              {dailyMode === 'daily' ? (
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-3 py-1.5">
+                    <Calendar className="w-4 h-4 text-[#5B4BFF]" />
+                    <input
+                      type="date"
+                      value={selectedDailyDate}
+                      onChange={e => setSelectedDailyDate(e.target.value)}
+                      className="bg-transparent text-xs font-bold outline-none text-[#101828] dark:text-white cursor-pointer"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDailyDate(todayKolkata)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-all ${
+                      selectedDailyDate === todayKolkata ? 'bg-[#5B4BFF] text-white font-black' : 'bg-slate-100 dark:bg-white/5 text-[#475467] dark:text-[#CBD5E1]'
+                    }`}
+                  >
+                    Today
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = new Date();
+                      d.setDate(d.getDate() - 1);
+                      setSelectedDailyDate(d.toISOString().split('T')[0]);
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 dark:bg-white/5 text-[#475467] dark:text-[#CBD5E1] hover:bg-slate-200 cursor-pointer"
+                  >
+                    Yesterday
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-2.5 py-1.5">
+                    <span className="text-[10px] font-bold text-[#64748B]">From:</span>
+                    <input
+                      type="date"
+                      value={selectedDailyDate}
+                      onChange={e => setSelectedDailyDate(e.target.value)}
+                      className="bg-transparent text-xs font-bold outline-none text-[#101828] dark:text-white cursor-pointer"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5 bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-2.5 py-1.5">
+                    <span className="text-[10px] font-bold text-[#64748B]">To:</span>
+                    <input
+                      type="date"
+                      value={customEndDate}
+                      onChange={e => setCustomEndDate(e.target.value)}
+                      className="bg-transparent text-xs font-bold outline-none text-[#101828] dark:text-white cursor-pointer"
+                    />
+                  </div>
+                </div>
+              )}
 
               {/* Employee Filter */}
-              <select
-                value={filterEmployeeId}
-                onChange={e => setFilterEmployeeId(e.target.value)}
-                className="bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-3 py-2 text-xs font-bold text-[#101828] dark:text-white outline-none"
-              >
-                <option value="">All Team Members</option>
-                {employees.map(e => (
-                  <option key={e.id} value={e.id}>{e.name} ({e.role || 'Staff'})</option>
-                ))}
-              </select>
+              {isEmployeeRole ? (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl text-xs font-bold text-[#101828] dark:text-white">
+                  <UserCheck className="w-3.5 h-3.5 text-[#5B4BFF]" />
+                  <span>My Report ({currentEmployee?.name || 'Self'})</span>
+                </div>
+              ) : (
+                <select
+                  value={filterEmployeeId}
+                  onChange={e => setFilterEmployeeId(e.target.value)}
+                  className="bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-3 py-1.5 text-xs font-bold text-[#101828] dark:text-white outline-none cursor-pointer"
+                >
+                  <option value="">All Team Members</option>
+                  {employees.map(e => (
+                    <option key={e.id} value={e.id}>{e.name} ({e.role || 'Staff'})</option>
+                  ))}
+                </select>
+              )}
 
               {/* Client Filter */}
               <select
                 value={filterClientId}
                 onChange={e => setFilterClientId(e.target.value)}
-                className="bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-3 py-2 text-xs font-bold text-[#101828] dark:text-white outline-none"
+                className="bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-3 py-1.5 text-xs font-bold text-[#101828] dark:text-white outline-none cursor-pointer"
               >
                 <option value="">All Clients</option>
                 {clients.map(c => (
-                  <option key={c.id || (c as any).clientId} value={c.id || (c as any).clientId}>{c.clientName || c.name}</option>
+                  <option key={c.id || (c as any).clientId} value={c.id || (c as any).clientId}>
+                    {c.clientName || c.name}
+                  </option>
                 ))}
               </select>
-            </div>
 
-            {/* Export Buttons */}
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                onClick={() => handleExportDaily('pdf')}
-                className="px-3.5 py-1.5 rounded-xl bg-[#5B4BFF]/10 text-[#5B4BFF] dark:text-[#806CFF] text-xs font-black hover:bg-[#5B4BFF] hover:text-white transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              {/* Priority Filter (Step 4 & 8) */}
+              <select
+                value={filterPriority}
+                onChange={e => setFilterPriority(e.target.value)}
+                className="bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-3 py-1.5 text-xs font-bold text-[#101828] dark:text-white outline-none cursor-pointer"
               >
-                <Download className="w-3.5 h-3.5" /> PDF
-              </button>
-              <button
-                onClick={() => handleExportDaily('xlsx')}
-                className="px-3.5 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-black hover:bg-emerald-600 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                <option value="All">All Priorities</option>
+                <option value="Urgent">Urgent</option>
+                <option value="High">High</option>
+                <option value="Medium">Medium</option>
+                <option value="Low">Low</option>
+              </select>
+
+              {/* Category Filter (Step 6 & 8) */}
+              <select
+                value={filterCategory}
+                onChange={e => setFilterCategory(e.target.value)}
+                className="bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl px-3 py-1.5 text-xs font-bold text-[#101828] dark:text-white outline-none cursor-pointer"
               >
-                <FileSpreadsheet className="w-3.5 h-3.5" /> Excel
-              </button>
-              <button
-                onClick={() => handleExportDaily('csv')}
-                className="px-3.5 py-1.5 rounded-xl bg-slate-500/10 text-slate-700 dark:text-slate-300 text-xs font-black hover:bg-slate-700 hover:text-white transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
-              >
-                <FileText className="w-3.5 h-3.5" /> CSV
-              </button>
+                <option value="All">All Categories</option>
+                <option value="Graphic Design">Graphic Design</option>
+                <option value="Reel Editing">Reel Editing</option>
+                <option value="Video Shoot">Video Shoot</option>
+                <option value="Video Editing">Video Editing</option>
+                <option value="Social Media">Social Media</option>
+                <option value="Meta Ads">Meta Ads</option>
+                <option value="Google Ads">Google Ads</option>
+                <option value="SEO">SEO</option>
+                <option value="Website Development">Website Development</option>
+                <option value="Website Update">Website Update</option>
+                <option value="Script Writing">Script Writing</option>
+                <option value="Other">Other</option>
+              </select>
             </div>
           </div>
 
-          {/* Daily KPI Summary */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
-            <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
-              <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496]">Tasks Completed</span>
-              <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1 block">{dailyRecords.completedTasks.length}</span>
+          {/* ── 2. COMPACT SUMMARY METRIC CARDS (Step 7 & 9) ──────────── */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
+            {/* Card 1: Completed Today */}
+            <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-emerald-200 dark:border-emerald-950/60 shadow-2xs flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-400 block">
+                  Completed Today
+                </span>
+                <span className="text-2xl font-black text-emerald-700 dark:text-emerald-400 mt-1 block">
+                  {classifiedDaily.summary.completedTodayCount}
+                </span>
+                <span className="text-[10px] font-bold text-[#64748B]">
+                  {formatDurationHours(classifiedDaily.completedTodayTotalHours)} tracked
+                </span>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 flex items-center justify-center shrink-0">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
             </div>
-            <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
-              <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496]">Tasks Pending</span>
-              <span className="text-2xl font-black text-amber-600 dark:text-amber-400 mt-1 block">{dailyRecords.pendingTasks.length}</span>
+
+            {/* Card 2: Worked On Today */}
+            <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-blue-200 dark:border-blue-950/60 shadow-2xs flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-wider text-blue-700 dark:text-blue-400 block">
+                  Worked On Today
+                </span>
+                <span className="text-2xl font-black text-blue-700 dark:text-blue-400 mt-1 block">
+                  {classifiedDaily.summary.workedOnTodayCount}
+                </span>
+                <span className="text-[10px] font-bold text-[#64748B]">
+                  Ongoing / active today
+                </span>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 flex items-center justify-center shrink-0">
+                <Clock className="w-5 h-5" />
+              </div>
             </div>
-            <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
-              <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496]">Hours Logged</span>
-              <span className="text-2xl font-black text-[#5B4BFF] mt-1 block">{dailyRecords.totalHours} hrs</span>
+
+            {/* Card 3: Pending Tasks */}
+            <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-amber-200 dark:border-amber-950/60 shadow-2xs flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-400 block">
+                  Pending Tasks
+                </span>
+                <span className="text-2xl font-black text-amber-700 dark:text-amber-400 mt-1 block">
+                  {classifiedDaily.summary.pendingCount}
+                </span>
+                <span className="text-[10px] font-bold text-[#64748B]">
+                  {classifiedDaily.newPending.length} new · {classifiedDaily.previousPending.length} carried
+                </span>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 flex items-center justify-center shrink-0">
+                <Layers className="w-5 h-5" />
+              </div>
             </div>
-            <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
-              <span className="text-[10px] font-black uppercase tracking-wider text-[#7A8496]">Deliverables Published</span>
-              <span className="text-2xl font-black text-purple-600 dark:text-purple-400 mt-1 block">{dailyRecords.publishedContent.length}</span>
+
+            {/* Card 4: Overdue */}
+            <div className={`p-4 rounded-2xl border shadow-2xs flex items-center justify-between transition-all ${
+              classifiedDaily.summary.overdueCount > 0 
+                ? 'bg-rose-50/40 dark:bg-rose-950/20 border-rose-300 dark:border-rose-900/60' 
+                : 'bg-white dark:bg-[#111728] border-slate-200 dark:border-white/10'
+            }`}>
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-wider text-rose-700 dark:text-rose-400 block">
+                  Overdue Tasks
+                </span>
+                <span className="text-2xl font-black text-rose-700 dark:text-rose-400 mt-1 block">
+                  {classifiedDaily.summary.overdueCount}
+                </span>
+                <span className="text-[10px] font-bold text-rose-600 dark:text-rose-300">
+                  {classifiedDaily.highPriorityOverdueCount > 0 ? `⚠️ ${classifiedDaily.highPriorityOverdueCount} High/Urgent` : 'No urgent overdue'}
+                </span>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-rose-100 dark:bg-rose-950/50 text-rose-600 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+            </div>
+
+            {/* Card 5: Total Time Logged */}
+            <div className="bg-white dark:bg-[#111728] p-4 rounded-2xl border border-purple-200 dark:border-purple-950/60 shadow-2xs flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-wider text-[#5B4BFF] dark:text-[#806CFF] block">
+                  Total Time Logged
+                </span>
+                <span className="text-2xl font-black text-[#5B4BFF] dark:text-[#806CFF] mt-1 block">
+                  {classifiedDaily.summary.totalTimeLoggedFormatted}
+                </span>
+                <span className="text-[10px] font-bold text-[#64748B]">
+                  Verified active work
+                </span>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-[#5B4BFF] flex items-center justify-center shrink-0">
+                <Timer className="w-5 h-5" />
+              </div>
             </div>
           </div>
 
-          {/* Employee Daily Report Submission Card */}
+          {/* Secondary Stats Chips (Step 9) */}
+          <div className="flex items-center gap-2.5 flex-wrap text-xs font-bold text-[#64748B]">
+            <span className="px-3 py-1 rounded-lg bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/5">
+              Assigned Today: <strong className="text-[#101828] dark:text-white">{classifiedDaily.summary.totalTasksAssignedToday}</strong>
+            </span>
+            <span className="px-3 py-1 rounded-lg bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/5">
+              Carried Forward: <strong className="text-amber-600">{classifiedDaily.summary.pendingCarriedForwardCount}</strong>
+            </span>
+            <span className="px-3 py-1 rounded-lg bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/5">
+              Overdue: <strong className="text-rose-600">{classifiedDaily.summary.overdueCount}</strong>
+            </span>
+            {classifiedDaily.summary.missingTimeRecordsCount > 0 ? (
+              <span className="px-3 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900/40">
+                ⚠️ {classifiedDaily.summary.missingTimeRecordsCount} completed tasks missing active duration
+              </span>
+            ) : (
+              <span className="px-3 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/40">
+                ✓ All completed tasks have verified time logs
+              </span>
+            )}
+          </div>
+
+          {/* Factual Daily Summary Banner (Step 9) */}
+          <div className="p-3.5 rounded-2xl bg-[#EEECFF] dark:bg-[#1E1B4B]/50 border border-[#D8DEE9] dark:border-[#5B4BFF]/30 flex items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2.5">
+              <Sparkles className="w-4 h-4 text-[#5B4BFF] shrink-0" />
+              <span className="font-bold text-[#1E1B4B] dark:text-[#E0E7FF]">
+                {classifiedDaily.summary.factualDailySummary}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard.writeText(classifiedDaily.summary.factualDailySummary);
+                showToast('success', 'Copied daily summary to clipboard');
+              }}
+              className="p-1.5 rounded-lg bg-white/70 dark:bg-white/10 hover:bg-white text-[#5B4BFF] cursor-pointer"
+              title="Copy Summary Text"
+            >
+              <Copy className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* ── 3. SECTION 1: COMPLETED TODAY (Step 2, 4, 5, 7) ────────── */}
+          <div className="bg-white dark:bg-[#111728] p-5 rounded-3xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                <h3 className="text-sm font-black text-[#101828] dark:text-white">
+                  Section 1 — Completed Today ({classifiedDaily.completedToday.length})
+                </h3>
+              </div>
+              <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                Total Time: {formatDurationHours(classifiedDaily.completedTodayTotalHours)}
+              </span>
+            </div>
+
+            {classifiedDaily.completedToday.length === 0 ? (
+              <p className="text-xs text-[#64748B] py-4 text-center bg-slate-50 dark:bg-[#161B31] rounded-2xl">
+                No tasks completed on this date.
+              </p>
+            ) : (
+              <div className="overflow-x-auto rounded-2xl border border-[#E2E8F0] dark:border-white/5">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-[#F8FAFC] dark:bg-[#161B31] text-[10px] font-black uppercase text-[#7A8496] border-b border-[#E2E8F0] dark:border-white/10">
+                    <tr>
+                      <th className="py-2.5 px-3">Task Title</th>
+                      <th className="py-2.5 px-3">Client</th>
+                      <th className="py-2.5 px-3">Category</th>
+                      <th className="py-2.5 px-3">Priority</th>
+                      <th className="py-2.5 px-3">Active Duration</th>
+                      <th className="py-2.5 px-3">Completed Date</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#E2E8F0] dark:divide-white/5 font-medium">
+                    {classifiedDaily.completedToday.map(item => (
+                      <tr key={item.task.id} className="hover:bg-slate-50/60 dark:hover:bg-white/5 transition-colors">
+                        <td className="py-2.5 px-3 font-bold text-[#101828] dark:text-white">
+                          {item.task.title}
+                        </td>
+                        <td className="py-2.5 px-3 text-[#64748B] dark:text-[#94A3B8]">
+                          {item.task.clientName || 'General'}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 dark:bg-white/5 text-[#475467] dark:text-[#CBD5E1]">
+                            {item.task.category || 'General'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span
+                            className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider inline-block border"
+                            style={{
+                              color: item.priorityColor,
+                              backgroundColor: item.priorityBg,
+                              borderColor: item.priorityBorder
+                            }}
+                          >
+                            {item.task.priority || 'Medium'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className={`font-bold ${item.durationHours === null ? 'text-[#94A3B8]' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                            {item.durationFormatted}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-[#64748B]">
+                          {item.completedDateKolkata || classifiedDaily.targetDate}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* ── 4. SECTION 2: WORKED ON TODAY (Step 2, 5, 7) ──────────── */}
+          <div className="bg-white dark:bg-[#111728] p-5 rounded-3xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></span>
+                <h3 className="text-sm font-black text-[#101828] dark:text-white">
+                  Section 2 — Worked On Today (Ongoing / In-Progress: {classifiedDaily.workedOnToday.length})
+                </h3>
+              </div>
+              <span className="text-xs font-bold text-blue-600 dark:text-blue-400">
+                Tracked Today: {formatDurationHours(classifiedDaily.workedOnTodayTotalHours)}
+              </span>
+            </div>
+
+            {classifiedDaily.workedOnToday.length === 0 ? (
+              <p className="text-xs text-[#64748B] py-4 text-center bg-slate-50 dark:bg-[#161B31] rounded-2xl">
+                No ongoing tasks worked on today.
+              </p>
+            ) : (
+              <div className="overflow-x-auto rounded-2xl border border-[#E2E8F0] dark:border-white/5">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-[#F8FAFC] dark:bg-[#161B31] text-[10px] font-black uppercase text-[#7A8496] border-b border-[#E2E8F0] dark:border-white/10">
+                    <tr>
+                      <th className="py-2.5 px-3">Task Title</th>
+                      <th className="py-2.5 px-3">Client</th>
+                      <th className="py-2.5 px-3">Category</th>
+                      <th className="py-2.5 px-3">Status</th>
+                      <th className="py-2.5 px-3">Priority</th>
+                      <th className="py-2.5 px-3">Today Tracked Time</th>
+                      <th className="py-2.5 px-3 text-right">Quick Timer</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#E2E8F0] dark:divide-white/5 font-medium">
+                    {classifiedDaily.workedOnToday.map(item => {
+                      const session = getTaskTimerSession(item.task.id);
+                      const isRunning = Boolean(session?.isRunning);
+
+                      return (
+                        <tr key={item.task.id} className="hover:bg-slate-50/60 dark:hover:bg-white/5 transition-colors">
+                          <td className="py-2.5 px-3 font-bold text-[#101828] dark:text-white">
+                            {item.task.title}
+                          </td>
+                          <td className="py-2.5 px-3 text-[#64748B]">
+                            {item.task.clientName || 'General'}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 dark:bg-white/5 text-[#475467]">
+                              {item.task.category || 'General'}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
+                              {item.task.status}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span
+                              className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider inline-block border"
+                              style={{
+                                color: item.priorityColor,
+                                backgroundColor: item.priorityBg,
+                                borderColor: item.priorityBorder
+                              }}
+                            >
+                              {item.task.priority || 'Medium'}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 font-bold text-blue-600 dark:text-blue-400">
+                            {item.durationFormatted}
+                          </td>
+                          <td className="py-2.5 px-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleTimer(item.task)}
+                                className={`px-2 py-1 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer transition-all ${
+                                  isRunning 
+                                    ? 'bg-amber-500 text-white shadow-2xs animate-pulse'
+                                    : 'bg-slate-100 dark:bg-white/10 text-[#475467] dark:text-[#CBD5E1] hover:bg-emerald-50 hover:text-emerald-600'
+                                }`}
+                              >
+                                {isRunning ? <Pause className="w-2.5 h-2.5" /> : <Play className="w-2.5 h-2.5" />}
+                                <span>{isRunning ? 'Pause' : 'Start'}</span>
+                              </button>
+                              {session && (session.accumulatedSeconds > 0 || isRunning) && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleStopTimer(item.task.id)}
+                                  className="px-2 py-1 rounded-lg text-[10px] font-black bg-rose-50 text-rose-600 hover:bg-rose-100 flex items-center gap-1 cursor-pointer"
+                                  title="Log and clear active timer"
+                                >
+                                  <Square className="w-2.5 h-2.5" />
+                                  <span>Stop</span>
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* ── 5. SECTION 3: NEW PENDING TASKS ASSIGNED TODAY (Step 3 & 7) */}
+          <div className="bg-white dark:bg-[#111728] p-5 rounded-3xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
+                <h3 className="text-sm font-black text-[#101828] dark:text-white">
+                  Section 3 — New Pending Tasks Assigned Today ({classifiedDaily.newPending.length})
+                </h3>
+              </div>
+              <span className="text-xs text-[#64748B]">Created on {classifiedDaily.targetDate}</span>
+            </div>
+
+            {classifiedDaily.newPending.length === 0 ? (
+              <p className="text-xs text-[#64748B] py-4 text-center bg-slate-50 dark:bg-[#161B31] rounded-2xl">
+                No new pending tasks assigned on this date.
+              </p>
+            ) : (
+              <div className="overflow-x-auto rounded-2xl border border-[#E2E8F0] dark:border-white/5">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-[#F8FAFC] dark:bg-[#161B31] text-[10px] font-black uppercase text-[#7A8496] border-b border-[#E2E8F0] dark:border-white/10">
+                    <tr>
+                      <th className="py-2.5 px-3">Task Title</th>
+                      <th className="py-2.5 px-3">Client</th>
+                      <th className="py-2.5 px-3">Category</th>
+                      <th className="py-2.5 px-3">Priority</th>
+                      <th className="py-2.5 px-3">Due Date</th>
+                      <th className="py-2.5 px-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#E2E8F0] dark:divide-white/5 font-medium">
+                    {classifiedDaily.newPending.map(item => (
+                      <tr key={item.task.id} className="hover:bg-slate-50/60 dark:hover:bg-white/5 transition-colors">
+                        <td className="py-2.5 px-3 font-bold text-[#101828] dark:text-white">
+                          {item.task.title}
+                        </td>
+                        <td className="py-2.5 px-3 text-[#64748B]">
+                          {item.task.clientName || 'General'}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 dark:bg-white/5 text-[#475467]">
+                            {item.task.category || 'General'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span
+                            className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider inline-block border"
+                            style={{
+                              color: item.priorityColor,
+                              backgroundColor: item.priorityBg,
+                              borderColor: item.priorityBorder
+                            }}
+                          >
+                            {item.task.priority || 'Medium'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-[#64748B]">
+                          {item.dueDateKolkata || 'No Deadline'}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300">
+                            Assigned Today
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* ── 6. SECTION 4: PREVIOUS PENDING & OVERDUE TASKS (Step 3 & 7) */}
+          <div className="bg-white dark:bg-[#111728] p-5 rounded-3xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+                <h3 className="text-sm font-black text-[#101828] dark:text-white">
+                  Section 4 — Previous Pending & Overdue Tasks ({classifiedDaily.overdue.length} overdue · {classifiedDaily.previousPending.length} carried forward)
+                </h3>
+              </div>
+              <span className="text-xs text-[#64748B]">Non-overlapping pending tasks</span>
+            </div>
+
+            {classifiedDaily.overdue.length === 0 && classifiedDaily.previousPending.length === 0 ? (
+              <p className="text-xs text-[#64748B] py-4 text-center bg-slate-50 dark:bg-[#161B31] rounded-2xl">
+                No overdue or carried forward pending tasks.
+              </p>
+            ) : (
+              <div className="overflow-x-auto rounded-2xl border border-[#E2E8F0] dark:border-white/5">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-[#F8FAFC] dark:bg-[#161B31] text-[10px] font-black uppercase text-[#7A8496] border-b border-[#E2E8F0] dark:border-white/10">
+                    <tr>
+                      <th className="py-2.5 px-3">Task Title</th>
+                      <th className="py-2.5 px-3">Client</th>
+                      <th className="py-2.5 px-3">Category</th>
+                      <th className="py-2.5 px-3">Priority</th>
+                      <th className="py-2.5 px-3">Due Date</th>
+                      <th className="py-2.5 px-3">Ageing / Status</th>
+                      <th className="py-2.5 px-3">Blocked Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#E2E8F0] dark:divide-white/5 font-medium">
+                    {/* Overdue tasks first */}
+                    {classifiedDaily.overdue.map(item => (
+                      <tr key={item.task.id} className="bg-rose-50/20 dark:bg-rose-950/10 hover:bg-rose-50/40 transition-colors">
+                        <td className="py-2.5 px-3 font-bold text-rose-900 dark:text-rose-200">
+                          {item.task.title}
+                        </td>
+                        <td className="py-2.5 px-3 text-[#64748B]">
+                          {item.task.clientName || 'General'}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 dark:bg-white/5 text-[#475467]">
+                            {item.task.category || 'General'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span
+                            className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider inline-block border"
+                            style={{
+                              color: item.priorityColor,
+                              backgroundColor: item.priorityBg,
+                              borderColor: item.priorityBorder
+                            }}
+                          >
+                            {item.task.priority || 'Medium'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 font-black text-rose-600 dark:text-rose-400">
+                          {item.dueDateKolkata}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase bg-rose-600 text-white">
+                            {item.daysOverdue} Days Overdue
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          {item.isBlocked ? (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-800">
+                              Blocked
+                            </span>
+                          ) : (
+                            <span className="text-[#94A3B8] text-[11px]">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+
+                    {/* Previous Pending carried forward */}
+                    {classifiedDaily.previousPending.map(item => (
+                      <tr key={item.task.id} className="hover:bg-slate-50/60 dark:hover:bg-white/5 transition-colors">
+                        <td className="py-2.5 px-3 font-bold text-[#101828] dark:text-white">
+                          {item.task.title}
+                        </td>
+                        <td className="py-2.5 px-3 text-[#64748B]">
+                          {item.task.clientName || 'General'}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 dark:bg-white/5 text-[#475467]">
+                            {item.task.category || 'General'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span
+                            className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider inline-block border"
+                            style={{
+                              color: item.priorityColor,
+                              backgroundColor: item.priorityBg,
+                              borderColor: item.priorityBorder
+                            }}
+                          >
+                            {item.task.priority || 'Medium'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-[#64748B]">
+                          {item.dueDateKolkata || 'No Deadline'}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                            {item.daysPending} days pending
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          {item.isBlocked ? (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-800">
+                              Blocked
+                            </span>
+                          ) : (
+                            <span className="text-[#94A3B8] text-[11px]">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* ── 7. SECTION 5: DAILY TIME SUMMARY (Step 5 & 7) ─────────── */}
+          <div className="bg-white dark:bg-[#111728] p-5 rounded-3xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-purple-500"></span>
+                <h3 className="text-sm font-black text-[#101828] dark:text-white">
+                  Section 5 — Daily Time Summary ({classifiedDaily.timeBreakdown.length} records)
+                </h3>
+              </div>
+              <span className="text-xs font-black text-[#5B4BFF] dark:text-[#806CFF]">
+                Total: {classifiedDaily.summary.totalTimeLoggedFormatted}
+              </span>
+            </div>
+
+            {classifiedDaily.timeBreakdown.length === 0 ? (
+              <p className="text-xs text-[#64748B] py-4 text-center bg-slate-50 dark:bg-[#161B31] rounded-2xl">
+                No active work time recorded for this date.
+              </p>
+            ) : (
+              <div className="overflow-x-auto rounded-2xl border border-[#E2E8F0] dark:border-white/5">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-[#F8FAFC] dark:bg-[#161B31] text-[10px] font-black uppercase text-[#7A8496] border-b border-[#E2E8F0] dark:border-white/10">
+                    <tr>
+                      <th className="py-2.5 px-3">Task / Work Activity</th>
+                      <th className="py-2.5 px-3">Client</th>
+                      <th className="py-2.5 px-3">Category</th>
+                      <th className="py-2.5 px-3">Status</th>
+                      <th className="py-2.5 px-3 text-right">Active Duration</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#E2E8F0] dark:divide-white/5 font-medium">
+                    {classifiedDaily.timeBreakdown.map(tb => (
+                      <tr key={tb.taskId} className="hover:bg-slate-50/60 dark:hover:bg-white/5 transition-colors">
+                        <td className="py-2.5 px-3 font-bold text-[#101828] dark:text-white">
+                          {tb.taskTitle}
+                        </td>
+                        <td className="py-2.5 px-3 text-[#64748B]">
+                          {tb.clientName}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 dark:bg-white/5 text-[#475467]">
+                            {tb.category}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 dark:bg-white/5 text-[#475467]">
+                            {tb.status}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-black text-[#5B4BFF] dark:text-[#806CFF]">
+                          {tb.formatted}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* ── 8. EMPLOYEE DAILY REPORT SUBMISSION CARD ────────────────── */}
           <div className="bg-white dark:bg-[#111728] p-6 rounded-3xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-[#E2E8F0] dark:border-white/10">
               <div className="flex items-center gap-2.5">
@@ -1341,7 +2237,7 @@ export const ReportsView: React.FC = () => {
 
             <div className="flex items-center justify-between pt-2">
               <span className="text-xs text-[#64748B]">
-                Auto-calculated today: <strong>{dailyRecords.completedTasks.length} tasks completed</strong> • <strong>{dailyRecords.totalHours} hrs logged</strong>
+                Auto-calculated today: <strong>{classifiedDaily.completedToday.length} tasks completed</strong> • <strong>{classifiedDaily.summary.totalTimeLoggedFormatted} logged</strong>
               </span>
 
               <div className="flex items-center gap-2">
@@ -1364,49 +2260,6 @@ export const ReportsView: React.FC = () => {
                 </button>
               </div>
             </div>
-          </div>
-
-          {/* Operational Tasks for Selected Date */}
-          <div className="bg-white dark:bg-[#111728] p-5 rounded-3xl border border-[#D8DEE9] dark:border-white/10 shadow-2xs">
-            <h3 className="text-sm font-black text-[#101828] dark:text-white mb-3">
-              Operational Tasks on {selectedDailyDate} ({dailyRecords.tasks.length})
-            </h3>
-            {dailyRecords.tasks.length === 0 ? (
-              <p className="text-xs text-[#64748B] py-4 text-center">No tasks scheduled or completed on this date.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs text-left">
-                  <thead className="bg-[#F8FAFC] dark:bg-[#161B31] text-[10px] font-black uppercase text-[#7A8496] border-b border-[#E2E8F0] dark:border-white/10">
-                    <tr>
-                      <th className="py-2 px-3">Task Title</th>
-                      <th className="py-2 px-3">Client</th>
-                      <th className="py-2 px-3">Assignee</th>
-                      <th className="py-2 px-3">Category</th>
-                      <th className="py-2 px-3">Status</th>
-                      <th className="py-2 px-3">Priority</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#E2E8F0] dark:divide-white/5 font-medium">
-                    {dailyRecords.tasks.map(t => (
-                      <tr key={t.id} className="hover:bg-slate-50/50 dark:hover:bg-white/5">
-                        <td className="py-2.5 px-3 font-bold text-[#101828] dark:text-white">{t.title}</td>
-                        <td className="py-2.5 px-3">{t.clientName || 'General'}</td>
-                        <td className="py-2.5 px-3">{t.assigneeName || 'Unassigned'}</td>
-                        <td className="py-2.5 px-3">{t.category}</td>
-                        <td className="py-2.5 px-3">
-                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                            t.status === 'Done' ? 'bg-emerald-50 text-emerald-700' : 'bg-indigo-50 text-indigo-700'
-                          }`}>
-                            {t.status}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3">{t.priority}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -1945,6 +2798,65 @@ export const ReportsView: React.FC = () => {
               >
                 Mark as Reviewed
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── PDF PREVIEW MODAL (Step 7 & 8) ───────────────────────────── */}
+      {pdfPreviewBlobUrl && (
+        <div className="fixed inset-0 z-99999 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 animate-in fade-in">
+          <div className="bg-white dark:bg-[#111728] border border-[#D8DEE9] dark:border-white/10 rounded-3xl w-full max-w-6xl h-[92vh] flex flex-col shadow-2xl overflow-hidden">
+            {/* Modal Top Bar */}
+            <div className="p-4 px-6 border-b border-[#E2E8F0] dark:border-white/10 flex items-center justify-between gap-4 bg-slate-50/50 dark:bg-white/5">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-[#5B4BFF]/10 text-[#5B4BFF] flex items-center justify-center font-bold">
+                  <FileText className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-[#101828] dark:text-white">
+                    Live PDF Preview — Employee Daily Report 2.0
+                  </h3>
+                  <p className="text-[11px] text-[#64748B]">
+                    A4 Landscape • Authoritative Agency OS Format • Identical to Downloaded File
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => triggerPrintReport()}
+                  className="px-3 py-1.5 rounded-xl bg-white dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 text-xs font-bold text-[#475467] dark:text-[#CBD5E1] hover:bg-slate-50 flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleExportDaily('pdf')}
+                  className="px-4 py-1.5 rounded-xl bg-[#5B4BFF] hover:bg-[#4E3FE6] text-white text-xs font-black flex items-center gap-1.5 shadow-md shadow-[#5B4BFF]/25 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download PDF</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPdfPreviewBlobUrl(null)}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-white/10 ml-2"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Embedded Iframe Preview */}
+            <div className="flex-1 w-full bg-slate-100 dark:bg-[#0B0F19] p-2">
+              <iframe
+                src={pdfPreviewBlobUrl}
+                title="Employee Daily Report PDF Preview"
+                className="w-full h-full rounded-2xl border-0 shadow-inner"
+              />
             </div>
           </div>
         </div>

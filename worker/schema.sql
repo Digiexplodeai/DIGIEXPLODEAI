@@ -193,8 +193,23 @@ CREATE TABLE IF NOT EXISTS users (
   role        TEXT DEFAULT 'employee',
   department  TEXT DEFAULT '',
   clientId    TEXT DEFAULT '',
+  tokensValidAfter TEXT DEFAULT '',
   createdAt   TEXT NOT NULL,
   updatedAt   TEXT NOT NULL
+);
+
+-- 12. PASSWORD RESETS (Zero-Trust Multi-Channel Recovery & OTP)
+CREATE TABLE IF NOT EXISTS passwordResets (
+  id           TEXT PRIMARY KEY,
+  identifier   TEXT NOT NULL,
+  targetType   TEXT NOT NULL,
+  tokenHash    TEXT NOT NULL,
+  role         TEXT DEFAULT 'employee',
+  resetAuth    TEXT DEFAULT '',
+  expiresAt    INTEGER NOT NULL,
+  usedAt       INTEGER DEFAULT 0,
+  attempts     INTEGER DEFAULT 0,
+  createdAt    TEXT NOT NULL
 );
 
 -- Indexes for common queries
@@ -207,9 +222,19 @@ CREATE INDEX IF NOT EXISTS idx_calendar_date ON contentCalendar(scheduledDate);
 CREATE INDEX IF NOT EXISTS idx_worklogs_employeeId ON workLogs(employeeId);
 CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance(date);
 CREATE INDEX IF NOT EXISTS idx_attendance_employeeId ON attendance(employeeId);
+CREATE INDEX IF NOT EXISTS idx_passwordResets_ident ON passwordResets(identifier);
+
+-- 13. SYSTEM SETTINGS (Role Permissions & Platform Configuration)
+CREATE TABLE IF NOT EXISTS system_settings (
+  key          TEXT PRIMARY KEY,
+  value        TEXT NOT NULL,
+  updatedAt    TEXT NOT NULL
+);
 
 -- Initial Clients
 INSERT OR IGNORE INTO clients (clientId, clientName, businessName, category, contactPerson, phone, email, package, startDate, status, createdAt, updatedAt)
 VALUES 
   ('client_001', 'DigiExplode Media', 'DigiExplode Media Pvt Ltd', 'Marketing & Advertising', 'Priyanshu', '+91 9876543210', 'admin@digiexplode.ai', 'Premium', '2026-01-01', 'Active', datetime('now'), datetime('now')),
   ('client_002', 'Apex Healthcare', 'Apex Health Clinic', 'Healthcare', 'Dr. Sharma', '+91 9876543211', 'contact@apexhealth.com', 'Growth', '2026-02-15', 'Active', datetime('now'), datetime('now'));
+
+

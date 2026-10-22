@@ -35,6 +35,11 @@ import {
   canManageHRDocuments,
   normalizeRole,
 } from './rbac';
+import {
+  handleRecoveryRequest,
+  handleRecoveryVerify,
+  handleRecoveryReset,
+} from './recovery';
 
 export type { Env, AuthenticatedUser };
 
@@ -112,6 +117,48 @@ export default {
     // 2. Health check (Public uptime monitoring)
     if (resource === 'health') {
       return json({ status: 'ok', timestamp: new Date().toISOString(), db: 'D1' }, 200, cors);
+    }
+
+    // 2b. Public Password Recovery & OTP endpoints (Zero-Trust Verified)
+    if (resource === 'auth') {
+      const action = parts[1]; // e.g. 'recovery'
+      const subAction = parts[2]; // e.g. 'request', 'verify', 'reset'
+
+      if (action === 'recovery') {
+        let body: any = {};
+        if (['POST', 'PUT'].includes(method)) {
+          try { body = await request.json(); } catch {}
+        }
+
+        if (subAction === 'request' && method === 'POST') {
+          try {
+            const res = await handleRecoveryRequest(body, env);
+            return json(res, 200, cors);
+          } catch (e: any) {
+            return json({ success: false, error: e.message || 'Recovery request failed' }, 400, cors);
+          }
+        }
+
+        if (subAction === 'verify' && method === 'POST') {
+          try {
+            const res = await handleRecoveryVerify(body, env);
+            return json(res, res.success ? 200 : 400, cors);
+          } catch (e: any) {
+            return json({ success: false, error: e.message || 'Verification failed' }, 400, cors);
+          }
+        }
+
+        if (subAction === 'reset' && method === 'POST') {
+          try {
+            const res = await handleRecoveryReset(body, env);
+            return json(res, res.success ? 200 : 400, cors);
+          } catch (e: any) {
+            return json({ success: false, error: e.message || 'Password reset failed' }, 400, cors);
+          }
+        }
+      }
+
+      return notFound('Auth endpoint not found', cors);
     }
 
     // 3. Authenticate all protected API routes
@@ -944,6 +991,50 @@ export default {
               body.department||'', body.clientId||'', now, id
             ).run();
             return json({ success: true, role: targetRole }, 200, cors);
+          }
+          break;
+        }
+
+        // ── SYSTEM CONFIGURATION & PERMISSIONS ────────────────────────
+        case 'system': {
+          if (id === 'permissions') {
+            if (method === 'GET') {
+              try {
+                const row = await env.DB.prepare(
+                  "SELECT value FROM system_settings WHERE key = 'role_permissions'"
+                ).first<{ value: string }>();
+                if (row && row.value) {
+                  return json(JSON.parse(row.value), 200, cors);
+                }
+              } catch (e) {
+                // Table might not exist yet in dev
+              }
+              return json(null, 200, cors);
+            }
+
+            if (method === 'POST') {
+              if (!hasRole(user, 'superAdmin', env)) {
+                return forbidden('Super Admin authorization required to update platform permissions', cors);
+              }
+              const now = new Date().toISOString();
+              try {
+                await env.DB.prepare(`
+                  CREATE TABLE IF NOT EXISTS system_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updatedAt TEXT NOT NULL
+                  )
+                `).run();
+                await env.DB.prepare(`
+                  INSERT INTO system_settings (key, value, updatedAt)
+                  VALUES ('role_permissions', ?, ?)
+                  ON CONFLICT(key) DO UPDATE SET value=excluded.value, updatedAt=excluded.updatedAt
+                `).bind(JSON.stringify(body), now).run();
+              } catch (e: any) {
+                console.warn('System settings D1 persistence notice:', e);
+              }
+              return json({ success: true, updatedAt: now }, 200, cors);
+            }
           }
           break;
         }

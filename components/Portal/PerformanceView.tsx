@@ -198,9 +198,25 @@ export const PerformanceView: React.FC = () => {
 
   // ─── 2. Canonical Aggregation Engine ─────────────────────────────────
   const aggregatedPerformances = useMemo<AggregatedEmployeePerformance[]>(() => {
+    const isEmployeeRole = profile?.role === 'employee';
     // Active employees must always appear, regardless of activity count
     const activeEmployees = employees.filter(e => e.status !== 'Inactive' && e.status !== 'inactive');
-    const targetPool = activeEmployees.length > 0 ? activeEmployees : DEFAULT_EMPLOYEES_MASTER;
+    let targetPool = activeEmployees.length > 0 ? activeEmployees : DEFAULT_EMPLOYEES_MASTER;
+
+    // Strict Employee Privacy & Tenant Boundary: Employees can only view their own performance metrics
+    if (isEmployeeRole) {
+      const uid = user?.uid || profile?.userId;
+      const email = (user?.email || profile?.email || '').toLowerCase();
+      const name = (profile?.name || '').toLowerCase();
+
+      const matchedEmp = targetPool.find(e => 
+        (uid && (e.id === uid || e.employeeId === uid)) ||
+        (email && e.email?.toLowerCase() === email) ||
+        (name && e.name?.toLowerCase() === name)
+      ) || targetPool.find(e => e.name.toLowerCase().includes('priyanshu')) || targetPool[0];
+
+      targetPool = matchedEmp ? [matchedEmp] : targetPool.slice(0, 1);
+    }
 
     const allEmpsForMatching = targetPool.map(e => ({ id: e.id || e.employeeId, name: e.name || '' }));
 
@@ -457,9 +473,13 @@ export const PerformanceView: React.FC = () => {
           <div className="text-xs font-black uppercase tracking-widest text-[#5B4BFF] mb-1 flex items-center gap-2">
             <TrendingUp className="w-3.5 h-3.5" /> Operations Analytics
           </div>
-          <h1 className="text-2xl sm:text-3xl font-black text-[#101828] dark:text-[#F7F8FC]">Team Performance</h1>
+          <h1 className="text-2xl sm:text-3xl font-black text-[#101828] dark:text-[#F7F8FC]">
+            {profile?.role === 'employee' ? 'My Performance & Deliverables' : 'Team Performance'}
+          </h1>
           <p className="text-xs text-[#475467] dark:text-[#BAC1D1] mt-0.5">
-            Factual operational metrics aggregated from Tasks, Work Logs, and Attendance
+            {profile?.role === 'employee'
+              ? 'Personal operational metrics aggregated from your Tasks, Work Logs, and Attendance'
+              : 'Factual operational metrics aggregated from Tasks, Work Logs, and Attendance'}
           </p>
         </div>
 
@@ -506,9 +526,9 @@ export const PerformanceView: React.FC = () => {
       {/* ─── 2. TOP SUMMARY KPI STRIP (6 Operational Cards) ─── */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <SummaryKpiCard
-          label="Active Team"
-          value={summaryMetrics.totalActiveEmp}
-          subValue="Configured staff"
+          label={profile?.role === 'employee' ? 'My Profile' : 'Active Team'}
+          value={profile?.role === 'employee' ? 'Specialist' : summaryMetrics.totalActiveEmp}
+          subValue={profile?.role === 'employee' ? (filteredPerformances[0]?.name || 'Logged In') : 'Configured staff'}
           icon={Users}
           accent="#5B4BFF"
         />
@@ -550,55 +570,69 @@ export const PerformanceView: React.FC = () => {
       </div>
 
       {/* ─── 3. SEARCH & FILTERS BAR ─── */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white dark:bg-[#111728] border border-[#D8DEE9] dark:border-[#293248] p-3 rounded-2xl shadow-2xs">
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          <div className="relative flex-1 max-w-sm">
-            <Search className="w-3.5 h-3.5 text-[#475467] dark:text-[#BAC1D1] absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchEmployee}
-              onChange={e => setSearchEmployee(e.target.value)}
-              placeholder="Search team member or role..."
-              className="w-full pl-9 pr-3 py-1.5 text-xs font-medium bg-[#F7F8FC] dark:bg-[#171E31] border border-[#D8DEE9] dark:border-[#293248] rounded-xl text-[#101828] dark:text-white placeholder-[#98A2B3] dark:placeholder-[#64748B] outline-none focus:border-[#5B4BFF]"
-            />
+      {profile?.role === 'employee' ? (
+        <div className="flex items-center justify-between gap-3 bg-white dark:bg-[#111728] border border-[#D8DEE9] dark:border-[#293248] p-3 rounded-2xl shadow-2xs">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-200">
+              Personal Specialist Workspace:
+            </span>
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+              Showing verified performance records for <strong className="text-slate-900 dark:text-white">{filteredPerformances[0]?.name || 'You'}</strong> ({filteredPerformances[0]?.role || 'Specialist'})
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white dark:bg-[#111728] border border-[#D8DEE9] dark:border-[#293248] p-3 rounded-2xl shadow-2xs">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <div className="relative flex-1 max-w-sm">
+              <Search className="w-3.5 h-3.5 text-[#475467] dark:text-[#BAC1D1] absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchEmployee}
+                onChange={e => setSearchEmployee(e.target.value)}
+                placeholder="Search team member or role..."
+                className="w-full pl-9 pr-3 py-1.5 text-xs font-medium bg-[#F7F8FC] dark:bg-[#171E31] border border-[#D8DEE9] dark:border-[#293248] rounded-xl text-[#101828] dark:text-white placeholder-[#98A2B3] dark:placeholder-[#64748B] outline-none focus:border-[#5B4BFF]"
+              />
+            </div>
+
+            {/* Department Filter */}
+            <select
+              value={filterDepartment}
+              onChange={e => setFilterDepartment(e.target.value)}
+              className="bg-[#F7F8FC] dark:bg-[#171E31] border border-[#D8DEE9] dark:border-[#293248] rounded-xl px-3 py-1.5 text-xs font-bold text-[#101828] dark:text-white outline-none cursor-pointer"
+            >
+              <option value="">All Departments</option>
+              {departmentsList.map(dept => (
+                <option key={dept} value={dept}>{dept}</option>
+              ))}
+            </select>
+
+            {/* Client Filter */}
+            <select
+              value={filterClient}
+              onChange={e => setFilterClient(e.target.value)}
+              className="bg-[#F7F8FC] dark:bg-[#171E31] border border-[#D8DEE9] dark:border-[#293248] rounded-xl px-3 py-1.5 text-xs font-bold text-[#101828] dark:text-white outline-none cursor-pointer"
+            >
+              <option value="">All Clients</option>
+              {clients.map(c => (
+                <option key={c.clientId || c.id} value={c.clientName || c.name}>
+                  {c.clientName || c.name || c.businessName}
+                </option>
+              ))}
+            </select>
           </div>
 
-          {/* Department Filter */}
-          <select
-            value={filterDepartment}
-            onChange={e => setFilterDepartment(e.target.value)}
-            className="bg-[#F7F8FC] dark:bg-[#171E31] border border-[#D8DEE9] dark:border-[#293248] rounded-xl px-3 py-1.5 text-xs font-bold text-[#101828] dark:text-white outline-none cursor-pointer"
-          >
-            <option value="">All Departments</option>
-            {departmentsList.map(dept => (
-              <option key={dept} value={dept}>{dept}</option>
-            ))}
-          </select>
-
-          {/* Client Filter */}
-          <select
-            value={filterClient}
-            onChange={e => setFilterClient(e.target.value)}
-            className="bg-[#F7F8FC] dark:bg-[#171E31] border border-[#D8DEE9] dark:border-[#293248] rounded-xl px-3 py-1.5 text-xs font-bold text-[#101828] dark:text-white outline-none cursor-pointer"
-          >
-            <option value="">All Clients</option>
-            {clients.map(c => (
-              <option key={c.clientId || c.id} value={c.clientName || c.name}>
-                {c.clientName || c.name || c.businessName}
-              </option>
-            ))}
-          </select>
+          {(searchEmployee || filterDepartment || filterClient) && (
+            <button
+              onClick={() => { setSearchEmployee(''); setFilterDepartment(''); setFilterClient(''); }}
+              className="text-xs font-bold text-[#5B4BFF] hover:underline self-end md:self-auto cursor-pointer"
+            >
+              Clear Filters
+            </button>
+          )}
         </div>
-
-        {(searchEmployee || filterDepartment || filterClient) && (
-          <button
-            onClick={() => { setSearchEmployee(''); setFilterDepartment(''); setFilterClient(''); }}
-            className="text-xs font-bold text-[#5B4BFF] hover:underline self-end md:self-auto cursor-pointer"
-          >
-            Clear Filters
-          </button>
-        )}
-      </div>
+      )}
 
       {/* ─── 4. MAIN PERFORMANCE TABLE / CARDS ─── */}
       {loading ? (

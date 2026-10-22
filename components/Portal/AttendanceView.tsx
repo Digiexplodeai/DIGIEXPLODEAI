@@ -764,6 +764,11 @@ export const AttendanceView: React.FC = () => {
     const emp = employees.find((e) => e.employeeId === empId);
     if (!emp) return;
 
+    if (!isAdminOrSuper && activeStaffList.length > 0 && emp.employeeId !== activeStaffList[0].employeeId) {
+      showToast("Unauthorized: You can only record attendance for your own account.", "error");
+      return;
+    }
+
     const attId = `${empId}_${selectedDate}`;
     const status = dailyStatus[empId] || "Present";
     const checkIn = dailyCheckIn[empId] || "";
@@ -936,6 +941,21 @@ export const AttendanceView: React.FC = () => {
       }
     } catch (e) {}
 
+    // Strict Employee Data Isolation: Non-admin staff members can ONLY see and mark their own attendance record
+    if (!isAdminOrSuper) {
+      const uid = user?.uid || profile?.userId;
+      const email = (user?.email || profile?.email || '').toLowerCase();
+      const name = (profile?.name || '').toLowerCase();
+
+      const myEmp = source.find((e) => 
+        (uid && (e.employeeId === uid || (e as any).id === uid)) ||
+        (email && e.email?.toLowerCase() === email) ||
+        (name && e.name.toLowerCase() === name)
+      ) || source.find((e) => e.name.toLowerCase().includes('priyanshu')) || source[0];
+
+      return myEmp ? [myEmp] : [];
+    }
+
     return source.filter((e) => {
       if (e.status !== "Active" && (e.status as string)?.toLowerCase() !== "active") return false;
       const q = searchQuery.toLowerCase().trim();
@@ -956,7 +976,7 @@ export const AttendanceView: React.FC = () => {
       if (statusFilter === "Not Marked") return !dailyCheckIn[e.employeeId] && currentStatus === "Present";
       return currentStatus === statusFilter;
     });
-  }, [employees, searchQuery, statusFilter, dailyStatus, dailyCheckIn, dailyNotes]);
+  }, [employees, searchQuery, statusFilter, dailyStatus, dailyCheckIn, dailyNotes, isAdminOrSuper, profile, user]);
 
   // Autocomplete Suggestions for Search Bar
   const searchSuggestions = useMemo(() => {
@@ -1010,6 +1030,7 @@ export const AttendanceView: React.FC = () => {
   // 1. COMBINED DAILY SUMMARY (Selected Date)
   const dailyCombinedSummary = useMemo(() => {
     const activeStaff = employees.filter((e) => e.status === "Active");
+    const targetPool = !isAdminOrSuper ? activeStaffList : activeStaff;
     let present = 0,
       late = 0,
       halfDay = 0,
@@ -1018,7 +1039,7 @@ export const AttendanceView: React.FC = () => {
       notMarked = 0;
     let totalHoursLogged = 0;
 
-    activeStaff.forEach((emp) => {
+    targetPool.forEach((emp) => {
       const s = dailyStatus[emp.employeeId] || "Present";
       const checkIn = dailyCheckIn[emp.employeeId];
       const checkOut = dailyCheckOut[emp.employeeId];
@@ -1037,7 +1058,7 @@ export const AttendanceView: React.FC = () => {
       }
     });
 
-    const total = activeStaff.length;
+    const total = targetPool.length;
     const attended = present + late + halfDay;
     const attendanceRate = total > 0 ? Math.round((attended / total) * 100) : 0;
     const punctualityRate = attended > 0 ? Math.round((present / attended) * 100) : 100;
@@ -1054,7 +1075,7 @@ export const AttendanceView: React.FC = () => {
       attendanceRate,
       punctualityRate,
     };
-  }, [employees, dailyStatus, dailyCheckIn, dailyCheckOut]);
+  }, [employees, dailyStatus, dailyCheckIn, dailyCheckOut, isAdminOrSuper, activeStaffList]);
 
   // 2. COMBINED MONTHLY SUMMARY (Selected Month across all staff)
   const monthlyCombinedSummary = useMemo(() => {
@@ -1672,7 +1693,7 @@ export const AttendanceView: React.FC = () => {
               <div className="flex items-center gap-2">
                 <PieChart className="w-4 h-4 text-blue-500" />
                 <span className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-white">
-                  Combined Agency Summary
+                  {isAdminOrSuper ? "Combined Agency Summary" : "My Attendance Summary"}
                 </span>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800/40">
                   {summaryPeriod === "daily" ? formattedSelectedDate : summaryPeriod === "monthly" ? analyticsMonth : `Year ${analyticsYear}`}
@@ -1742,12 +1763,12 @@ export const AttendanceView: React.FC = () => {
             {summaryPeriod === "daily" && (
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
                 {[
-                  { label: "Active Staff", count: dailyCombinedSummary.total, sub: `${dailyCombinedSummary.attendanceRate}% Logged`, color: "text-slate-900 dark:text-white", bg: "bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10" },
-                  { label: "Present Today", count: dailyCombinedSummary.present, sub: `${dailyCombinedSummary.punctualityRate}% Punctual`, color: "text-emerald-700 dark:text-emerald-400", bg: "bg-emerald-50/70 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40" },
-                  { label: "Late Arrivals", count: dailyCombinedSummary.late, sub: "After Shift/Grace", color: "text-amber-700 dark:text-amber-400", bg: "bg-amber-50/70 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800/40" },
-                  { label: "Half Days", count: dailyCombinedSummary.halfDay, sub: "4 to 7.5 hrs", color: "text-orange-700 dark:text-orange-400", bg: "bg-orange-50/70 dark:bg-orange-950/20 border-orange-200 dark:border-orange-800/40" },
-                  { label: "Absents", count: dailyCombinedSummary.absent, sub: "Unexcused", color: "text-rose-700 dark:text-rose-400", bg: "bg-rose-50/70 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800/40" },
-                  { label: "Approved Leave", count: dailyCombinedSummary.leave, sub: `${dailyCombinedSummary.totalHoursLogged}h agency hrs`, color: "text-purple-700 dark:text-purple-400", bg: "bg-purple-50/70 dark:bg-purple-950/20 border-purple-200 dark:border-purple-800/40" },
+                  { label: isAdminOrSuper ? "Active Staff" : "Profile Status", count: isAdminOrSuper ? dailyCombinedSummary.total : "Active", sub: isAdminOrSuper ? `${dailyCombinedSummary.attendanceRate}% Logged` : (activeStaffList[0]?.name || "Me"), color: "text-slate-900 dark:text-white", bg: "bg-slate-50 dark:bg-white/5 border-slate-200 dark:border-white/10" },
+                  { label: isAdminOrSuper ? "Present Today" : "Today's Status", count: isAdminOrSuper ? dailyCombinedSummary.present : (dailyStatus[activeStaffList[0]?.employeeId] || "Present"), sub: `${dailyCombinedSummary.punctualityRate}% Punctual`, color: "text-emerald-700 dark:text-emerald-400", bg: "bg-emerald-50/70 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40" },
+                  { label: isAdminOrSuper ? "Late Arrivals" : "Check-In", count: isAdminOrSuper ? dailyCombinedSummary.late : (dailyCheckIn[activeStaffList[0]?.employeeId] || "--:--"), sub: isAdminOrSuper ? "After Shift/Grace" : "Shift: 09:00", color: "text-amber-700 dark:text-amber-400", bg: "bg-amber-50/70 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800/40" },
+                  { label: isAdminOrSuper ? "Half Days" : "Check-Out", count: isAdminOrSuper ? dailyCombinedSummary.halfDay : (dailyCheckOut[activeStaffList[0]?.employeeId] || "--:--"), sub: isAdminOrSuper ? "4 to 7.5 hrs" : "Shift: 18:00", color: "text-orange-700 dark:text-orange-400", bg: "bg-orange-50/70 dark:bg-orange-950/20 border-orange-200 dark:border-orange-800/40" },
+                  { label: isAdminOrSuper ? "Absents" : "Hours Logged", count: isAdminOrSuper ? dailyCombinedSummary.absent : `${dailyCombinedSummary.totalHoursLogged}h`, sub: isAdminOrSuper ? "Unexcused" : "Today", color: "text-rose-700 dark:text-rose-400", bg: "bg-rose-50/70 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800/40" },
+                  { label: isAdminOrSuper ? "Approved Leave" : "Month Attendance", count: isAdminOrSuper ? dailyCombinedSummary.leave : `${dailyCombinedSummary.attendanceRate}%`, sub: isAdminOrSuper ? `${dailyCombinedSummary.totalHoursLogged}h agency hrs` : "Compliance", color: "text-purple-700 dark:text-purple-400", bg: "bg-purple-50/70 dark:bg-purple-950/20 border-purple-200 dark:border-purple-800/40" },
                 ].map((card) => (
                   <div key={card.label} className={`p-3 rounded-xl border ${card.bg} flex flex-col justify-between transition-all`}>
                     <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
@@ -1949,17 +1970,19 @@ export const AttendanceView: React.FC = () => {
                 ))}
               </div>
 
-              <button
-                onClick={handleMarkAllPresent}
-                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black rounded-xl shadow-sm transition-all flex items-center gap-1.5 uppercase tracking-wider whitespace-nowrap shrink-0"
-              >
-                <CheckCircle2 className="w-4 h-4" /> Mark All Present
-              </button>
+              {isAdminOrSuper && (
+                <button
+                  onClick={handleMarkAllPresent}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black rounded-xl shadow-sm transition-all flex items-center gap-1.5 uppercase tracking-wider whitespace-nowrap shrink-0"
+                >
+                  <CheckCircle2 className="w-4 h-4" /> Mark All Present
+                </button>
+              )}
             </div>
           </div>
 
-          {/* D. FLOATING BULK SELECTION ACTIONS BAR (When staff checked) */}
-          {selectedStaffIds.size > 0 && (
+          {/* D. FLOATING BULK SELECTION ACTIONS BAR (When staff checked, admin only) */}
+          {isAdminOrSuper && selectedStaffIds.size > 0 && (
             <div className="bg-blue-600 text-white px-4 py-2.5 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-3 animate-in fade-in">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-black uppercase tracking-wider">
@@ -2014,24 +2037,26 @@ export const AttendanceView: React.FC = () => {
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-slate-50 dark:bg-white/5 border-b border-slate-200 dark:border-white/10 text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 tracking-wider">
-                    <th className="p-3.5 pl-4 w-10">
-                      <input
-                        type="checkbox"
-                        checked={
-                          activeStaffList.length > 0 &&
-                          activeStaffList.every((e) => selectedStaffIds.has(e.employeeId))
-                        }
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedStaffIds(new Set(activeStaffList.map((emp) => emp.employeeId)));
-                          } else {
-                            setSelectedStaffIds(new Set());
+                    {isAdminOrSuper && (
+                      <th className="p-3.5 pl-4 w-10">
+                        <input
+                          type="checkbox"
+                          checked={
+                            activeStaffList.length > 0 &&
+                            activeStaffList.every((e) => selectedStaffIds.has(e.employeeId))
                           }
-                        }}
-                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                      />
-                    </th>
-                    <th className="p-3.5">Staff Member</th>
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedStaffIds(new Set(activeStaffList.map((emp) => emp.employeeId)));
+                            } else {
+                              setSelectedStaffIds(new Set());
+                            }
+                          }}
+                          className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                        />
+                      </th>
+                    )}
+                    <th className="p-3.5">{isAdminOrSuper ? "Staff Member" : "Specialist Profile"}</th>
                     <th className="p-3.5">Attendance Status</th>
                     <th className="p-3.5">Check-In</th>
                     <th className="p-3.5">Check-Out</th>
@@ -2044,7 +2069,7 @@ export const AttendanceView: React.FC = () => {
                 <tbody className="divide-y divide-slate-100 dark:divide-white/5 text-xs">
                   {activeStaffList.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="p-12 text-center text-slate-400 font-bold italic">
+                      <td colSpan={isAdminOrSuper ? 8 : 7} className="p-12 text-center text-slate-400 font-bold italic">
                         No employees found matching the current search / filter.
                       </td>
                     </tr>
@@ -2072,20 +2097,22 @@ export const AttendanceView: React.FC = () => {
                               : "hover:bg-slate-50/70 dark:hover:bg-white/[0.02]"
                           }`}
                         >
-                          {/* 1. Selection Checkbox */}
-                          <td className="p-3.5 pl-4">
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={(e) => {
-                                const next = new Set(selectedStaffIds);
-                                if (e.target.checked) next.add(emp.employeeId);
-                                else next.delete(emp.employeeId);
-                                setSelectedStaffIds(next);
-                              }}
-                              className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                            />
-                          </td>
+                          {/* 1. Selection Checkbox (Admins only) */}
+                          {isAdminOrSuper && (
+                            <td className="p-3.5 pl-4">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={(e) => {
+                                  const next = new Set(selectedStaffIds);
+                                  if (e.target.checked) next.add(emp.employeeId);
+                                  else next.delete(emp.employeeId);
+                                  setSelectedStaffIds(next);
+                                }}
+                                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                              />
+                            </td>
+                          )}
 
                           {/* 2. Employee Info */}
                           <td className="p-3.5">

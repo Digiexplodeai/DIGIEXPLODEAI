@@ -7,7 +7,7 @@ import {
   Sparkles, CheckCircle2, Layers, ExternalLink, Zap, Eye, MoveRight,
   Shield, Users, CalendarDays, RotateCcw, Film, ArrowLeft, ArrowRight,
   Settings, CheckCheck, AlertCircle, Calendar as CalendarIcon, SlidersHorizontal,
-  Copy
+  Copy, Play, Pause, Square
 } from 'lucide-react';
 
 import { useActiveEmployee } from '../../hooks/useActiveEmployee';
@@ -20,6 +20,14 @@ import { MiniCalendarWidget } from './MiniCalendarWidget';
 import { SuggestiveCombobox, type SuggestiveOption } from './SuggestiveCombobox';
 import { SuggestiveInput, SuggestiveTextarea } from './SuggestiveInput';
 import { saveFormFieldHistory, isLikelyPlaceholder } from '../../lib/formHistoryStorage';
+import {
+  startTaskTimer,
+  pauseTaskTimer,
+  stopAndLogTaskTimer,
+  getActiveTimers,
+  formatDurationMinutes,
+  type TaskTimerSession
+} from '../../lib/taskTimerService';
 import {
   type Task,
   type RolloverSettings,
@@ -62,9 +70,33 @@ export const KANBAN_COLUMNS: { key: KanbanColumnKey; label: string; color: strin
 export const CATEGORIES = [
   'Graphic Design', 'Reel Editing', 'Video Shoot', 'Video Editing',
   'Script Writing', 'Caption Writing', 'Social Media', 'Meta Ads',
-  'Google Ads', 'SEO', 'Website Update', 'Blog', 'Client Coordination',
+  'Google Ads', 'SEO', 'Website Development', 'Website Update', 'Blog', 'Client Coordination',
   'Reporting', 'Photography', 'Other'
 ];
+
+/**
+ * Intelligent task category inference that strictly prioritizes:
+ * 1. Meta Ads (ensuring Meta Ads are not misclassified as Graphic Design)
+ * 2. Video Shoot (ensuring shoots are not misclassified as Video Editing)
+ * 3. Website Development / Update
+ */
+export function inferTaskCategory(title: string = '', desc: string = ''): string {
+  const text = `${title} ${desc}`.toLowerCase();
+  if (/meta ads?|facebook ads?|fb ads?|fb ad\b|insta ads?|instagram ads?|ad campaign|audience targeting|roas|lead gen ads?|cpc/i.test(text)) return 'Meta Ads';
+  if (/google ads?|adwords|sem|ppc|search ads/i.test(text)) return 'Google Ads';
+  if (/video shoot|shoot footage|bts shoot|camera shoot|on-site shoot|film shoot|\bshoot\b/i.test(text)) return 'Video Shoot';
+  if (/reel|short/i.test(text)) return 'Reel Editing';
+  if (/video|clip|testimonial|b-roll|voiceover|footage|davinci|premiere|after effects/i.test(text)) return 'Video Editing';
+  if (/web dev|website dev|website development|frontend|backend|wordpress|shopify|full-stack/i.test(text)) return 'Website Development';
+  if (/website|webpage|landing page|web update/i.test(text)) return 'Website Update';
+  if (/seo|keyword|gmb|google business/i.test(text)) return 'SEO';
+  if (/social media|social calendar|smm|community management|page management/i.test(text)) return 'Social Media';
+  if (/carousel|post|banner|flyer|story|poster|thumbnail|graphic|logo|branding|creative/i.test(text)) return 'Graphic Design';
+  if (/script|copy|caption|blog|article|content/i.test(text)) return 'Script Writing';
+  if (/report|analytic|margin|kpi/i.test(text)) return 'Reporting';
+  if (/meeting|call|client|coordination/i.test(text)) return 'Client Coordination';
+  return 'Other';
+}
 
 export const PRIORITIES: ('Urgent' | 'High' | 'Medium' | 'Low')[] = ['Urgent', 'High', 'Medium', 'Low'];
 
@@ -135,6 +167,23 @@ export const TasksView: React.FC = () => {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+
+  // Active Timer Sessions State
+  const [activeTimers, setActiveTimers] = useState<Record<string, TaskTimerSession>>(() => getActiveTimers());
+  useEffect(() => {
+    const sync = () => setActiveTimers(getActiveTimers());
+    window.addEventListener('digi_task_timer_updated', sync);
+    const interval = setInterval(() => {
+      const timers = getActiveTimers();
+      if (Object.values(timers).some(t => t.isRunning)) {
+        setActiveTimers({ ...timers });
+      }
+    }, 1000);
+    return () => {
+      window.removeEventListener('digi_task_timer_updated', sync);
+      clearInterval(interval);
+    };
+  }, []);
 
   // Bulk Selection State
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
@@ -1543,9 +1592,84 @@ export const TasksView: React.FC = () => {
                                   </div>
                                 </div>
 
+                                  {/* Task Active Timer Session */}
+                                  {(() => {
+                                    const timer = activeTimers[task.id];
+                                    const isRunning = timer?.isRunning;
+                                    const sec = timer ? (timer.accumulatedSeconds || 0) + (isRunning && timer.lastStartedAt ? Math.max(0, Math.floor((Date.now() - timer.lastStartedAt) / 1000)) : 0) : 0;
+                                    const mins = Math.floor(sec / 60);
+                                    const remSec = sec % 60;
+                                    const timeDisplay = `${mins}:${remSec < 10 ? '0' : ''}${remSec}`;
+
+                                    return (
+                                      <div 
+                                        className="pt-2 border-t border-dashed border-[#D8DEE9]/70 dark:border-white/10 flex items-center justify-between gap-1 text-[11px]"
+                                        onClick={e => e.stopPropagation()}
+                                      >
+                                        <div className="flex items-center gap-1.5">
+                                          <span className={`w-2 h-2 rounded-full ${isRunning ? 'bg-rose-500 animate-pulse' : sec > 0 ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-700'}`} />
+                                          <span className="font-mono text-[10px] font-bold text-[#475467] dark:text-[#CBD5E1]">
+                                            {sec > 0 ? timeDisplay : 'Timer'}
+                                          </span>
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                          {!isRunning ? (
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                startTaskTimer({
+                                                  id: task.id,
+                                                  title: task.title,
+                                                  employeeId: task.assigneeId || user?.uid || 'emp',
+                                                  employeeName: task.assigneeName || profile?.name,
+                                                  clientId: task.clientId,
+                                                  clientName: task.clientName,
+                                                  category: task.category,
+                                                });
+                                                triggerToast(`Timer started: "${task.title}"`);
+                                              }}
+                                              title="Start work session timer"
+                                              className="px-2 py-0.5 rounded-md bg-indigo-50 hover:bg-[#5B4BFF] text-[#5B4BFF] hover:text-white dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:text-white font-bold text-[10px] transition-all cursor-pointer flex items-center gap-1"
+                                            >
+                                              <Play className="w-2.5 h-2.5 fill-current" />
+                                              <span>{sec > 0 ? 'Resume' : 'Start'}</span>
+                                            </button>
+                                          ) : (
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                pauseTaskTimer(task.id);
+                                                triggerToast('Timer paused');
+                                              }}
+                                              title="Pause timer"
+                                              className="px-2 py-0.5 rounded-md bg-amber-50 hover:bg-amber-600 text-amber-700 hover:text-white dark:bg-amber-950/40 dark:text-amber-300 dark:hover:text-white font-bold text-[10px] transition-all cursor-pointer flex items-center gap-1"
+                                            >
+                                              <Pause className="w-2.5 h-2.5" />
+                                              <span>Pause</span>
+                                            </button>
+                                          )}
+                                          {sec > 0 && (
+                                            <button
+                                              type="button"
+                                              onClick={async () => {
+                                                const res = await stopAndLogTaskTimer(task.id, profile);
+                                                triggerToast(`Logged ${res.loggedMinutes} min(s) to work history`);
+                                              }}
+                                              title="Stop timer and log work duration"
+                                              className="px-1.5 py-0.5 rounded-md bg-slate-100 hover:bg-slate-700 text-slate-700 hover:text-white dark:bg-white/10 dark:text-slate-300 dark:hover:text-white font-bold text-[10px] transition-all cursor-pointer flex items-center gap-1"
+                                            >
+                                              <Square className="w-2 h-2 fill-current" />
+                                              <span>Log</span>
+                                            </button>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })()}
+
                                   {/* 5. Action Footer Row: Balanced Stepper + Proportionate Done Button */}
                                   <div 
-                                    className="pt-2.5 border-t border-[#D8DEE9]/60 dark:border-white/10 flex items-center justify-between gap-1.5"
+                                    className="pt-2 border-t border-[#D8DEE9]/60 dark:border-white/10 flex items-center justify-between gap-1.5"
                                     onClick={e => e.stopPropagation()}
                                   >
                                     {/* Left: Compact Workflow Stepper */}
@@ -1970,6 +2094,7 @@ const CreateTaskModal: React.FC<{
     internalNotes: '',
     videoProductionId: '',
   });
+  const [userPickedCategory, setUserPickedCategory] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const applyQuickDate = (type: 'today' | 'tomorrow' | 'nextWorking' | 'nextMonday') => {
@@ -2072,8 +2197,19 @@ const CreateTaskModal: React.FC<{
               fieldKey="task_title"
               value={form.title}
               extraSeeds={taskTitleSeeds}
-              onChange={val => setForm(p => ({ ...p, title: val }))}
-              placeholder="e.g. Design 10 Figma Carousel Slides with Dark Aesthetic"
+              onChange={val => {
+                setForm(p => {
+                  const updated = { ...p, title: val };
+                  if (!userPickedCategory) {
+                    const inf = inferTaskCategory(val, p.description);
+                    if (inf && inf !== 'Other') {
+                      updated.category = inf;
+                    }
+                  }
+                  return updated;
+                });
+              }}
+              placeholder="e.g. Meta Ads Campaign Launch or Reel Editing"
               className={inputCls}
             />
           </div>
@@ -2131,10 +2267,15 @@ const CreateTaskModal: React.FC<{
             </div>
 
             <div className="relative z-0">
-              <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">Category</label>
+              <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">
+                Category {userPickedCategory ? '(Manual)' : ''}
+              </label>
               <select
                 value={form.category}
-                onChange={e => setForm(p => ({ ...p, category: e.target.value }))}
+                onChange={e => {
+                  setUserPickedCategory(true);
+                  setForm(p => ({ ...p, category: e.target.value }));
+                }}
                 className={`${inputCls} cursor-pointer font-bold`}
               >
                 {CATEGORIES.map(c => (
@@ -2291,6 +2432,7 @@ const TaskDetailDrawer: React.FC<{
   const [notes, setNotes] = useState(task.internalNotes || '');
   const [assigneeId, setAssigneeId] = useState(task.assigneeId || '');
   const [priority, setPriority] = useState(task.priority);
+  const [category, setCategory] = useState(task.category || 'Other');
   const [scheduledDate, setScheduledDate] = useState(task.scheduledDate || task.scheduled_date || '');
   const [dueDate, setDueDate] = useState(task.dueDate || task.due_date || '');
   const [saving, setSaving] = useState(false);
@@ -2354,6 +2496,7 @@ const TaskDetailDrawer: React.FC<{
         assigneeId,
         assigneeName: emp?.name || task.assigneeName || 'Unassigned',
         priority,
+        category,
         scheduledDate,
         scheduled_date: scheduledDate,
         dueDate,
@@ -2404,7 +2547,7 @@ const TaskDetailDrawer: React.FC<{
 
           <div className="relative z-40">
             <span className="text-[10px] font-black text-[#5B4BFF] dark:text-[#806CFF] uppercase tracking-wider">
-              {task.category || 'Deliverable'}
+              {category || 'Deliverable'}
             </span>
             <SuggestiveInput
               fieldKey="task_title"
@@ -2483,6 +2626,17 @@ const TaskDetailDrawer: React.FC<{
                   emptyText="No employee found"
                   icon="user"
                 />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black uppercase tracking-wider text-[#7A8496] mb-1">Category</label>
+                <select
+                  value={category}
+                  onChange={e => setCategory(e.target.value)}
+                  className="w-full bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 rounded-xl p-2.5 text-xs font-bold text-[#101828] dark:text-[#F7F8FC] outline-none cursor-pointer"
+                >
+                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
               </div>
 
               <div>

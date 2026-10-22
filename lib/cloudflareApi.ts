@@ -241,6 +241,33 @@ export const cfUpdateUser = (id: string, data: any) =>
 
 export const cfHealthCheck = () => apiFetch('/health');
 
+// ── SYSTEM PERMISSIONS ────────────────────────────────────────────────────────
+
+export const cfGetPermissions = () => apiFetch('/system/permissions');
+export const cfSavePermissions = (matrix: any) =>
+  apiFetch('/system/permissions', { method: 'POST', body: JSON.stringify(matrix) });
+
+
+// ── AUTH & PASSWORD RECOVERY ──────────────────────────────────────────────────
+
+export const cfRequestPasswordRecovery = (identifier: string, channel: 'email' | 'sms' = 'email') =>
+  apiFetch('/auth/recovery/request', {
+    method: 'POST',
+    body: JSON.stringify({ identifier, channel }),
+  });
+
+export const cfVerifyRecoveryOtp = (identifier: string, otp: string) =>
+  apiFetch('/auth/recovery/verify', {
+    method: 'POST',
+    body: JSON.stringify({ identifier, otp }),
+  });
+
+export const cfResetPasswordWithToken = (resetAuthToken: string, newPassword: string) =>
+  apiFetch('/auth/recovery/reset', {
+    method: 'POST',
+    body: JSON.stringify({ resetAuthToken, newPassword }),
+  });
+
 /**
  * Subscribe-like helper for components using polling instead of Firestore onSnapshot.
  * Returns an unsubscribe function (clears the interval).

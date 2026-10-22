@@ -60,7 +60,7 @@ export interface WorkLog {
 const CATEGORIES = [
   'Graphic Design', 'Reel Editing', 'Video Shoot', 'Video Editing',
   'Script Writing', 'Caption Writing', 'Social Media', 'Meta Ads',
-  'Google Ads', 'SEO', 'Website Update', 'Blog', 'Client Coordination',
+  'Google Ads', 'SEO', 'Website Development', 'Website Update', 'Blog', 'Client Coordination',
   'Reporting', 'Photography', 'Other'
 ];
 

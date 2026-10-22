@@ -31,7 +31,11 @@ interface AuthContextType {
   profile: UserProfile | null;
   loading: boolean;
   signOutUser: () => Promise<void>;
-  loginWithEmail: (email: string, pass: string) => Promise<void>;
+  loginWithEmail: (
+    email: string,
+    pass: string,
+    expectedRole?: "superAdmin" | "admin" | "employee" | "client",
+  ) => Promise<void>;
   signUpWithEmail: (
     email: string,
     pass: string,
@@ -344,24 +348,40 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     } catch (e) {}
   };
 
-  const loginWithEmail = async (email: string, pass: string) => {
+  const loginWithEmail = async (
+    email: string,
+    pass: string,
+    expectedRole?: "superAdmin" | "admin" | "employee" | "client"
+  ) => {
     setLoading(true);
     const cleanEmail = email.trim().toLowerCase();
     
-    // Direct Super Admin quick credentials fallback (ID: admin, Password: admin123)
-    if (
+    // Direct Super Admin quick credentials check
+    const isAdminAccount = (
       cleanEmail === "admin" ||
       cleanEmail === "admin@digiexplode.ai" ||
       cleanEmail === "superadmin" ||
       cleanEmail === "superadmin@digiexplode.ai" ||
       cleanEmail === "dilseinvite@gmail.com"
-    ) {
+    );
+
+    if (isAdminAccount) {
+      if (expectedRole && expectedRole !== "superAdmin" && expectedRole !== "admin") {
+        setLoading(false);
+        throw new Error('This identifier belongs to Super Admin. Please switch to the "Super Admin" tab to log in.');
+      }
       if (pass !== "admin123") {
         setLoading(false);
         throw new Error("Invalid password for Super Admin. Password must be admin123");
       }
       loginAsDemoRole("superAdmin");
       return;
+    }
+
+    // If logging in from Super Admin tab, non-admin accounts must not pass
+    if (expectedRole === "superAdmin") {
+      setLoading(false);
+      throw new Error('This account does not have Super Admin access. Please use the Employee or Client login tab.');
     }
 
     // 2. Employee login: Name as ID and Name as Password!
@@ -375,6 +395,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     );
 
     if (matchedFixed) {
+      if (expectedRole === "client") {
+        setLoading(false);
+        throw new Error(`"${matchedFixed.name}" is an Employee account. Please switch to the Employee tab to sign in.`);
+      }
+
       const isPassValid = 
         cleanPass === matchedFixed.name.toLowerCase().replace(/[\s_\-.]+/g, '') ||
         cleanPass === matchedFixed.aliases[0].toLowerCase().replace(/[\s_\-.]+/g, '') ||
@@ -413,6 +438,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
           });
 
           if (matchedDyn) {
+            if (expectedRole === "client") {
+              setLoading(false);
+              throw new Error(`"${matchedDyn.name}" is an Employee account. Please switch to the Employee tab to sign in.`);
+            }
+
             const eClean = (matchedDyn.name || '').toLowerCase().replace(/[\s_\-.]+/g, '');
             if (cleanPass === eClean || pass.trim() === matchedDyn.email) {
               await loginAsCustomEmployee({
@@ -437,11 +467,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     } catch (e) {}
 
     if (cleanEmail === "employee") {
+      if (expectedRole === "client") {
+        setLoading(false);
+        throw new Error('This is an Employee account. Please switch to the Employee tab to sign in.');
+      }
       loginAsDemoRole("employee");
       return;
     }
 
     if (cleanEmail === "client" || cleanEmail === "client@nexuscoaching.com") {
+      if (expectedRole === "employee") {
+        setLoading(false);
+        throw new Error('This is a Client account. Please switch to the Client tab to sign in.');
+      }
       loginAsDemoRole("client");
       return;
     }

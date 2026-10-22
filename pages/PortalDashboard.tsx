@@ -25,6 +25,25 @@ import { PermissionsView }    from '../components/Portal/PermissionsView';
 import { Topbar }             from '../components/Portal/Topbar';
 import { CommandPalette }     from '../components/Portal/CommandPalette';
 import { Menu, ShieldAlert, LogOut, Loader2, Command, Bell } from 'lucide-react';
+import { PermissionService } from '../lib/controlPlane/PermissionService';
+
+const TAB_MODULE_MAP: Record<string, string> = {
+  'clients': 'Clients',
+  'tasks': 'Tasks & Work',
+  'worklog': 'Work Log',
+  'calendar': 'Content Calendar',
+  'videos': 'Video Production',
+  'approvals': 'Approvals',
+  'admins': 'Employees',
+  'attendance': 'Attendance & Leaves',
+  'performance': 'Performance',
+  'reports': 'Reports',
+  'hr-docs': 'HR Documents',
+  'payroll': 'Payroll',
+  'seo': 'SEO Studio',
+  'files': 'Files & Assets',
+  'settings': 'Settings',
+};
 
 interface PortalDashboardProps {
   defaultTab?: string;
@@ -119,10 +138,8 @@ const PortalDashboard: React.FC<PortalDashboardProps> = ({ defaultTab }) => {
   // Not signed in
   if (!user && !profile) {
     return (
-      <div className="min-h-screen bg-slate-950 pt-24 pb-12">
-        <div className="container mx-auto px-4 max-w-7xl">
-          <LoginView />
-        </div>
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center py-6 px-4">
+        <LoginView />
       </div>
     );
   }
@@ -149,8 +166,88 @@ const PortalDashboard: React.FC<PortalDashboardProps> = ({ defaultTab }) => {
     );
   }
 
-  // Render tab content
+  // Render tab content with Dynamic Role Boundary Enforcement
   const renderTab = () => {
+    const rawRole = profile?.role || 'admin';
+    const effectiveRole = PermissionService.getEffectiveRole(rawRole as any);
+    const isSuperAdmin = effectiveRole === 'superAdmin';
+    const isClient = effectiveRole === 'client';
+
+    // 1. Super Admin strictly restricted modules
+    const superAdminOnlyTabs = ['audit-log', 'permissions'];
+    if (!isSuperAdmin && superAdminOnlyTabs.includes(activeTab)) {
+      return (
+        <div className="min-h-[50vh] flex flex-col items-center justify-center p-8 text-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-sm space-y-4">
+          <div className="w-14 h-14 rounded-2xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-[#3557FF]">
+            <ShieldAlert className="w-7 h-7" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-xl font-black text-slate-900 dark:text-white">Super Admin Authorization Required</h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md leading-relaxed">
+              This module requires elevated platform administrator credentials.
+            </p>
+          </div>
+          <button
+            onClick={() => setActiveTab(isClient ? 'client-workspace' : 'myday')}
+            className="px-5 py-2.5 bg-[#3557FF] hover:bg-[#2545E0] text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md"
+          >
+            Return to Workspace
+          </button>
+        </div>
+      );
+    }
+
+    // 2. Client Boundary: Prevent clients from accessing internal operational tools
+    const clientAllowedTabs = ['dashboard', 'client-workspace', 'approvals', 'reports', 'notifications'];
+    if (isClient && !clientAllowedTabs.includes(activeTab)) {
+      return (
+        <div className="min-h-[50vh] flex flex-col items-center justify-center p-8 text-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-sm space-y-4">
+          <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-500">
+            <ShieldAlert className="w-7 h-7" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-xl font-black text-slate-900 dark:text-white">Client Access Boundary</h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md leading-relaxed">
+              Internal agency modules, team directories, and financial records are restricted. Please navigate to your dedicated client workspace.
+            </p>
+          </div>
+          <button
+            onClick={() => setActiveTab('client-workspace')}
+            className="px-5 py-2.5 bg-[#3557FF] hover:bg-[#2545E0] text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md"
+          >
+            Return to My Workspace
+          </button>
+        </div>
+      );
+    }
+
+    // 3. Dynamic Matrix Enforcement for Platform Modules
+    const canonicalMod = TAB_MODULE_MAP[activeTab];
+    if (canonicalMod && !isSuperAdmin) {
+      const allowed = PermissionService.can(canonicalMod, 'view', effectiveRole);
+      if (!allowed) {
+        return (
+          <div className="min-h-[50vh] flex flex-col items-center justify-center p-8 text-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-sm space-y-4">
+            <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-500">
+              <ShieldAlert className="w-7 h-7" />
+            </div>
+            <div className="space-y-1">
+              <h2 className="text-xl font-black text-slate-900 dark:text-white">Access Not Granted</h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md leading-relaxed">
+                You do not have view permissions for the <strong className="text-slate-800 dark:text-slate-200">{canonicalMod}</strong> module. Please contact your agency administrator.
+              </p>
+            </div>
+            <button
+              onClick={() => setActiveTab(isClient ? 'client-workspace' : 'myday')}
+              className="px-5 py-2.5 bg-[#3557FF] hover:bg-[#2545E0] text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-md"
+            >
+              Return to Workspace
+            </button>
+          </div>
+        );
+      }
+    }
+
     switch (activeTab) {
       // ─── Overview ─────────────────────────────────────────
       case 'dashboard':

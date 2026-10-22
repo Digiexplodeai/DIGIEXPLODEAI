@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /portal
+Disallow: /admin
+Disallow: /attendance
+Disallow: /attendence
+
+Sitemap: https://www.digiexplodeai.com/sitemap.xml

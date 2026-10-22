@@ -133,7 +133,10 @@ export default {
       env
     );
 
-    // 5. Account Disablement & Deactivation Enforcement
+    // 5. Account Provisioning & Disablement Enforcement (Deny by default)
+    if (!user.isProvisioned) {
+      return forbidden('Account is not provisioned. Access denied by default. Please contact an administrator.', cors);
+    }
     if (user.status === 'inactive') {
       return forbidden('Account is deactivated. Access denied.', cors);
     }

@@ -1,19 +1,20 @@
 /**
  * DigiExplodeAI — Server-Side RBAC & Identity Resolution for Cloudflare Workers
  * Resolves user identity from Cloudflare D1 with strict server control.
- * Enforces Zero Trust tenant isolation and least privilege.
+ * Enforces Zero Trust tenant isolation, deny-by-default for unprovisioned users,
+ * and eliminates unsafe role fallbacks.
  */
 
 import type { AuthenticatedUser, CanonicalRole, Env } from './types';
 
-const BOOTSTRAP_SUPER_ADMIN_EMAILS = [
-  'dilseinvite@gmail.com',
-  'admin@digiexplode.ai',
-];
+// The verified primary bootstrap platform owner.
+// admin@digiexplode.ai has been removed to prevent unverified domain registration hijacking.
+const PRIMARY_BOOTSTRAP_SUPER_ADMIN = 'dilseinvite@gmail.com';
 
 /**
  * Resolves an authenticated user's trusted role, identity, and status from Cloudflare D1.
  * Never trusts client-supplied headers, query parameters, or request body roles.
+ * Unprovisioned users are DENIED access by default.
  */
 export async function resolveUserProfile(
   uid: string,
@@ -22,10 +23,17 @@ export async function resolveUserProfile(
   env: Env
 ): Promise<AuthenticatedUser> {
   const cleanEmail = (email || '').trim().toLowerCase();
-  const isBootstrapAdmin = BOOTSTRAP_SUPER_ADMIN_EMAILS.includes(cleanEmail);
 
+  // Audit bootstrap Super Admin: Requires matching primary owner email AND strictly verified email status
+  const isEmailVerified = tokenClaims.email_verified === true;
+  const isBootstrapAdmin = cleanEmail === PRIMARY_BOOTSTRAP_SUPER_ADMIN && isEmailVerified;
+
+  // Prevent email-spoofing account takeover: unverified emails cannot match records by email
+  const lookupEmail = isEmailVerified ? cleanEmail : '';
+
+  let isProvisioned = isBootstrapAdmin;
   let role: CanonicalRole = isBootstrapAdmin ? 'superAdmin' : 'employee';
-  let status: 'active' | 'inactive' = 'active';
+  let status: 'active' | 'inactive' = isBootstrapAdmin ? 'active' : 'inactive';
   let clientId: string | undefined = undefined;
   let employeeId: string | undefined = undefined;
 
@@ -33,68 +41,110 @@ export async function resolveUserProfile(
   try {
     const userRow: any = await env.DB.prepare(
       'SELECT * FROM users WHERE userId = ? OR (email != "" AND LOWER(email) = ?)'
-    ).bind(uid, cleanEmail).first();
+    ).bind(uid, lookupEmail).first();
 
     if (userRow) {
+      isProvisioned = true;
       if (!isBootstrapAdmin && userRow.role) {
         role = normalizeRole(userRow.role);
       }
-      if (userRow.status && (userRow.status.toLowerCase() === 'inactive' || userRow.status.toLowerCase() === 'deactivated')) {
+      status = (userRow.status && (userRow.status.toLowerCase() === 'inactive' || userRow.status.toLowerCase() === 'deactivated'))
+        ? 'inactive'
+        : 'active';
+
+      // Security requirement: Privileged administrative access strictly requires verified email
+      if ((role === 'superAdmin' || role === 'admin') && !isEmailVerified) {
         status = 'inactive';
+        isProvisioned = false;
       }
+
       if (userRow.clientId) {
         clientId = userRow.clientId;
       }
       if (userRow.employeeId) {
         employeeId = userRow.employeeId;
       }
+
+      // Check token revocation timestamp if present in D1
+      if (userRow.tokensValidAfter) {
+        const tokensValidAfterSec = Math.floor(new Date(userRow.tokensValidAfter).getTime() / 1000);
+        const tokenTimestamp = typeof tokenClaims.iat === 'number' ? tokenClaims.iat : (typeof tokenClaims.auth_time === 'number' ? tokenClaims.auth_time : 0);
+        if (tokenTimestamp < tokensValidAfterSec) {
+          status = 'inactive'; // Session revoked prior to tokensValidAfter
+        }
+      }
     } else {
-      // 2. Fallback: check employees table
+      // 2. Secondary check: check D1 employees table
       const empRow: any = await env.DB.prepare(
         'SELECT * FROM employees WHERE id = ? OR (email != "" AND LOWER(email) = ?)'
-      ).bind(uid, cleanEmail).first();
+      ).bind(uid, lookupEmail).first();
 
       if (empRow) {
+        isProvisioned = true;
         employeeId = empRow.id || empRow.employeeId;
         if (!isBootstrapAdmin) {
           role = normalizeRole(empRow.role || 'employee');
         }
-        if (empRow.status && empRow.status.toLowerCase() === 'inactive') {
-          status = 'inactive';
+        status = (empRow.status && empRow.status.toLowerCase() === 'inactive') ? 'inactive' : 'active';
+
+        // Check token revocation timestamp on employee record if present
+        if (empRow.tokensValidAfter) {
+          const tokensValidAfterSec = Math.floor(new Date(empRow.tokensValidAfter).getTime() / 1000);
+          const tokenTimestamp = typeof tokenClaims.iat === 'number' ? tokenClaims.iat : (typeof tokenClaims.auth_time === 'number' ? tokenClaims.auth_time : 0);
+          if (tokenTimestamp < tokensValidAfterSec) {
+            status = 'inactive';
+          }
         }
       } else {
-        // 3. Fallback: check clients table
+        // 3. Tertiary check: check D1 clients table
         const clientRow: any = await env.DB.prepare(
           'SELECT * FROM clients WHERE email != "" AND LOWER(email) = ?'
-        ).bind(cleanEmail).first();
+        ).bind(lookupEmail).first();
 
         if (clientRow) {
+          isProvisioned = true;
           clientId = clientRow.clientId;
           if (!isBootstrapAdmin) {
             role = 'client';
           }
-          if (clientRow.status && clientRow.status.toLowerCase() === 'inactive') {
-            status = 'inactive';
+          status = (clientRow.status && clientRow.status.toLowerCase() === 'inactive') ? 'inactive' : 'active';
+
+          // Check token revocation timestamp on client record if present
+          if (clientRow.tokensValidAfter) {
+            const tokensValidAfterSec = Math.floor(new Date(clientRow.tokensValidAfter).getTime() / 1000);
+            const tokenTimestamp = typeof tokenClaims.iat === 'number' ? tokenClaims.iat : (typeof tokenClaims.auth_time === 'number' ? tokenClaims.auth_time : 0);
+            if (tokenTimestamp < tokensValidAfterSec) {
+              status = 'inactive';
+            }
           }
-        } else if (tokenClaims.role) {
-          // 4. Token custom claims fallback (if verified server-minted claim present)
-          if (!isBootstrapAdmin) {
-            role = normalizeRole(tokenClaims.role);
-          }
-          if (tokenClaims.clientId) clientId = tokenClaims.clientId;
-          if (tokenClaims.employeeId) employeeId = tokenClaims.employeeId;
         }
       }
     }
   } catch (err) {
     console.warn('[rbac] D1 user resolution notice:', err);
-    // If D1 query fails or tables not yet created, preserve bootstrap admin
     if (isBootstrapAdmin) {
       role = 'superAdmin';
+      status = 'active';
+      isProvisioned = true;
     }
   }
 
-  // Fallback employeeId for employees
+  // Deny unprovisioned users by default: If not found anywhere, do not grant employee access
+  if (!isProvisioned) {
+    return {
+      uid,
+      email: cleanEmail,
+      role: 'employee',
+      clientId: undefined,
+      employeeId: undefined,
+      status: 'inactive',
+      isProvisioned: false,
+      isAnonymous: false,
+      tokenClaims,
+    };
+  }
+
+  // Set employeeId for provisioned employees
   if (role === 'employee' && !employeeId) {
     employeeId = uid;
   }
@@ -106,6 +156,7 @@ export async function resolveUserProfile(
     clientId,
     employeeId,
     status,
+    isProvisioned: true,
     isAnonymous: false,
     tokenClaims,
   };
@@ -146,6 +197,9 @@ export function normalizeRole(roleStr: string): CanonicalRole {
  * Super Admin always has full access across all operations.
  */
 export function hasRole(user: AuthenticatedUser, allowedRoles: CanonicalRole[]): boolean {
+  if (!user.isProvisioned || user.status === 'inactive') {
+    return false;
+  }
   if (user.role === 'superAdmin') {
     return true;
   }

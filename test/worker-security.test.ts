@@ -77,6 +77,7 @@ class MockD1Database {
       { userId: 'uid_priyanshu', name: 'Priyanshu Dev', email: 'priyanshu@digiexplode.ai', role: 'employee', employeeId: 'emp_priyanshu', status: 'active' },
       { userId: 'uid_nexus_client', name: 'Nexus Rep', email: 'nexus@nexuscoaching.com', role: 'client', clientId: 'client_nexus', status: 'active' },
       { userId: 'uid_inactive', name: 'Deactivated User', email: 'inactive@digiexplode.ai', role: 'employee', status: 'inactive' },
+      { userId: 'uid_revoked_user', name: 'Revoked User', email: 'revoked@digiexplode.ai', role: 'employee', employeeId: 'emp_priyanshu', status: 'active', tokensValidAfter: '2026-10-22T08:00:00Z' },
     ]
   };
 
@@ -91,7 +92,8 @@ class MockD1Database {
     if (s.includes('FROM users')) {
       if (s.includes('WHERE userId = ?')) {
         const id = binds[0];
-        const res = this.tables.users.filter(u => u.userId === id);
+        const email = (binds[1] || '').toLowerCase();
+        const res = this.tables.users.filter(u => u.userId === id || (email && u.email && u.email.toLowerCase() === email));
         return { results: res };
       }
       return { results: [...this.tables.users] };
@@ -101,7 +103,8 @@ class MockD1Database {
     if (s.includes('FROM employees')) {
       if (s.includes('WHERE id = ?')) {
         const id = binds[0];
-        const res = this.tables.employees.filter(e => e.id === id || e.employeeId === id);
+        const email = (binds[1] || '').toLowerCase();
+        const res = this.tables.employees.filter(e => e.id === id || e.employeeId === id || (email && e.email && e.email.toLowerCase() === email));
         return { results: res };
       }
       return { results: [...this.tables.employees] };
@@ -109,6 +112,11 @@ class MockD1Database {
 
     // SELECT clients
     if (s.includes('FROM clients')) {
+      if (s.includes('WHERE email != "" AND LOWER(email) = ?')) {
+        const email = (binds[0] || '').toLowerCase();
+        const res = this.tables.clients.filter(c => c.email && c.email.toLowerCase() === email);
+        return { results: res };
+      }
       if (s.includes('WHERE clientId = ?')) {
         const id = binds[0];
         const res = this.tables.clients.filter(c => c.clientId === id);
@@ -292,15 +300,21 @@ async function runAllSecurityTests() {
     isAnon?: boolean;
     key?: KeyBundle;
     header?: any;
+    emailVerified?: boolean;
+    iat?: number;
+    authTime?: number;
+    customClaims?: Record<string, any>;
   }) => {
     const payload: any = {
       sub: opts.uid || 'uid_priyanshu',
       email: opts.email || 'priyanshu@digiexplode.ai',
+      email_verified: opts.emailVerified !== undefined ? opts.emailVerified : true,
       aud: opts.aud || PROJECT_ID,
       iss: opts.iss || `https://securetoken.google.com/${PROJECT_ID}`,
-      iat: nowSec - 60,
-      auth_time: nowSec - 60,
+      iat: opts.iat !== undefined ? opts.iat : nowSec - 60,
+      auth_time: opts.authTime !== undefined ? opts.authTime : nowSec - 60,
       exp: opts.exp !== undefined ? opts.exp : nowSec + 3600,
+      ...(opts.customClaims || {}),
     };
     if (opts.isAnon) {
       payload.firebase = { sign_in_provider: 'anonymous' };
@@ -521,6 +535,134 @@ async function runAllSecurityTests() {
     const healthReq = new Request('https://api.digiexplode.ai/api/health', { method: 'GET' });
     const healthRes = await worker.fetch(healthReq, env);
     assert(healthRes.status === 200, 'Test 16: Public health check endpoint remains accessible without authentication');
+  }
+
+  // 17. Unprovisioned user denied access by default → 403 Forbidden
+  {
+    const unprovToken = await createToken({ uid: 'uid_unprovisioned_stranger', email: 'stranger@external.com' });
+    const req = new Request('https://api.digiexplode.ai/api/tasks', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${unprovToken}` },
+    });
+    const res = await worker.fetch(req, env);
+    const body: any = await res.json();
+    assert(res.status === 403 && body.error.includes('not provisioned'), 'Test 17: Unprovisioned user denied access by default with 403 Forbidden');
+  }
+
+  // 18. Unsafe role fallback rejection: Token claim cannot self-provision unprovisioned user → 403 Forbidden
+  {
+    const claimToken = await createToken({
+      uid: 'uid_malicious_attacker',
+      email: 'attacker@external.com',
+      customClaims: { role: 'superAdmin', admin: true },
+    });
+    const req = new Request('https://api.digiexplode.ai/api/clients', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${claimToken}` },
+    });
+    const res = await worker.fetch(req, env);
+    const body: any = await res.json();
+    assert(res.status === 403 && body.error.includes('not provisioned'), 'Test 18: Unsafe role fallback rejected; token claims cannot self-provision user in D1');
+  }
+
+  // 19. Bootstrap Super Admin audit: Unverified email rejected → 403 Forbidden
+  {
+    const unverifiedAdminToken = await createToken({
+      uid: 'uid_unverified_admin',
+      email: 'dilseinvite@gmail.com',
+      emailVerified: false,
+    });
+    const req = new Request('https://api.digiexplode.ai/api/clients', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${unverifiedAdminToken}` },
+    });
+    const res = await worker.fetch(req, env);
+    assert(res.status === 403, 'Test 19: Bootstrap Super Admin email with email_verified: false is denied with 403 Forbidden');
+  }
+
+  // 20. Bootstrap Super Admin audit: Verified email permitted → 200 OK
+  {
+    const verifiedAdminToken = await createToken({
+      uid: 'uid_verified_admin',
+      email: 'dilseinvite@gmail.com',
+      emailVerified: true,
+    });
+    const req = new Request('https://api.digiexplode.ai/api/clients', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${verifiedAdminToken}` },
+    });
+    const res = await worker.fetch(req, env);
+    assert(res.status === 200, 'Test 20: Audited bootstrap Super Admin with email_verified: true is granted full access');
+  }
+
+  // 21. Audit bootstrap removal: Former admin@digiexplode.ai without D1 record rejected → 403 Forbidden
+  {
+    const legacyAdminToken = await createToken({
+      uid: 'uid_legacy_admin',
+      email: 'admin@digiexplode.ai',
+      emailVerified: true,
+    });
+    const req = new Request('https://api.digiexplode.ai/api/clients', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${legacyAdminToken}` },
+    });
+    const res = await worker.fetch(req, env);
+    assert(res.status === 403, 'Test 21: Removed bootstrap email admin@digiexplode.ai rejected with 403 Forbidden');
+  }
+
+  // 22. Account revocation enforcement: Token issued before tokensValidAfter → 403 Forbidden
+  {
+    const revocationTimeSec = nowSec - 1800; // Account sessions revoked 30 minutes ago
+    const revokedUser = mockDb.tables.users.find(u => u.userId === 'uid_revoked_user');
+    if (revokedUser) {
+      revokedUser.tokensValidAfter = new Date(revocationTimeSec * 1000).toISOString();
+    }
+
+    const staleRevokedToken = await createToken({
+      uid: 'uid_revoked_user',
+      email: 'revoked@digiexplode.ai',
+      iat: revocationTimeSec - 600, // issued 10 minutes prior to revocation
+      authTime: revocationTimeSec - 600,
+    });
+    const req = new Request('https://api.digiexplode.ai/api/tasks', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${staleRevokedToken}` },
+    });
+    const res = await worker.fetch(req, env);
+    const body: any = await res.json();
+    assert(res.status === 403 && body.error.includes('deactivated'), 'Test 22: Token issued before tokensValidAfter revocation timestamp is rejected with 403 Forbidden');
+  }
+
+  // 23. Account revocation enforcement: Token issued after tokensValidAfter → 200 OK
+  {
+    const revocationTimeSec = nowSec - 1800;
+    const freshToken = await createToken({
+      uid: 'uid_revoked_user',
+      email: 'revoked@digiexplode.ai',
+      iat: revocationTimeSec + 300, // issued 5 minutes after revocation
+      authTime: revocationTimeSec + 300,
+    });
+    const req = new Request('https://api.digiexplode.ai/api/tasks', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${freshToken}` },
+    });
+    const res = await worker.fetch(req, env);
+    assert(res.status === 200, 'Test 23: Fresh token issued after tokensValidAfter is successfully accepted');
+  }
+
+  // 24. Immediate employee account disablement in D1 employees table → 403 Forbidden
+  {
+    const deactivatedEmpToken = await createToken({
+      uid: 'emp_inactive_user',
+      email: 'inactive@digiexplode.ai',
+    });
+    const req = new Request('https://api.digiexplode.ai/api/tasks', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${deactivatedEmpToken}` },
+    });
+    const res = await worker.fetch(req, env);
+    const body: any = await res.json();
+    assert(res.status === 403 && body.error.includes('deactivated'), 'Test 24: Deactivated employee in D1 employees table is immediately denied with 403 Forbidden');
   }
 
   console.log('='.repeat(68));

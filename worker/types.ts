@@ -37,6 +37,7 @@ export interface AuthenticatedUser {
   clientId?: string;
   employeeId?: string;
   status: 'active' | 'inactive';
+  isProvisioned: boolean;
   isAnonymous: boolean;
   tokenClaims: Record<string, any>;
 }

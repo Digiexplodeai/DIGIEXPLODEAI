@@ -55,12 +55,12 @@ export const DEFAULT_ROLE_PERMISSIONS: RolePermissions = CANONICAL_MODULES.reduc
       export: ['Tasks & Work', 'Work Log', 'Reports'].includes(mod),
     },
     employee: {
-      view: ['Tasks & Work', 'Work Log', 'Content Calendar', 'Video Production', 'Attendance & Leaves', 'Performance', 'Files & Assets'].includes(mod),
+      view: ['Tasks & Work', 'Work Log', 'Content Calendar', 'Video Production', 'Attendance & Leaves', 'Performance', 'Files & Assets', 'Reports'].includes(mod),
       create: ['Work Log'].includes(mod),
       edit: ['Work Log', 'Tasks & Work'].includes(mod),
       delete: false,
       approve: false,
-      export: false,
+      export: ['Reports'].includes(mod),
     },
     hr: {
       view: ['Employees', 'Attendance & Leaves', 'HR Documents', 'Payroll'].includes(mod),

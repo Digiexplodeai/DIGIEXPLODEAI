@@ -1,75 +1,141 @@
 /**
  * DigiExplodeAI — Cloudflare Worker API
- * Replaces Firebase Firestore as the data backend.
- * Firebase is kept ONLY for Authentication.
+ * Hardened Zero Trust backend with native RS256 Firebase ID-Token verification,
+ * server-controlled RBAC, multi-tenant isolation, and resource-level access control.
  *
  * Routes:
- *   /api/clients       GET, POST
- *   /api/clients/:id   GET, PUT, DELETE
- *   /api/employees     GET, POST
- *   /api/employees/:id GET, PUT, DELETE
- *   /api/tasks         GET, POST
- *   /api/tasks/:id     GET, PUT, DELETE
- *   /api/calendar      GET, POST
- *   /api/calendar/:id  GET, PUT, DELETE
- *   /api/worklogs      GET, POST
- *   /api/worklogs/:id  PUT, DELETE
- *   /api/attendance    GET, POST
- *   /api/attendance/:id PUT
- *   /api/approvals     GET, POST
- *   /api/approvals/:id PUT, DELETE
- *   /api/videotracker  GET, POST
- *   /api/videotracker/:id PUT, DELETE
- *   /api/payslips      GET, POST
- *   /api/payslips/:id  PUT, DELETE
- *   /api/hrdocuments   GET, POST
- *   /api/hrdocuments/:id PUT, DELETE
- *   /api/users         GET, POST
- *   /api/users/:id     GET, PUT
+ *   /api/health        GET (Public)
+ *   /api/clients       GET, POST (Authenticated, RBAC Scoped)
+ *   /api/clients/:id   GET, PUT, DELETE (Authenticated, RBAC Scoped)
+ *   /api/employees     GET, POST (Authenticated, RBAC Scoped)
+ *   /api/employees/:id GET, PUT, DELETE (Authenticated, RBAC Scoped)
+ *   /api/tasks         GET, POST (Authenticated, Client Isolated)
+ *   /api/tasks/:id     GET, PUT, DELETE (Authenticated, Client Isolated)
+ *   /api/calendar      GET, POST (Authenticated, Client Isolated)
+ *   /api/calendar/:id  PUT, DELETE (Authenticated, Client Isolated)
+ *   /api/worklogs      GET, POST (Authenticated, Employee Isolated)
+ *   /api/worklogs/:id  PUT, DELETE (Authenticated, Employee Isolated)
+ *   /api/attendance    GET, POST, PUT (Authenticated, Employee Isolated)
+ *   /api/approvals     GET, POST, PUT, DELETE (Authenticated, Client Isolated)
+ *   /api/videotracker  GET, POST, PUT, DELETE (Authenticated, Client Isolated)
+ *   /api/payslips      GET, POST, PUT, DELETE (Authenticated, Payroll RBAC)
+ *   /api/hrdocuments   GET, POST, PUT, DELETE (Authenticated, HR RBAC)
+ *   /api/users         GET, POST (Authenticated, User Administration)
+ *   /api/users/:id     GET, PUT (Authenticated, User Administration)
  */
 
-export interface Env {
-  DB: D1Database;
-  KV?: KVNamespace;
+import type { Env, AuthenticatedUser } from './types';
+import { extractBearerToken, verifyFirebaseIdToken } from './auth';
+import {
+  resolveUserProfile,
+  hasRole,
+  canViewPayroll,
+  canManagePayroll,
+  canViewHRDocuments,
+  canManageHRDocuments,
+  normalizeRole,
+} from './rbac';
+
+export type { Env, AuthenticatedUser };
+
+// ── CORS Headers Generator ──────────────────────────────────────────────────
+function getCorsHeaders(request: Request, env: Env) {
+  const origin = request.headers.get('Origin') || '';
+  const defaultAllowed = 'https://digiexplodeai.vercel.app,http://localhost:3000,http://localhost:5173';
+  const allowed = (env.ALLOWED_ORIGINS || defaultAllowed).split(',').map(o => o.trim());
+
+  const isAllowed =
+    allowed.includes(origin) ||
+    origin.endsWith('.vercel.app') ||
+    origin.startsWith('http://localhost:');
+
+  const allowOrigin = isAllowed && origin ? origin : 'https://digiexplodeai.vercel.app';
+
+  return {
+    'Access-Control-Allow-Origin': allowOrigin,
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Max-Age': '86400',
+  };
 }
 
-// ── CORS Headers ──────────────────────────────────────────────────────────
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-};
-
-function json(data: any, status = 200) {
+function json(data: any, status = 200, cors: Record<string, string>) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+    headers: { 'Content-Type': 'application/json', ...cors },
   });
 }
 
-function notFound(msg = 'Not found') {
-  return json({ error: msg }, 404);
+function unauthorized(msg = 'Unauthorized', cors: Record<string, string>) {
+  return json({ error: msg }, 401, cors);
 }
 
-function err(msg: string, status = 500) {
-  return json({ error: msg }, status);
+function forbidden(msg = 'Forbidden', cors: Record<string, string>) {
+  return json({ error: msg }, 403, cors);
 }
 
-// ── Simple UID generator ───────────────────────────────────────────────────
+function notFound(msg = 'Not found', cors: Record<string, string>) {
+  return json({ error: msg }, 404, cors);
+}
+
+function err(msg: string, status = 500, cors: Record<string, string>) {
+  return json({ error: msg }, status, cors);
+}
+
 function uid(prefix = 'id') {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-// ── Route handler ──────────────────────────────────────────────────────────
+function tryParse(val: any, fallback: any) {
+  if (!val) return fallback;
+  try { return JSON.parse(val); } catch { return fallback; }
+}
+
+// ── Main Route Handler ──────────────────────────────────────────────────────
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const cors = getCorsHeaders(request, env);
     const url = new URL(request.url);
     const path = url.pathname;
     const method = request.method;
 
-    // CORS preflight
+    // 1. CORS Preflight
     if (method === 'OPTIONS') {
-      return new Response(null, { headers: CORS_HEADERS });
+      return new Response(null, { headers: cors, status: 204 });
+    }
+
+    // Route segments
+    const parts = path.replace(/^\/api\//, '').split('/');
+    const resource = parts[0];
+    const id = parts[1];
+
+    // 2. Health check (Public uptime monitoring)
+    if (resource === 'health') {
+      return json({ status: 'ok', timestamp: new Date().toISOString(), db: 'D1' }, 200, cors);
+    }
+
+    // 3. Authenticate all protected API routes
+    const token = extractBearerToken(request);
+    if (!token) {
+      return unauthorized('Missing or malformed Authorization header. Expected Bearer <token>', cors);
+    }
+
+    const authVerification = await verifyFirebaseIdToken(token, env);
+    if (authVerification.success === false) {
+      return unauthorized(authVerification.error, cors);
+    }
+
+    // 4. Resolve Trusted User Role & Account Status from Server (D1)
+    const user: AuthenticatedUser = await resolveUserProfile(
+      authVerification.uid,
+      authVerification.email,
+      authVerification.payload,
+      env
+    );
+
+    // 5. Account Disablement & Deactivation Enforcement
+    if (user.status === 'inactive') {
+      return forbidden('Account is deactivated. Access denied.', cors);
     }
 
     // Parse JSON body for mutating methods
@@ -78,24 +144,34 @@ export default {
       try { body = await request.json(); } catch {}
     }
 
-    // Route segments
-    const parts = path.replace(/^\/api\//, '').split('/');
-    const resource = parts[0];
-    const id = parts[1];
-
     try {
       switch (resource) {
         // ── CLIENTS ──────────────────────────────────────────────────────
         case 'clients': {
           if (method === 'GET' && !id) {
+            if (user.role === 'client') {
+              if (!user.clientId) return json([], 200, cors);
+              const { results } = await env.DB.prepare(
+                'SELECT * FROM clients WHERE clientId = ?'
+              ).bind(user.clientId).all();
+              return json(results, 200, cors);
+            }
             const { results } = await env.DB.prepare('SELECT * FROM clients ORDER BY updatedAt DESC').all();
-            return json(results);
+            return json(results, 200, cors);
           }
+
           if (method === 'GET' && id) {
+            if (user.role === 'client' && user.clientId !== id) {
+              return forbidden("Access denied to other client's records", cors);
+            }
             const row = await env.DB.prepare('SELECT * FROM clients WHERE clientId = ?').bind(id).first();
-            return row ? json(row) : notFound();
+            return row ? json(row, 200, cors) : notFound('Client not found', cors);
           }
+
           if (method === 'POST') {
+            if (!hasRole(user, ['superAdmin', 'admin'])) {
+              return forbidden('Only administrators can register clients', cors);
+            }
             const now = new Date().toISOString();
             const clientId = body.clientId || uid('client');
             await env.DB.prepare(`
@@ -113,9 +189,13 @@ export default {
               body.startDate||'', body.status||'Active', body.assignedAdminId||'', body.notes||'',
               body.createdAt||now, now
             ).run();
-            return json({ clientId, ...body, createdAt: body.createdAt||now, updatedAt: now }, 201);
+            return json({ clientId, ...body, createdAt: body.createdAt||now, updatedAt: now }, 201, cors);
           }
+
           if (method === 'PUT' && id) {
+            if (!hasRole(user, ['superAdmin', 'admin'])) {
+              return forbidden('Only administrators can modify client profiles', cors);
+            }
             const now = new Date().toISOString();
             await env.DB.prepare(`
               INSERT INTO clients (clientId,clientName,businessName,category,contactPerson,phone,email,package,startDate,status,assignedAdminId,notes,createdAt,updatedAt)
@@ -132,26 +212,53 @@ export default {
               body.startDate||'', body.status||'Active', body.assignedAdminId||'', body.notes||'',
               body.createdAt||now, now
             ).run();
-            return json({ success: true, clientId: id, updatedAt: now });
+            return json({ success: true, clientId: id, updatedAt: now }, 200, cors);
           }
+
           if (method === 'DELETE' && id) {
+            if (user.role !== 'superAdmin') {
+              return forbidden('Only Super Admin is authorized to delete client accounts', cors);
+            }
             await env.DB.prepare('DELETE FROM clients WHERE clientId = ?').bind(id).run();
-            return json({ success: true });
+            return json({ success: true }, 200, cors);
           }
           break;
         }
 
         // ── EMPLOYEES ────────────────────────────────────────────────────
         case 'employees': {
+          if (user.role === 'client') {
+            return forbidden('Clients are not authorized to access employee records', cors);
+          }
+
           if (method === 'GET' && !id) {
             const { results } = await env.DB.prepare('SELECT * FROM employees ORDER BY name ASC').all();
-            return json(results);
+            const isPrivileged = hasRole(user, ['superAdmin', 'admin', 'hr', 'accounts']);
+            const sanitized = (results || []).map((emp: any) => {
+              if (!isPrivileged) {
+                const { monthlySalary, notes, ...rest } = emp;
+                return { ...rest, monthlySalary: 0 };
+              }
+              return emp;
+            });
+            return json(sanitized, 200, cors);
           }
+
           if (method === 'GET' && id) {
-            const row = await env.DB.prepare('SELECT * FROM employees WHERE id = ?').bind(id).first();
-            return row ? json(row) : notFound();
+            const row: any = await env.DB.prepare('SELECT * FROM employees WHERE id = ?').bind(id).first();
+            if (!row) return notFound('Employee not found', cors);
+            const isPrivileged = hasRole(user, ['superAdmin', 'admin', 'hr', 'accounts']) || user.employeeId === id;
+            if (!isPrivileged) {
+              const { monthlySalary, notes, ...rest } = row;
+              return json({ ...rest, monthlySalary: 0 }, 200, cors);
+            }
+            return json(row, 200, cors);
           }
+
           if (method === 'POST') {
+            if (!hasRole(user, ['superAdmin', 'admin', 'hr'])) {
+              return forbidden('Only Super Admin, Admin, or HR can create employee records', cors);
+            }
             const now = new Date().toISOString();
             const empId = body.id || body.employeeId || uid('emp');
             await env.DB.prepare(`
@@ -168,9 +275,13 @@ export default {
               body.joiningDate||'', body.status||'Active', body.monthlySalary||0,
               body.weeklyOff||'Sunday', body.notes||'', body.createdAt||now
             ).run();
-            return json({ id: empId, employeeId: empId, ...body }, 201);
+            return json({ id: empId, employeeId: empId, ...body }, 201, cors);
           }
+
           if (method === 'PUT' && id) {
+            if (!hasRole(user, ['superAdmin', 'admin', 'hr'])) {
+              return forbidden('Only Super Admin, Admin, or HR can modify employee records', cors);
+            }
             await env.DB.prepare(`
               UPDATE employees SET name=?,email=?,phone=?,role=?,designation=?,department=?,
               joiningDate=?,status=?,monthlySalary=?,weeklyOff=?,notes=? WHERE id=?
@@ -180,11 +291,15 @@ export default {
               body.joiningDate||'', body.status||'Active', body.monthlySalary||0,
               body.weeklyOff||'Sunday', body.notes||'', id
             ).run();
-            return json({ success: true });
+            return json({ success: true }, 200, cors);
           }
+
           if (method === 'DELETE' && id) {
+            if (!hasRole(user, ['superAdmin', 'admin'])) {
+              return forbidden('Only administrators can delete employee profiles', cors);
+            }
             await env.DB.prepare('DELETE FROM employees WHERE id = ?').bind(id).run();
-            return json({ success: true });
+            return json({ success: true }, 200, cors);
           }
           break;
         }
@@ -192,25 +307,46 @@ export default {
         // ── TASKS ────────────────────────────────────────────────────────
         case 'tasks': {
           if (method === 'GET' && !id) {
-            const clientId = url.searchParams.get('clientId');
+            let targetClientId = url.searchParams.get('clientId');
             const assigneeId = url.searchParams.get('assigneeId');
             const status = url.searchParams.get('status');
+
+            // Enforce client-to-client tenant isolation
+            if (user.role === 'client') {
+              targetClientId = user.clientId || 'unassigned_client_scope';
+            }
+
             let q = 'SELECT * FROM tasks WHERE 1=1';
             const binds: any[] = [];
-            if (clientId) { q += ' AND clientId = ?'; binds.push(clientId); }
+            if (targetClientId) { q += ' AND clientId = ?'; binds.push(targetClientId); }
             if (assigneeId) { q += ' AND assigneeId = ?'; binds.push(assigneeId); }
             if (status) { q += ' AND status = ?'; binds.push(status); }
             q += ' ORDER BY updatedAt DESC';
+
             const { results } = await env.DB.prepare(q).bind(...binds).all();
-            return json(results);
+            return json(results, 200, cors);
           }
+
           if (method === 'GET' && id) {
-            const row = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(id).first();
-            return row ? json(row) : notFound();
+            const row: any = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(id).first();
+            if (!row) return notFound('Task not found', cors);
+
+            if (user.role === 'client' && row.clientId !== user.clientId) {
+              return forbidden("Access denied: task belongs to another client's workspace", cors);
+            }
+            return json(row, 200, cors);
           }
+
           if (method === 'POST') {
             const now = new Date().toISOString();
             const taskId = body.id || body.taskId || uid('task');
+
+            // Enforce client tenant scope
+            let assignedClientId = body.clientId || '';
+            if (user.role === 'client') {
+              assignedClientId = user.clientId || '';
+            }
+
             await env.DB.prepare(`
               INSERT INTO tasks (id,taskId,title,description,status,priority,category,clientId,clientName,
               assigneeId,assigneeName,dueDate,scheduledDate,completedAt,createdAt,updatedAt,createdBy,format,platform,notes)
@@ -224,15 +360,24 @@ export default {
             `).bind(
               taskId, taskId, body.title||'', body.description||'',
               body.status||'Planned', body.priority||'Medium', body.category||'Graphic Design',
-              body.clientId||'', body.clientName||'', body.assigneeId||'', body.assigneeName||'',
+              assignedClientId, body.clientName||'', body.assigneeId||'', body.assigneeName||'',
               body.dueDate||'', body.scheduledDate||body.dueDate||'', body.completedAt||'',
-              body.createdAt||now, now, body.createdBy||'', body.format||'', body.platform||'', body.notes||''
+              body.createdAt||now, now, body.createdBy||user.email, body.format||'', body.platform||'', body.notes||''
             ).run();
-            return json({ id: taskId, taskId, ...body, createdAt: body.createdAt||now, updatedAt: now }, 201);
+            return json({ id: taskId, taskId, ...body, clientId: assignedClientId, createdAt: body.createdAt||now, updatedAt: now }, 201, cors);
           }
+
           if (method === 'PUT' && id) {
+            const existing: any = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(id).first();
+            if (!existing) return notFound('Task not found', cors);
+
+            if (user.role === 'client' && existing.clientId !== user.clientId) {
+              return forbidden("Access denied: task belongs to another client's workspace", cors);
+            }
+
             const now = new Date().toISOString();
-            const taskId = id;
+            const assignedClientId = user.role === 'client' ? (user.clientId || existing.clientId) : (body.clientId || existing.clientId);
+
             await env.DB.prepare(`
               INSERT INTO tasks (id,taskId,title,description,status,priority,category,clientId,clientName,
               assigneeId,assigneeName,dueDate,scheduledDate,completedAt,createdAt,updatedAt,createdBy,format,platform,notes)
@@ -244,17 +389,21 @@ export default {
                 dueDate=excluded.dueDate, scheduledDate=excluded.scheduledDate, completedAt=excluded.completedAt,
                 updatedAt=excluded.updatedAt, format=excluded.format, platform=excluded.platform, notes=excluded.notes
             `).bind(
-              taskId, taskId, body.title||'', body.description||'',
-              body.status||'Planned', body.priority||'Medium', body.category||'Graphic Design',
-              body.clientId||'', body.clientName||'', body.assigneeId||'', body.assigneeName||'',
-              body.dueDate||'', body.scheduledDate||body.dueDate||'', body.completedAt||'',
-              body.createdAt||now, now, body.createdBy||'', body.format||'', body.platform||'', body.notes||''
+              id, id, body.title||existing.title||'', body.description||existing.description||'',
+              body.status||existing.status||'Planned', body.priority||existing.priority||'Medium', body.category||existing.category||'Graphic Design',
+              assignedClientId, body.clientName||existing.clientName||'', body.assigneeId||existing.assigneeId||'', body.assigneeName||existing.assigneeName||'',
+              body.dueDate||existing.dueDate||'', body.scheduledDate||existing.scheduledDate||body.dueDate||'', body.completedAt||existing.completedAt||'',
+              existing.createdAt||now, now, existing.createdBy||user.email, body.format||existing.format||'', body.platform||existing.platform||'', body.notes||existing.notes||''
             ).run();
-            return json({ success: true, taskId, updatedAt: now });
+            return json({ success: true, taskId: id, updatedAt: now }, 200, cors);
           }
+
           if (method === 'DELETE' && id) {
+            if (!hasRole(user, ['superAdmin', 'admin'])) {
+              return forbidden('Only administrators can delete tasks', cors);
+            }
             await env.DB.prepare('DELETE FROM tasks WHERE id = ?').bind(id).run();
-            return json({ success: true });
+            return json({ success: true }, 200, cors);
           }
           break;
         }
@@ -262,19 +411,27 @@ export default {
         // ── CONTENT CALENDAR ─────────────────────────────────────────────
         case 'calendar': {
           if (method === 'GET' && !id) {
-            const clientId = url.searchParams.get('clientId');
+            let targetClientId = url.searchParams.get('clientId');
+            if (user.role === 'client') {
+              targetClientId = user.clientId || 'unassigned_client_scope';
+            }
+
             let q = 'SELECT * FROM contentCalendar WHERE 1=1';
             const binds: any[] = [];
-            if (clientId) { q += ' AND clientId = ?'; binds.push(clientId); }
+            if (targetClientId) { q += ' AND clientId = ?'; binds.push(targetClientId); }
             q += ' ORDER BY scheduledDate ASC';
+
             const { results } = await env.DB.prepare(q).bind(...binds).all();
-            // Parse JSON fields
-            return json(results.map((r: any) => ({
+            return json((results || []).map((r: any) => ({
               ...r,
               platforms: tryParse(r.platforms, []),
-            })));
+            })), 200, cors);
           }
+
           if (method === 'POST') {
+            if (user.role === 'client') {
+              return forbidden('Clients cannot create calendar entries directly', cors);
+            }
             const now = new Date().toISOString();
             const entryId = body.id || uid('cal');
             await env.DB.prepare(`
@@ -295,101 +452,161 @@ export default {
               body.caption||'', body.notes||'', body.approvalStatus||'pending',
               body.createdAt||now, now
             ).run();
-            return json({ id: entryId, ...body, createdAt: body.createdAt||now, updatedAt: now }, 201);
+            return json({ id: entryId, ...body, createdAt: body.createdAt||now, updatedAt: now }, 201, cors);
           }
+
           if (method === 'PUT' && id) {
+            const existing: any = await env.DB.prepare('SELECT * FROM contentCalendar WHERE id = ?').bind(id).first();
+            if (!existing) return notFound('Calendar entry not found', cors);
+
+            if (user.role === 'client' && existing.clientId !== user.clientId) {
+              return forbidden("Access denied: calendar entry belongs to another client", cors);
+            }
+
             const now = new Date().toISOString();
             await env.DB.prepare(`
               UPDATE contentCalendar SET title=?,clientId=?,clientName=?,contentType=?,platforms=?,status=?,
               assigneeId=?,assigneeName=?,scheduledDate=?,dueDate=?,caption=?,notes=?,approvalStatus=?,updatedAt=?
               WHERE id=?
             `).bind(
-              body.title||'', body.clientId||'', body.clientName||'', body.contentType||'Static Post',
-              JSON.stringify(body.platforms||[]), body.status||'Planned',
-              body.assigneeId||'', body.assigneeName||'', body.scheduledDate||'', body.dueDate||'',
-              body.caption||'', body.notes||'', body.approvalStatus||'pending', now, id
+              body.title||existing.title||'', user.role === 'client' ? existing.clientId : (body.clientId||existing.clientId||''),
+              body.clientName||existing.clientName||'', body.contentType||existing.contentType||'Static Post',
+              JSON.stringify(body.platforms||tryParse(existing.platforms, [])), body.status||existing.status||'Planned',
+              body.assigneeId||existing.assigneeId||'', body.assigneeName||existing.assigneeName||'',
+              body.scheduledDate||existing.scheduledDate||'', body.dueDate||existing.dueDate||'',
+              body.caption||existing.caption||'', body.notes||existing.notes||'',
+              body.approvalStatus||existing.approvalStatus||'pending', now, id
             ).run();
-            return json({ success: true, updatedAt: now });
+            return json({ success: true, updatedAt: now }, 200, cors);
           }
+
           if (method === 'DELETE' && id) {
+            if (!hasRole(user, ['superAdmin', 'admin'])) {
+              return forbidden('Only administrators can delete calendar entries', cors);
+            }
             await env.DB.prepare('DELETE FROM contentCalendar WHERE id = ?').bind(id).run();
-            return json({ success: true });
+            return json({ success: true }, 200, cors);
           }
           break;
         }
 
         // ── WORKLOGS ─────────────────────────────────────────────────────
         case 'worklogs': {
+          if (user.role === 'client') {
+            return forbidden('Clients cannot access employee work logs', cors);
+          }
+
           if (method === 'GET' && !id) {
-            const employeeId = url.searchParams.get('employeeId');
+            let targetEmployeeId = url.searchParams.get('employeeId');
+            if (user.role === 'employee') {
+              targetEmployeeId = user.employeeId || user.uid;
+            }
+
             let q = 'SELECT * FROM workLogs WHERE 1=1';
             const binds: any[] = [];
-            if (employeeId) { q += ' AND employeeId = ?'; binds.push(employeeId); }
+            if (targetEmployeeId) { q += ' AND employeeId = ?'; binds.push(targetEmployeeId); }
             q += ' ORDER BY date DESC';
+
             const { results } = await env.DB.prepare(q).bind(...binds).all();
-            return json(results);
+            return json(results, 200, cors);
           }
+
           if (method === 'POST') {
             const now = new Date().toISOString();
             const logId = body.id || uid('log');
+            const targetEmployeeId = user.role === 'employee' ? (user.employeeId || user.uid) : (body.employeeId || user.uid);
+
             await env.DB.prepare(`
               INSERT INTO workLogs (id,taskId,taskTitle,employeeId,employeeName,clientId,clientName,status,hoursWorked,date,notes,createdAt)
               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
               ON CONFLICT(id) DO UPDATE SET status=excluded.status, hoursWorked=excluded.hoursWorked, notes=excluded.notes
             `).bind(
-              logId, body.taskId||'', body.taskTitle||'', body.employeeId||'', body.employeeName||'',
+              logId, body.taskId||'', body.taskTitle||'', targetEmployeeId, body.employeeName||'',
               body.clientId||'', body.clientName||'', body.status||'Completed',
               body.hoursWorked||0, body.date||now.split('T')[0], body.notes||'', now
             ).run();
-            return json({ id: logId, ...body }, 201);
+            return json({ id: logId, ...body, employeeId: targetEmployeeId }, 201, cors);
           }
+
           if (method === 'PUT' && id) {
+            if (user.role === 'employee') {
+              const existing: any = await env.DB.prepare('SELECT * FROM workLogs WHERE id = ?').bind(id).first();
+              if (!existing) return notFound('Work log not found', cors);
+              if (existing.employeeId !== user.employeeId && existing.employeeId !== user.uid) {
+                return forbidden("Access denied: cannot modify another employee's work log", cors);
+              }
+            }
             await env.DB.prepare(`
               UPDATE workLogs SET status=?,hoursWorked=?,notes=? WHERE id=?
             `).bind(body.status||'Completed', body.hoursWorked||0, body.notes||'', id).run();
-            return json({ success: true });
+            return json({ success: true }, 200, cors);
           }
+
           if (method === 'DELETE' && id) {
+            if (!hasRole(user, ['superAdmin', 'admin'])) {
+              return forbidden('Only administrators can delete work logs', cors);
+            }
             await env.DB.prepare('DELETE FROM workLogs WHERE id = ?').bind(id).run();
-            return json({ success: true });
+            return json({ success: true }, 200, cors);
           }
           break;
         }
 
         // ── ATTENDANCE ───────────────────────────────────────────────────
         case 'attendance': {
+          if (user.role === 'client') {
+            return forbidden('Clients cannot access employee attendance records', cors);
+          }
+
           if (method === 'GET' && !id) {
             const date = url.searchParams.get('date');
-            const employeeId = url.searchParams.get('employeeId');
+            let targetEmployeeId = url.searchParams.get('employeeId');
+
+            if (user.role === 'employee') {
+              targetEmployeeId = user.employeeId || user.uid;
+            }
+
             let q = 'SELECT * FROM attendance WHERE 1=1';
             const binds: any[] = [];
             if (date) { q += ' AND date = ?'; binds.push(date); }
-            if (employeeId) { q += ' AND employeeId = ?'; binds.push(employeeId); }
+            if (targetEmployeeId) { q += ' AND employeeId = ?'; binds.push(targetEmployeeId); }
             q += ' ORDER BY date DESC';
+
             const { results } = await env.DB.prepare(q).bind(...binds).all();
-            return json(results);
+            return json(results, 200, cors);
           }
+
           if (method === 'POST') {
             const now = new Date().toISOString();
             const attId = body.id || body.attendanceId || uid('att');
+            const targetEmployeeId = user.role === 'employee' ? (user.employeeId || user.uid) : (body.employeeId || user.uid);
+
             await env.DB.prepare(`
               INSERT INTO attendance (id,attendanceId,employeeId,employeeName,date,status,checkIn,checkOut,hoursWorked,notes,createdAt)
               VALUES (?,?,?,?,?,?,?,?,?,?,?)
               ON CONFLICT(id) DO UPDATE SET status=excluded.status, checkIn=excluded.checkIn,
               checkOut=excluded.checkOut, hoursWorked=excluded.hoursWorked, notes=excluded.notes
             `).bind(
-              attId, attId, body.employeeId||'', body.employeeName||'',
+              attId, attId, targetEmployeeId, body.employeeName||'',
               body.date||now.split('T')[0], body.status||'Present',
               body.checkIn||body.checkInTime||'', body.checkOut||'', body.hoursWorked||0,
               body.notes||'', now
             ).run();
-            return json({ id: attId, ...body }, 201);
+            return json({ id: attId, ...body, employeeId: targetEmployeeId }, 201, cors);
           }
+
           if (method === 'PUT' && id) {
+            if (user.role === 'employee') {
+              const existing: any = await env.DB.prepare('SELECT * FROM attendance WHERE id = ?').bind(id).first();
+              if (!existing) return notFound('Attendance record not found', cors);
+              if (existing.employeeId !== user.employeeId && existing.employeeId !== user.uid) {
+                return forbidden("Access denied: cannot update another employee's attendance", cors);
+              }
+            }
             await env.DB.prepare(`
               UPDATE attendance SET status=?,checkIn=?,checkOut=?,hoursWorked=?,notes=? WHERE id=?
             `).bind(body.status||'Present', body.checkIn||'', body.checkOut||'', body.hoursWorked||0, body.notes||'', id).run();
-            return json({ success: true });
+            return json({ success: true }, 200, cors);
           }
           break;
         }
@@ -397,10 +614,21 @@ export default {
         // ── APPROVALS ────────────────────────────────────────────────────
         case 'approvals': {
           if (method === 'GET' && !id) {
-            const { results } = await env.DB.prepare('SELECT * FROM approvals ORDER BY createdAt DESC').all();
-            return json(results);
+            let q = 'SELECT * FROM approvals WHERE 1=1';
+            const binds: any[] = [];
+            if (user.role === 'client') {
+              q += ' AND clientId = ?';
+              binds.push(user.clientId || 'unassigned_client_scope');
+            }
+            q += ' ORDER BY createdAt DESC';
+            const { results } = await env.DB.prepare(q).bind(...binds).all();
+            return json(results, 200, cors);
           }
+
           if (method === 'POST') {
+            if (user.role === 'client') {
+              return forbidden('Clients cannot submit approval items directly', cors);
+            }
             const now = new Date().toISOString();
             const appId = body.id || uid('appr');
             await env.DB.prepare(`
@@ -409,21 +637,33 @@ export default {
               ON CONFLICT(id) DO UPDATE SET status=excluded.status, reviewedBy=excluded.reviewedBy, notes=excluded.notes, updatedAt=excluded.updatedAt
             `).bind(
               appId, body.taskId||'', body.clientId||'', body.clientName||'', body.title||'',
-              body.status||'pending', body.submittedBy||'', body.reviewedBy||'',
+              body.status||'pending', body.submittedBy||user.email, body.reviewedBy||'',
               body.fileUrl||'', body.notes||'', now, now
             ).run();
-            return json({ id: appId, ...body }, 201);
+            return json({ id: appId, ...body }, 201, cors);
           }
+
           if (method === 'PUT' && id) {
+            const existing: any = await env.DB.prepare('SELECT * FROM approvals WHERE id = ?').bind(id).first();
+            if (!existing) return notFound('Approval not found', cors);
+
+            if (user.role === 'client' && existing.clientId !== user.clientId) {
+              return forbidden("Access denied: approval request belongs to another client", cors);
+            }
+
             const now = new Date().toISOString();
             await env.DB.prepare(`
               UPDATE approvals SET status=?,reviewedBy=?,notes=?,updatedAt=? WHERE id=?
-            `).bind(body.status||'pending', body.reviewedBy||'', body.notes||'', now, id).run();
-            return json({ success: true });
+            `).bind(body.status||existing.status||'pending', body.reviewedBy||user.email, body.notes||existing.notes||'', now, id).run();
+            return json({ success: true }, 200, cors);
           }
+
           if (method === 'DELETE' && id) {
+            if (!hasRole(user, ['superAdmin', 'admin'])) {
+              return forbidden('Only administrators can delete approval requests', cors);
+            }
             await env.DB.prepare('DELETE FROM approvals WHERE id = ?').bind(id).run();
-            return json({ success: true });
+            return json({ success: true }, 200, cors);
           }
           break;
         }
@@ -431,10 +671,21 @@ export default {
         // ── VIDEO TRACKER ────────────────────────────────────────────────
         case 'videotracker': {
           if (method === 'GET' && !id) {
-            const { results } = await env.DB.prepare('SELECT * FROM videoTracker ORDER BY createdAt DESC').all();
-            return json(results);
+            let q = 'SELECT * FROM videoTracker WHERE 1=1';
+            const binds: any[] = [];
+            if (user.role === 'client') {
+              q += ' AND clientId = ?';
+              binds.push(user.clientId || 'unassigned_client_scope');
+            }
+            q += ' ORDER BY createdAt DESC';
+            const { results } = await env.DB.prepare(q).bind(...binds).all();
+            return json(results, 200, cors);
           }
+
           if (method === 'POST') {
+            if (user.role === 'client') {
+              return forbidden('Clients cannot create video production entries', cors);
+            }
             const now = new Date().toISOString();
             const vidId = body.id || uid('vid');
             await env.DB.prepare(`
@@ -451,9 +702,13 @@ export default {
               body.editorId||'', body.editorName||'', body.shootDate||'', body.dueDate||'',
               body.footageLink||'', body.notes||'', now, now
             ).run();
-            return json({ id: vidId, ...body }, 201);
+            return json({ id: vidId, ...body }, 201, cors);
           }
+
           if (method === 'PUT' && id) {
+            if (user.role === 'client') {
+              return forbidden('Clients cannot modify video production entries', cors);
+            }
             const now = new Date().toISOString();
             await env.DB.prepare(`
               UPDATE videoTracker SET status=?,shotQuantity=?,editedQuantity=?,editorId=?,editorName=?,
@@ -464,34 +719,57 @@ export default {
               body.editorId||'', body.editorName||'', body.videographerId||'', body.videographerName||'',
               body.shootDate||'', body.dueDate||'', body.footageLink||'', body.notes||'', now, id
             ).run();
-            return json({ success: true });
+            return json({ success: true }, 200, cors);
           }
+
           if (method === 'DELETE' && id) {
+            if (!hasRole(user, ['superAdmin', 'admin'])) {
+              return forbidden('Only administrators can delete video tracker records', cors);
+            }
             await env.DB.prepare('DELETE FROM videoTracker WHERE id = ?').bind(id).run();
-            return json({ success: true });
+            return json({ success: true }, 200, cors);
           }
           break;
         }
 
         // ── PAYSLIPS ─────────────────────────────────────────────────────
         case 'payslips': {
+          if (user.role === 'client') {
+            return forbidden('Clients cannot access payroll information', cors);
+          }
+
           if (method === 'GET' && !id) {
             const month = url.searchParams.get('month');
-            const employeeId = url.searchParams.get('employeeId');
+            let targetEmployeeId = url.searchParams.get('employeeId');
+
+            // Restrict employees to only their own payslips
+            if (user.role === 'employee') {
+              targetEmployeeId = user.employeeId || user.uid;
+            }
+
+            if (!canViewPayroll(user, targetEmployeeId)) {
+              return forbidden('Unauthorized to access payroll records', cors);
+            }
+
             let q = 'SELECT * FROM payslips WHERE 1=1';
             const binds: any[] = [];
             if (month) { q += ' AND month = ?'; binds.push(month); }
-            if (employeeId) { q += ' AND employeeId = ?'; binds.push(employeeId); }
+            if (targetEmployeeId) { q += ' AND employeeId = ?'; binds.push(targetEmployeeId); }
             q += ' ORDER BY month DESC';
+
             const { results } = await env.DB.prepare(q).bind(...binds).all();
-            return json(results.map((r: any) => ({
+            return json((results || []).map((r: any) => ({
               ...r,
               deductions: tryParse(r.deductions, {}),
               earnings: tryParse(r.earnings, {}),
               attendance: tryParse(r.attendance, {}),
-            })));
+            })), 200, cors);
           }
+
           if (method === 'POST') {
+            if (!canManagePayroll(user)) {
+              return forbidden('Only Super Admin, Admin, or Accounts can generate payslips', cors);
+            }
             const now = new Date().toISOString();
             const psId = body.id || uid('ps');
             await env.DB.prepare(`
@@ -505,11 +783,15 @@ export default {
               body.annualCTC||0, body.grossPay||0, body.netPay||0,
               JSON.stringify(body.deductions||{}), JSON.stringify(body.earnings||{}),
               JSON.stringify(body.attendance||{}), body.status||'pending',
-              body.generatedAt||'', now, now
+              body.generatedAt||now, now, now
             ).run();
-            return json({ id: psId, ...body }, 201);
+            return json({ id: psId, ...body }, 201, cors);
           }
+
           if (method === 'PUT' && id) {
+            if (!canManagePayroll(user)) {
+              return forbidden('Only Super Admin, Admin, or Accounts can modify payslips', cors);
+            }
             const now = new Date().toISOString();
             await env.DB.prepare(`
               UPDATE payslips SET grossPay=?,netPay=?,deductions=?,earnings=?,attendance=?,status=?,generatedAt=?,updatedAt=?
@@ -518,29 +800,50 @@ export default {
               body.grossPay||0, body.netPay||0,
               JSON.stringify(body.deductions||{}), JSON.stringify(body.earnings||{}),
               JSON.stringify(body.attendance||{}), body.status||'pending',
-              body.generatedAt||'', now, id
+              body.generatedAt||now, now, id
             ).run();
-            return json({ success: true });
+            return json({ success: true }, 200, cors);
           }
+
           if (method === 'DELETE' && id) {
+            if (!canManagePayroll(user)) {
+              return forbidden('Only Super Admin, Admin, or Accounts can delete payslips', cors);
+            }
             await env.DB.prepare('DELETE FROM payslips WHERE id = ?').bind(id).run();
-            return json({ success: true });
+            return json({ success: true }, 200, cors);
           }
           break;
         }
 
         // ── HR DOCUMENTS ─────────────────────────────────────────────────
         case 'hrdocuments': {
+          if (user.role === 'client') {
+            return forbidden('Clients cannot access HR documents', cors);
+          }
+
           if (method === 'GET' && !id) {
-            const employeeId = url.searchParams.get('employeeId');
+            let targetEmployeeId = url.searchParams.get('employeeId');
+            if (user.role === 'employee') {
+              targetEmployeeId = user.employeeId || user.uid;
+            }
+
+            if (!canViewHRDocuments(user, targetEmployeeId)) {
+              return forbidden('Unauthorized to access HR documents', cors);
+            }
+
             let q = 'SELECT * FROM hrDocuments WHERE 1=1';
             const binds: any[] = [];
-            if (employeeId) { q += ' AND employeeId = ?'; binds.push(employeeId); }
+            if (targetEmployeeId) { q += ' AND employeeId = ?'; binds.push(targetEmployeeId); }
             q += ' ORDER BY createdAt DESC';
+
             const { results } = await env.DB.prepare(q).bind(...binds).all();
-            return json(results.map((r: any) => ({ ...r, fields: tryParse(r.fields, {}) })));
+            return json((results || []).map((r: any) => ({ ...r, fields: tryParse(r.fields, {}) })), 200, cors);
           }
+
           if (method === 'POST') {
+            if (!canManageHRDocuments(user)) {
+              return forbidden('Only Super Admin, Admin, or HR can generate HR documents', cors);
+            }
             const now = new Date().toISOString();
             const docId = body.id || uid('hrdoc');
             await env.DB.prepare(`
@@ -552,77 +855,104 @@ export default {
               body.referenceNumber||'', body.effectiveDate||'', body.status||'draft',
               body.verificationToken||'', JSON.stringify(body.fields||{}), now, now
             ).run();
-            return json({ id: docId, ...body }, 201);
+            return json({ id: docId, ...body }, 201, cors);
           }
+
           if (method === 'PUT' && id) {
+            if (!canManageHRDocuments(user)) {
+              return forbidden('Only Super Admin, Admin, or HR can edit HR documents', cors);
+            }
             const now = new Date().toISOString();
             await env.DB.prepare(`
               UPDATE hrDocuments SET status=?,fields=?,updatedAt=? WHERE id=?
             `).bind(body.status||'draft', JSON.stringify(body.fields||{}), now, id).run();
-            return json({ success: true });
+            return json({ success: true }, 200, cors);
           }
+
           if (method === 'DELETE' && id) {
+            if (!canManageHRDocuments(user)) {
+              return forbidden('Only Super Admin, Admin, or HR can delete HR documents', cors);
+            }
             await env.DB.prepare('DELETE FROM hrDocuments WHERE id = ?').bind(id).run();
-            return json({ success: true });
+            return json({ success: true }, 200, cors);
           }
           break;
         }
 
-        // ── USERS ────────────────────────────────────────────────────────
+        // ── USERS & ACCOUNT ADMINISTRATION ───────────────────────────────
         case 'users': {
           if (method === 'GET' && !id) {
+            if (!hasRole(user, ['superAdmin', 'admin'])) {
+              return forbidden('Only administrators can view all user profiles', cors);
+            }
             const { results } = await env.DB.prepare('SELECT * FROM users ORDER BY name ASC').all();
-            return json(results);
+            return json(results, 200, cors);
           }
+
           if (method === 'GET' && id) {
+            if (!hasRole(user, ['superAdmin', 'admin']) && user.uid !== id) {
+              return forbidden('Cannot inspect account records of other users', cors);
+            }
             const row = await env.DB.prepare('SELECT * FROM users WHERE userId = ?').bind(id).first();
-            return row ? json(row) : notFound();
+            return row ? json(row, 200, cors) : notFound('User not found', cors);
           }
+
           if (method === 'POST') {
             const now = new Date().toISOString();
-            const userId = body.userId || id || uid('user');
+            // Non-superAdmin users can only initialize their own user record on signup
+            const userId = user.role === 'superAdmin' ? (body.userId || user.uid) : user.uid;
+
+            // Privilege escalation prevention: non-superAdmins cannot set privileged roles
+            let assignedRole: string = user.role;
+            if (user.role === 'superAdmin' && body.role) {
+              assignedRole = normalizeRole(body.role);
+            }
+
             await env.DB.prepare(`
               INSERT INTO users (userId,name,email,role,department,clientId,createdAt,updatedAt)
               VALUES (?,?,?,?,?,?,?,?)
               ON CONFLICT(userId) DO UPDATE SET name=excluded.name, email=excluded.email,
               role=excluded.role, department=excluded.department, clientId=excluded.clientId, updatedAt=excluded.updatedAt
             `).bind(
-              userId, body.name||'', body.email||'', body.role||'employee',
-              body.department||'', body.clientId||'', body.createdAt||now, now
+              userId, body.name||'', body.email||user.email, assignedRole,
+              body.department||'', body.clientId||user.clientId||'', body.createdAt||now, now
             ).run();
-            return json({ userId, ...body }, 201);
+            return json({ userId, ...body, role: assignedRole }, 201, cors);
           }
+
           if (method === 'PUT' && id) {
+            // Privilege escalation prevention: users cannot modify other users or escalate their own role
+            if (user.role !== 'superAdmin') {
+              if (user.uid !== id) {
+                return forbidden('Cannot modify account of another user', cors);
+              }
+              if (body.role && normalizeRole(body.role) !== user.role) {
+                return forbidden('Privilege escalation rejected: users cannot self-assign or modify roles', cors);
+              }
+            }
+
+            const targetRole = user.role === 'superAdmin' && body.role ? normalizeRole(body.role) : user.role;
             const now = new Date().toISOString();
+
             await env.DB.prepare(`
               UPDATE users SET name=?,email=?,role=?,department=?,clientId=?,updatedAt=? WHERE userId=?
             `).bind(
-              body.name||'', body.email||'', body.role||'employee',
+              body.name||'', body.email||'', targetRole,
               body.department||'', body.clientId||'', now, id
             ).run();
-            return json({ success: true });
+            return json({ success: true, role: targetRole }, 200, cors);
           }
           break;
         }
 
-        // ── HEALTH CHECK ─────────────────────────────────────────────────
-        case 'health': {
-          return json({ status: 'ok', timestamp: new Date().toISOString(), db: 'D1' });
-        }
-
         default:
-          return notFound('Unknown API route');
+          return notFound('Unknown API route', cors);
       }
     } catch (e: any) {
       console.error('Worker API error:', e);
-      return err(`Internal error: ${e?.message || 'Unknown'}`);
+      return err(`Internal server error: ${e?.message || 'Unknown'}`, 500, cors);
     }
 
-    return notFound('Method not allowed');
+    return notFound('Method not allowed', cors);
   },
 };
-
-function tryParse(val: any, fallback: any) {
-  if (!val) return fallback;
-  try { return JSON.parse(val); } catch { return fallback; }
-}

@@ -11,6 +11,7 @@ import { cfGetEmployees } from './cloudflareApi';
 
 export interface MasterEmployee extends Employee {
   id: string;
+  designation?: string;
 }
 export type CanonicalEmployee = MasterEmployee;
 

@@ -18,6 +18,8 @@ export interface UserProfile {
   email: string;
   phone?: string;
   role: "superAdmin" | "admin" | "client" | "employee";
+  department?: string;
+  designation?: string;
   clientId?: string;
   assignedClientIds?: string[];
   status: "active" | "inactive";

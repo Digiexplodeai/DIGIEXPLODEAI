@@ -1,26 +1,103 @@
 /**
  * DigiExplodeAI — Cloudflare D1 API Client
- * Replaces all Firebase Firestore reads/writes.
- * Firebase is used ONLY for Auth.
+ * Secure API client integrating Firebase Authentication Bearer tokens,
+ * automatic token refresh on 401 responses, and Zero Trust error handling.
  *
  * Set VITE_WORKER_URL in your .env to your Worker URL:
  *   VITE_WORKER_URL=https://digiexplodai.digiexplodeai.workers.dev
  */
 
+import { auth } from './firebase';
+
 const BASE_URL = ((import.meta as any).env?.VITE_WORKER_URL || 'https://digiexplodai.digiexplodeai.workers.dev').replace(/\/$/, '');
 
-async function apiFetch<T = any>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE_URL}/api${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options?.headers || {}),
-    },
-  });
-  if (!res.ok) {
-    const errBody = await res.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(errBody.error || `HTTP ${res.status}`);
+let explicitAuthTokenOverride: string | null = null;
+
+/**
+ * Optional override for testing or background tasks
+ */
+export function setApiAuthTokenOverride(token: string | null): void {
+  explicitAuthTokenOverride = token;
+}
+
+/**
+ * Retrieves the active user's Firebase ID-token.
+ */
+async function getActiveIdToken(forceRefresh = false): Promise<string | null> {
+  if (explicitAuthTokenOverride) {
+    return explicitAuthTokenOverride;
   }
+
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    return null;
+  }
+
+  try {
+    return await currentUser.getIdToken(forceRefresh);
+  } catch (err) {
+    console.warn('[cloudflareApi] Token retrieval warning:', err);
+    return null;
+  }
+}
+
+/**
+ * Authenticated API Fetch wrapper
+ */
+async function apiFetch<T = any>(path: string, options?: RequestInit): Promise<T> {
+  const token = await getActiveIdToken(false);
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...((options?.headers as Record<string, string>) || {}),
+  };
+
+  let res = await fetch(`${BASE_URL}/api${path}`, {
+    ...options,
+    headers,
+  });
+
+  // Automatic token refresh on 401 Unauthorized
+  if (res.status === 401 && !explicitAuthTokenOverride && auth.currentUser) {
+    try {
+      const freshToken = await getActiveIdToken(true);
+      if (freshToken && freshToken !== token) {
+        headers['Authorization'] = `Bearer ${freshToken}`;
+        res = await fetch(`${BASE_URL}/api${path}`, {
+          ...options,
+          headers,
+        });
+      }
+    } catch (refreshErr) {
+      console.warn('[cloudflareApi] Token refresh attempt failed:', refreshErr);
+    }
+  }
+
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({ error: `Request failed with HTTP status ${res.status}` }));
+    const errorMessage = errBody.error || `HTTP ${res.status}`;
+
+    // Dispatches global security event if token was revoked or role forbidden
+    if (typeof window !== 'undefined') {
+      if (res.status === 401) {
+        window.dispatchEvent(
+          new CustomEvent('digi_api_unauthorized', {
+            detail: { path, status: 401, error: errorMessage },
+          })
+        );
+      } else if (res.status === 403) {
+        window.dispatchEvent(
+          new CustomEvent('digi_api_forbidden', {
+            detail: { path, status: 403, error: errorMessage },
+          })
+        );
+      }
+    }
+
+    throw new Error(errorMessage);
+  }
+
   return res.json();
 }
 
@@ -45,6 +122,7 @@ export const cfDeleteClient = (id: string) =>
 // ── EMPLOYEES ────────────────────────────────────────────────────────────────
 
 export const cfGetEmployees = () => apiFetch('/employees');
+export const cfGetEmployee = (id: string) => apiFetch(`/employees/${id}`);
 export const cfCreateEmployee = (data: any) =>
   apiFetch('/employees', { method: 'POST', body: JSON.stringify(data) });
 export const cfUpdateEmployee = (id: string, data: any) =>
@@ -61,6 +139,7 @@ export const cfGetTasks = (filters?: { clientId?: string; assigneeId?: string; s
   if (filters?.status) params.set('status', filters.status);
   return apiFetch(`/tasks${params.toString() ? '?' + params.toString() : ''}`);
 };
+export const cfGetTask = (id: string) => apiFetch(`/tasks/${id}`);
 export const cfCreateTask = (data: any) =>
   apiFetch('/tasks', { method: 'POST', body: JSON.stringify(data) });
 export const cfUpdateTask = (id: string, data: any) =>

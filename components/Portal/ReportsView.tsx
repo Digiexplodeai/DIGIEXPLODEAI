@@ -263,6 +263,7 @@ export const ReportsView: React.FC = () => {
 
   // Daily Report 2.0 State
   const [pdfPreviewBlobUrl, setPdfPreviewBlobUrl] = useState<string | null>(null);
+  const [pdfPreviewFilename, setPdfPreviewFilename] = useState<string>('DigiexplodeAI_Daily_Report.pdf');
   const [isGeneratingDailyPdf, setIsGeneratingDailyPdf] = useState(false);
   const [activeTimersTick, setActiveTimersTick] = useState<number>(0);
 
@@ -852,12 +853,46 @@ export const ReportsView: React.FC = () => {
         filterSummary: filterDesc
       }, { download: false });
 
-      const blobUrl = doc.output('bloburl');
-      setPdfPreviewBlobUrl(blobUrl.toString());
+      // Build filename identical to download path
+      const safeEmp = (empName || 'employee').toLowerCase().replace(/[^a-z0-9]/g, '_');
+      const safeDate = classifiedDaily.targetDate.replace(/[^0-9-]/g, '_');
+      const filename = `Digiexplode_Daily_Report_${safeEmp}_${safeDate}.pdf`;
+
+      const blob = doc.output('blob');
+      const blobUrl = URL.createObjectURL(blob);
+      // Revoke previous blob URL to avoid memory leak
+      if (pdfPreviewBlobUrl) URL.revokeObjectURL(pdfPreviewBlobUrl);
+      setPdfPreviewBlobUrl(blobUrl);
+      setPdfPreviewFilename(filename);
     } catch (err: any) {
       showToast('error', `Failed to render PDF preview: ${err?.message || 'Error'}`);
     } finally {
       setIsGeneratingDailyPdf(false);
+    }
+  };
+
+  // Download already-rendered preview blob directly (no regeneration)
+  const handleDownloadPreviewBlob = () => {
+    if (!pdfPreviewBlobUrl) return;
+    const a = document.createElement('a');
+    a.href = pdfPreviewBlobUrl;
+    a.download = pdfPreviewFilename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    showToast('success', `Downloaded: ${pdfPreviewFilename}`);
+  };
+
+  // Print only the PDF iframe content
+  const handlePrintPreviewIframe = () => {
+    const iframe = document.getElementById('pdf-preview-iframe') as HTMLIFrameElement | null;
+    if (iframe?.contentWindow) {
+      iframe.contentWindow.focus();
+      iframe.contentWindow.print();
+    } else if (pdfPreviewBlobUrl) {
+      // Fallback: open in new tab and print
+      const win = window.open(pdfPreviewBlobUrl, '_blank');
+      win?.addEventListener('load', () => win.print());
     }
   };
 
@@ -2826,7 +2861,7 @@ export const ReportsView: React.FC = () => {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => triggerPrintReport()}
+                  onClick={handlePrintPreviewIframe}
                   className="px-3 py-1.5 rounded-xl bg-white dark:bg-[#161B31] border border-[#D8DEE9] dark:border-white/10 text-xs font-bold text-[#475467] dark:text-[#CBD5E1] hover:bg-slate-50 flex items-center gap-1.5 cursor-pointer shadow-2xs"
                 >
                   <Printer className="w-3.5 h-3.5" />
@@ -2834,7 +2869,7 @@ export const ReportsView: React.FC = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => handleExportDaily('pdf')}
+                  onClick={handleDownloadPreviewBlob}
                   className="px-4 py-1.5 rounded-xl bg-[#5B4BFF] hover:bg-[#4E3FE6] text-white text-xs font-black flex items-center gap-1.5 shadow-md shadow-[#5B4BFF]/25 cursor-pointer"
                 >
                   <Download className="w-3.5 h-3.5" />
@@ -2842,7 +2877,7 @@ export const ReportsView: React.FC = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setPdfPreviewBlobUrl(null)}
+                  onClick={() => { setPdfPreviewBlobUrl(null); }}
                   className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer hover:bg-slate-100 dark:hover:bg-white/10 ml-2"
                 >
                   <X className="w-5 h-5" />
@@ -2853,7 +2888,8 @@ export const ReportsView: React.FC = () => {
             {/* Embedded Iframe Preview */}
             <div className="flex-1 w-full bg-slate-100 dark:bg-[#0B0F19] p-2">
               <iframe
-                src={pdfPreviewBlobUrl}
+                id="pdf-preview-iframe"
+                src={pdfPreviewBlobUrl ?? undefined}
                 title="Employee Daily Report PDF Preview"
                 className="w-full h-full rounded-2xl border-0 shadow-inner"
               />

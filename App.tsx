@@ -9,6 +9,7 @@ import About from './pages/About';
 import Contact from './pages/Contact';
 import StartProject from './pages/StartProject';
 import PortalDashboard from './pages/PortalDashboard';
+import LocationPage from './pages/LocationPage';
 import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { MotionalBackground } from './components/UI/MotionalBackground';
@@ -88,6 +89,18 @@ const App: React.FC = () => {
               <Route path="/admin" element={<PortalDashboard key="admin" defaultTab="attendance" />} />
               <Route path="/attendance" element={<PortalDashboard key="attendance" defaultTab="attendance" />} />
               <Route path="/attendence" element={<PortalDashboard key="attendence" defaultTab="attendance" />} />
+              {/* Location SEO Pages — North India */}
+              <Route path="/chandigarh" element={<LocationPage citySlug="chandigarh" />} />
+              <Route path="/panchkula" element={<LocationPage citySlug="panchkula" />} />
+              <Route path="/mohali" element={<LocationPage citySlug="mohali" />} />
+              <Route path="/gurugram" element={<LocationPage citySlug="gurugram" />} />
+              <Route path="/delhi" element={<LocationPage citySlug="delhi" />} />
+              <Route path="/noida" element={<LocationPage citySlug="noida" />} />
+              <Route path="/ludhiana" element={<LocationPage citySlug="ludhiana" />} />
+              <Route path="/amritsar" element={<LocationPage citySlug="amritsar" />} />
+              <Route path="/jalandhar" element={<LocationPage citySlug="jalandhar" />} />
+              <Route path="/shimla" element={<LocationPage citySlug="shimla" />} />
+              <Route path="/dehradun" element={<LocationPage citySlug="dehradun" />} />
             </Routes>
           </LayoutContainer>
         </Router>

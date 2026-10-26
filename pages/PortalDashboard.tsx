@@ -63,6 +63,7 @@ const getDefaultTab = (role: string): string => {
 };
 
 const PortalDashboard: React.FC<PortalDashboardProps> = ({ defaultTab }) => {
+  const { user, profile, loading, signOutUser, loginAsDemoRole } = useAuth();
   const searchTab = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('tab') : null;
   const [activeTab, setActiveTab] = useState<string>(searchTab || defaultTab || 'attendance');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);

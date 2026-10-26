@@ -33,6 +33,7 @@ const LayoutContainer: React.FC<{ children: React.ReactNode }> = ({ children }) 
   const isPortal =
     location.pathname.startsWith('/portal') ||
     location.pathname.startsWith('/admin') ||
+    location.pathname.startsWith('/marketing') ||
     location.pathname.startsWith('/attendance') ||
     location.pathname.startsWith('/attendence');
 

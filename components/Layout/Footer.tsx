@@ -130,6 +130,7 @@ const Footer: React.FC = () => {
               <ul className="flex flex-col gap-2.5 list-none p-0 m-0">
                 {[
                   { label: 'Featured Work', path: '/projects' },
+                  { label: 'For Doctors & Clinics', path: '/doctors' },
                   { label: 'About Us', path: '/about' },
                   { label: 'Pricing Tiers', path: '/#pricing' },
                   { label: 'Start a Project', path: '/start-project' },

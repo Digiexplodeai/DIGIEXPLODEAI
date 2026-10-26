@@ -10,6 +10,7 @@ import Contact from './pages/Contact';
 import StartProject from './pages/StartProject';
 import PortalDashboard from './pages/PortalDashboard';
 import LocationPage from './pages/LocationPage';
+import DoctorMarketingPage from './pages/DoctorMarketingPage';
 import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { MotionalBackground } from './components/UI/MotionalBackground';
@@ -101,6 +102,10 @@ const App: React.FC = () => {
               <Route path="/jalandhar" element={<LocationPage citySlug="jalandhar" />} />
               <Route path="/shimla" element={<LocationPage citySlug="shimla" />} />
               <Route path="/dehradun" element={<LocationPage citySlug="dehradun" />} />
+              {/* Dedicated Doctor & Healthcare Patient Growth Landing Pages */}
+              <Route path="/doctors" element={<DoctorMarketingPage />} />
+              <Route path="/healthcare" element={<DoctorMarketingPage />} />
+              <Route path="/doctor-marketing" element={<DoctorMarketingPage />} />
             </Routes>
           </LayoutContainer>
         </Router>

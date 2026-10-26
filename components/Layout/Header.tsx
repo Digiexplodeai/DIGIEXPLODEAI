@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Menu, X, ArrowRight, Sparkles, Phone, MessageSquare, Briefcase, Layers, Users, Mail, ExternalLink } from 'lucide-react';
+import { Menu, X, ArrowRight, Sparkles, Phone, MessageSquare, Briefcase, Layers, Users, Mail, ExternalLink, Stethoscope } from 'lucide-react';
 import { siteConfig } from '../../config/site';
 import ThemeToggle from '../UI/ThemeToggle';
 
@@ -90,6 +90,7 @@ const Header: React.FC = () => {
   const navLinks = [
     { label: 'Work',      path: '/projects', isAnchor: false, icon: Briefcase, desc: 'Portfolio & Case Studies' },
     { label: 'Services',  path: '/#services', isAnchor: true, sectionId: 'services', icon: Layers, desc: 'Engineering & Marketing' },
+    { label: 'Doctors',   path: '/doctors',  isAnchor: false, icon: Stethoscope, desc: 'Clinic & Patient Growth' },
     { label: 'About',     path: '/about',    isAnchor: false, icon: Users, desc: 'Agency Story & Team' },
     { label: 'Contact',   path: '/contact',  isAnchor: false, icon: Mail, desc: 'Get in Touch' },
   ];

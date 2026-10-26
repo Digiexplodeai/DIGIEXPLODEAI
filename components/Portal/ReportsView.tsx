@@ -15,6 +15,11 @@ import {
   collection, onSnapshot, addDoc, doc, setDoc
 } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
+import {
+  cfGetWorkLogs,
+  cfGetCalendar,
+  cfSubscribe
+} from '../../lib/cloudflareApi';
 import { type ClientData } from './ClientList';
 import {
   DEFAULT_CLIENTS_MASTER,
@@ -298,23 +303,37 @@ export const ReportsView: React.FC = () => {
     const unsubTasks = subscribeToCanonicalTasks(setTasks);
     const unsubDaily = subscribeToDailyReports(setDailyReports);
 
-    // Sync contentCalendar
-    const unsubCal = onSnapshot(collection(db, 'contentCalendar'), (snap) => {
-      if (!snap.empty) {
-        const list = snap.docs.map(d => ({ contentId: d.id, ...d.data() } as CalendarEntry));
-        setCalendarEntries(list);
-      }
-    }, () => {});
+    // ── Sync contentCalendar from Cloudflare D1 (authoritative source) ──
+    // NOTE: Firestore contentCalendar is empty — all calendar data lives in D1
+    const unsubCal = cfSubscribe(
+      () => cfGetCalendar(),
+      (entries: any) => {
+        if (Array.isArray(entries) && entries.length > 0) {
+          setCalendarEntries(entries as CalendarEntry[]);
+        }
+      },
+      (err) => console.warn('[ReportsView] Calendar D1 sync notice:', err),
+      30000
+    );
 
-    // Sync workLogs
-    const unsubWorkLogs = onSnapshot(collection(db, 'workLogs'), (snap) => {
-      if (!snap.empty) {
-        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setWorkLogs(list);
-      }
-    }, () => {});
+    // ── Sync workLogs from Cloudflare D1 (authoritative source) ──
+    // NOTE: Firestore workLogs is empty — all work logs live in D1
+    const unsubWorkLogs = cfSubscribe(
+      () => cfGetWorkLogs(),
+      (logs: any) => {
+        if (Array.isArray(logs)) {
+          setWorkLogs(logs);
+          // Persist to local cache so classifier can use it instantly on next load
+          try {
+            localStorage.setItem('digi_persisted_worklogs_v2', JSON.stringify(logs));
+          } catch {}
+        }
+      },
+      (err) => console.warn('[ReportsView] WorkLogs D1 sync notice:', err),
+      30000
+    );
 
-    // Sync saved reports
+    // ── Sync saved client reports from Firestore (historical storage) ──
     const unsubSaved = onSnapshot(collection(db, 'client_reports'), (snap) => {
       if (!snap.empty) {
         const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as SavedReportSnapshot));
@@ -322,11 +341,31 @@ export const ReportsView: React.FC = () => {
       }
     }, () => {});
 
-    // Sync active task timers and work logs local events
+    // ── Sync active task timers and work log local events ──
     const handleTimerChange = () => setActiveTimersTick(t => t + 1);
+    // Also re-read work logs from localStorage when a timer stop creates a new entry
+    const handleWorkLogUpdate = (e: Event) => {
+      setActiveTimersTick(t => t + 1);
+      try {
+        const raw = localStorage.getItem('digi_persisted_worklogs_v2');
+        if (raw) {
+          const localLogs = JSON.parse(raw);
+          if (Array.isArray(localLogs)) {
+            setWorkLogs(prev => {
+              // Merge local log into state — deduplicate by id
+              const detail = (e as CustomEvent).detail;
+              if (!detail) return prev;
+              const exists = prev.some((l: any) => l.id === detail.id);
+              if (exists) return prev;
+              return [detail, ...prev];
+            });
+          }
+        }
+      } catch {}
+    };
     if (typeof window !== 'undefined') {
       window.addEventListener('digi_task_timer_updated', handleTimerChange);
-      window.addEventListener('worklogs_updated', handleTimerChange);
+      window.addEventListener('worklogs_updated', handleWorkLogUpdate);
     }
 
     return () => {
@@ -339,20 +378,23 @@ export const ReportsView: React.FC = () => {
       unsubSaved();
       if (typeof window !== 'undefined') {
         window.removeEventListener('digi_task_timer_updated', handleTimerChange);
-        window.removeEventListener('worklogs_updated', handleTimerChange);
+        window.removeEventListener('worklogs_updated', handleWorkLogUpdate);
       }
     };
   }, []);
 
   // Current active employee identity
+  // NOTE: Returns null if no match — do NOT fallback to employees[0] which shows wrong data
   const currentEmployee = useMemo(() => {
+    if (!user) return null;
     const email = user?.email?.toLowerCase();
     const uid = user?.uid;
-    return employees.find(e => 
-      (email && e.email?.toLowerCase() === email) || 
-      e.id === uid || 
+    const matched = employees.find(e =>
+      (email && e.email?.toLowerCase() === email) ||
+      e.id === uid ||
       e.employeeId === uid
-    ) || employees[0];
+    );
+    return matched || null;
   }, [employees, user]);
 
   // Prefill employee daily report form if draft/submission exists for selectedDailyDate

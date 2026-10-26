@@ -20,7 +20,7 @@ export const CITIES: Record<string, CityConfig> = {
     industries: ['Real Estate', 'Healthcare & Clinics', 'Education & Coaching', 'Restaurants & Cafes', 'Fashion & Retail', 'IT & SaaS Startups'],
     whyUs: ['Dedicated Chandigarh account manager with local market expertise', 'Proven results in competitive Tricity real estate & healthcare niches', 'Hindi + English creatives — culturally resonant ads that actually convert', 'No retainer lock-in — pay for results, not promises'],
     faqs: [{ q: 'Do you have an office in Chandigarh?', a: 'Yes — our team serves the Tricity area (Chandigarh, Panchkula, Mohali) with on-ground support and regular client meetings.' }, { q: 'Which services are most popular in Chandigarh?', a: 'Meta & Google Ads for real estate lead generation, clinic/hospital SEO, and high-converting websites for coaching institutes.' }, { q: 'What is your minimum project budget?', a: 'We work with budgets starting from Rs. 25,000/month for focused digital campaigns.' }],
-    phone: '+91-98765-43210',
+    phone: '+91 8725072730',
   },
   panchkula: {
     slug: 'panchkula', name: 'Panchkula', state: 'Haryana',
@@ -31,7 +31,7 @@ export const CITIES: Record<string, CityConfig> = {
     industries: ['Real Estate & Housing', 'Clinics & Hospitals', 'Schools & Coaching', 'Interior Design', 'Gyms & Wellness', 'Food & Hospitality'],
     whyUs: ["Deep knowledge of Panchkula's competitive real estate market", 'Local language creatives (Hindi/Punjabi) for higher engagement', 'Weekly transparent reports — you always know your ROI', 'Specialised clinic & healthcare digital marketing compliance'],
     faqs: [{ q: 'Can you help my Panchkula real estate project get leads?', a: 'Absolutely. We have generated 500+ verified real estate leads for projects in Panchkula sectors through hyper-local Meta Ads.' }, { q: 'Do you do local SEO for Panchkula businesses?', a: 'Yes — we optimise your Google Business Profile, local citations, and on-site SEO to rank for near-me searches in Panchkula.' }, { q: 'How fast can we start?', a: 'Within 72 hours of signing — we move fast and believe in quick wins.' }],
-    phone: '+91-98765-43210',
+    phone: '+91 8725072730',
   },
   mohali: {
     slug: 'mohali', name: 'Mohali', state: 'Punjab',
@@ -42,7 +42,7 @@ export const CITIES: Record<string, CityConfig> = {
     industries: ['IT Companies & SaaS', 'Real Estate (Aerocity)', 'E-Commerce & D2C', 'Education Technology', 'Pharma & Healthcare', 'Logistics & Manufacturing'],
     whyUs: ["Specialist B2B digital marketing for Mohali's IT & SaaS companies", 'Full-stack web & mobile app development with React/Next.js', 'LinkedIn Ads for B2B lead generation — specialty in tech sector', 'Aerocity & JLPL sector real estate lead generation experts'],
     faqs: [{ q: 'Can you help my Mohali IT company get B2B clients?', a: 'Yes — B2B lead gen is our strength. We run LinkedIn Ads, Google Search campaigns, and SEO content strategies that attract decision-makers.' }, { q: 'Do you build websites for Mohali startups?', a: "Absolutely. We have built 30+ high-converting websites for Mohali-based tech startups, from MVP landing pages to full SaaS platforms." }, { q: 'What makes you different from other Mohali agencies?', a: 'We are performance-obsessed. Every rupee is tracked, every campaign is optimised weekly, and we share transparent reports.' }],
-    phone: '+91-98765-43210',
+    phone: '+91 8725072730',
   },
   gurugram: {
     slug: 'gurugram', name: 'Gurugram', state: 'Haryana',
@@ -53,7 +53,7 @@ export const CITIES: Record<string, CityConfig> = {
     industries: ['Fintech & Banking', 'Real Estate (DLF, Sohna)', 'Healthcare & Hospitals', 'Ed-Tech & Coaching', 'Luxury Retail', 'Corporate Services & B2B'],
     whyUs: ["Experienced in Gurugram's ultra-competitive real estate & fintech verticals", 'Google Premier Partner — certified campaign managers', 'Dedicated creative studio producing high-converting video ads & reels', 'CRO-focused websites — we track every micro-conversion, not just clicks'],
     faqs: [{ q: 'Do you work with large Gurugram enterprises?', a: 'Yes — we work with brands spending Rs. 50,000 to Rs. 50 lakhs/month on digital. We have dedicated enterprise account teams for large-budget campaigns.' }, { q: 'Can you handle Gurugram real estate lead gen at scale?', a: 'This is our strongest vertical. We have generated 10,000+ verified buyer leads for Gurugram real estate projects in sectors 65, 92, 67, and Dwarka Expressway.' }, { q: 'What industries do you NOT serve?', a: 'We do not work with gambling, unlicensed crypto, or any content violating Meta/Google advertising policies.' }],
-    phone: '+91-98765-43210',
+    phone: '+91 8725072730',
   },
   delhi: {
     slug: 'delhi', name: 'Delhi', state: 'Delhi NCR',
@@ -64,7 +64,7 @@ export const CITIES: Record<string, CityConfig> = {
     industries: ['E-Commerce & D2C', 'Healthcare & Hospital Chains', 'Fashion & Lifestyle', 'Real Estate & Builders', 'Education & UPSC Coaching', 'Restaurants & QSR'],
     whyUs: ["Delhi NCR's most data-obsessed performance marketing team", 'In-house Hindi & English creative production — reels, ads, banners', 'Google & Meta certified — no outsourcing, no middlemen', 'Transparent weekly reporting with actual revenue attribution'],
     faqs: [{ q: 'Can you generate leads for my Delhi real estate project?', a: 'Yes — we have generated 10,000+ verified real estate leads across Greater Noida West, Dwarka Expressway, and Delhi NCR micro-markets.' }, { q: 'Do you create social media content in Hindi?', a: 'Absolutely. Our in-house creative team produces high-engagement Hindi reels, stories, and ad copies specifically tuned for the Delhi audience.' }, { q: 'What is the minimum engagement period?', a: 'We offer flexible 3-month starter contracts. Most clients stay 12+ months because of consistent results.' }],
-    phone: '+91-98765-43210',
+    phone: '+91 8725072730',
   },
   noida: {
     slug: 'noida', name: 'Noida', state: 'Uttar Pradesh',
@@ -75,7 +75,7 @@ export const CITIES: Record<string, CityConfig> = {
     industries: ['Real Estate (Noida Expressway)', 'IT & Software Services', 'Film & Creative Production', 'E-Commerce', 'Healthcare', 'Coaching & EdTech'],
     whyUs: ["Deep expertise in Noida's real estate & IT B2B markets", 'Multilingual campaigns (Hindi, English, regional) for UP market', 'Custom web apps built for performance — React/Next.js specialists', 'Greater Noida West & Noida Extension hyper-local lead generation'],
     faqs: [{ q: 'Do you serve Greater Noida & Noida Extension?', a: 'Yes — we are highly active in Greater Noida West, Noida Extension, and Yamuna Expressway real estate markets with proven lead generation campaigns.' }, { q: 'Can you help a Noida IT company with B2B marketing?', a: 'Yes — LinkedIn Ads, Google B2B campaigns, and content-led SEO are our B2B specialties for Noida IT companies.' }, { q: 'How soon can we see results?', a: 'Meta Ads: leads within 48 hours. SEO: measurable movement in 6-8 weeks. Website: launched within 2-3 weeks.' }],
-    phone: '+91-98765-43210',
+    phone: '+91 8725072730',
   },
   ludhiana: {
     slug: 'ludhiana', name: 'Ludhiana', state: 'Punjab',
@@ -86,7 +86,7 @@ export const CITIES: Record<string, CityConfig> = {
     industries: ['Manufacturing & Export', 'Real Estate', 'Textile & Hosiery', 'Automotive Parts', 'Healthcare & Hospitals', 'Education & Coaching'],
     whyUs: ['B2B export marketing — Google Ads & LinkedIn for international buyers', 'Punjabi creative content that resonates with local audience', "Real estate lead gen proven in Ludhiana's competitive market", 'Industrial website development with multi-language export catalogues'],
     faqs: [{ q: 'Can you help my Ludhiana factory get international inquiries?', a: 'Yes — we specialise in export-focused Google Ads and LinkedIn campaigns that drive global B2B inquiries for Ludhiana manufacturers.' }, { q: 'Do you create content in Punjabi?', a: 'Absolutely. Our creative team produces Punjabi + Hindi + English content to maximise reach across Punjab.' }, { q: 'Can you help real estate projects in Ludhiana?', a: 'Yes — we have generated 1,000+ verified buyer leads for Ludhiana real estate projects through hyper-local Meta Ads campaigns.' }],
-    phone: '+91-98765-43210',
+    phone: '+91 8725072730',
   },
   amritsar: {
     slug: 'amritsar', name: 'Amritsar', state: 'Punjab',
@@ -97,7 +97,7 @@ export const CITIES: Record<string, CityConfig> = {
     industries: ['Tourism & Hospitality', 'Real Estate', 'Healthcare & Clinics', 'Education & Boarding Schools', 'Textile & Export', 'Restaurants & Dhabas'],
     whyUs: ['Tourism marketing specialists — Google Ads, TripAdvisor, and social targeting', 'Bilingual Punjabi/English content for global reach', 'Heritage brand storytelling — authentic, compelling digital narratives', 'Local SEO dominance for best hotel in Amritsar type searches'],
     faqs: [{ q: 'Can you help my hotel in Amritsar get more bookings?', a: 'Yes — we run Google Hotel Ads, Meta retargeting, and local SEO campaigns that have consistently grown direct bookings for Amritsar hospitality brands.' }, { q: 'Do you manage Instagram for Amritsar restaurants?', a: 'Absolutely. We create scroll-stopping food reels and manage Instagram/Facebook pages for Amritsar restaurants with proven engagement growth.' }, { q: 'Can you target NRI audiences for Amritsar real estate?', a: 'Yes — NRI targeting via Meta Ads and Google for Amritsar real estate is one of our specialties, reaching diaspora audiences in UK, Canada, and USA.' }],
-    phone: '+91-98765-43210',
+    phone: '+91 8725072730',
   },
   jalandhar: {
     slug: 'jalandhar', name: 'Jalandhar', state: 'Punjab',
@@ -108,7 +108,7 @@ export const CITIES: Record<string, CityConfig> = {
     industries: ['Sports Goods Export', 'Real Estate & Plots', 'Education & Schools', 'Healthcare', 'Manufacturing & Industrial', 'Retail Chains'],
     whyUs: ['Sports goods export marketing — B2B digital for global buyers', 'NRI real estate targeting for Jalandhar properties', 'Educational institution admissions campaign specialists', "Cost-effective packages designed for Jalandhar's business scale"],
     faqs: [{ q: 'Can you help my Jalandhar sports goods company get international orders?', a: 'Yes — we create B2B-focused digital campaigns targeting sports retailers and distributors in Europe, Middle East, and Americas.' }, { q: 'Do you help schools in Jalandhar with admissions?', a: 'Absolutely. We run targeted Meta Ads and Google campaigns during admission seasons with proven results for Jalandhar schools and colleges.' }, { q: 'How do I get started?', a: "Call us or fill the form below. We will do a free 30-min strategy call and tell you exactly how we would grow your Jalandhar business." }],
-    phone: '+91-98765-43210',
+    phone: '+91 8725072730',
   },
   shimla: {
     slug: 'shimla', name: 'Shimla', state: 'Himachal Pradesh',
@@ -119,7 +119,7 @@ export const CITIES: Record<string, CityConfig> = {
     industries: ['Hotels & Homestays', 'Tourism & Travel', 'Real Estate & Holiday Homes', 'Apple & Agri Export', 'Education & Boarding Schools', 'Adventure & Trekking'],
     whyUs: ['Tourism digital marketing specialists with Himachal market expertise', 'Instagram & Pinterest visual marketing for beautiful mountain brands', 'Google Hotel Ads and OTA strategy for maximum direct bookings', 'Holiday home & real estate NRI targeting'],
     faqs: [{ q: 'Can you help my Shimla hotel get direct bookings without paying OTA commission?', a: 'Yes — we run Google Hotel Ads, Meta retargeting, and build direct booking websites that reduce your OTA dependency by 40-60%.' }, { q: 'Do you market Himachal real estate to NRIs?', a: 'Absolutely. NRI targeting for Himachal holiday homes and land is a growing specialty — we reach diaspora audiences across USA, Canada, UK, and Middle East.' }, { q: 'Can you run digital marketing from Shimla or is it remote?', a: 'Everything is remote-first with digital delivery. We serve Shimla clients with full-stack digital marketing just like Delhi or Gurugram clients.' }],
-    phone: '+91-98765-43210',
+    phone: '+91 8725072730',
   },
   dehradun: {
     slug: 'dehradun', name: 'Dehradun', state: 'Uttarakhand',
@@ -130,7 +130,7 @@ export const CITIES: Record<string, CityConfig> = {
     industries: ['Education & Boarding Schools', 'Real Estate & Townships', 'Tourism & Eco-Resorts', 'Healthcare', 'IT & Startups', 'Retail & Restaurants'],
     whyUs: ['Education institution admissions campaign specialists (boarding schools, colleges)', 'Uttarakhand real estate lead generation with NRI targeting', 'Tourism campaigns for Mussoorie, Rishikesh, and Dehradun destinations', "Cost-effective packages for Uttarakhand's growing business community"],
     faqs: [{ q: 'Can you help my Dehradun school get admissions?', a: 'Yes — school admissions campaigns are our specialty. We run geo-targeted Meta Ads reaching parents in Delhi NCR, Punjab, and Haryana who seek Dehradun boarding schools.' }, { q: 'Do you handle Mussoorie and Rishikesh tourism marketing?', a: 'Absolutely. We manage digital campaigns for tourism businesses across the Uttarakhand region including Mussoorie, Rishikesh, and Haridwar.' }, { q: 'What results can I expect in 90 days?', a: 'Typically: 3x increase in qualified website traffic, 50-100 verified leads per month for real estate/education, and measurable brand awareness growth.' }],
-    phone: '+91-98765-43210',
+    phone: '+91 8725072730',
   },
 };
 
@@ -214,7 +214,8 @@ const LocationPage: React.FC<LocationPageProps> = ({ citySlug }) => {
             <p style={{ fontSize: 'clamp(1rem,2vw,1.15rem)', color: '#94A3B8', maxWidth: 700, margin: '0 auto 40px', lineHeight: 1.75 }}>{city.heroSub}</p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, justifyContent: 'center', marginBottom: 64 }}>
               <button onClick={() => navigate('/start-project')} style={{ padding: '15px 32px', borderRadius: 16, fontWeight: 900, fontSize: 15, background: 'linear-gradient(135deg,#6C4CFF,#2563FF)', color: '#fff', boxShadow: '0 8px 32px rgba(108,76,255,.35)', border: 'none', cursor: 'pointer', transition: 'transform .2s' }} {...hover('1.05')}>🚀 Get Free Strategy Call</button>
-              <a href={`tel:${city.phone}`} style={{ padding: '15px 32px', borderRadius: 16, fontWeight: 700, fontSize: 15, background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.15)', color: '#CBD5E1', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8, transition: 'transform .2s' }} {...hover('1.05')}>📞 {city.phone}</a>
+              <a href={`tel:${city.phone.replace(/\s+/g, '')}`} style={{ padding: '15px 32px', borderRadius: 16, fontWeight: 700, fontSize: 15, background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.15)', color: '#CBD5E1', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8, transition: 'transform .2s' }} {...hover('1.05')}>📞 {city.phone}</a>
+              <a href="https://wa.me/918725072730?text=Hi%20DigiexplodeAI,%20I'm%20interested%20in%20digital%20marketing%20services" target="_blank" rel="noopener noreferrer" style={{ padding: '15px 28px', borderRadius: 16, fontWeight: 700, fontSize: 15, background: 'rgba(37,211,102,.12)', border: '1px solid rgba(37,211,102,.35)', color: '#25D366', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8, transition: 'transform .2s' }} {...hover('1.05')}>💬 WhatsApp Support</a>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(160px,1fr))', gap: 16, maxWidth: 800, margin: '0 auto' }}>
               {city.stats.map((s, i) => (
@@ -310,7 +311,8 @@ const LocationPage: React.FC<LocationPageProps> = ({ citySlug }) => {
             <p style={{ fontSize: 17, color: '#94A3B8', marginBottom: 40, lineHeight: 1.7 }}>Free 30-minute strategy call. No commitment. We will show you exactly where your competitors are beating you — and how to flip it.</p>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, justifyContent: 'center' }}>
               <button onClick={() => navigate('/start-project')} style={{ padding: '18px 40px', borderRadius: 16, fontWeight: 900, fontSize: 16, background: 'linear-gradient(135deg,#6C4CFF,#2563FF)', color: '#fff', boxShadow: '0 8px 32px rgba(108,76,255,.4)', border: 'none', cursor: 'pointer', transition: 'transform .2s' }} {...hover('1.05')}>Start My Free Strategy Call</button>
-              <a href={`tel:${city.phone}`} style={{ padding: '18px 40px', borderRadius: 16, fontWeight: 700, fontSize: 16, background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.15)', color: '#CBD5E1', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8, transition: 'transform .2s' }} {...hover('1.05')}>📞 Call Us Now</a>
+              <a href={`tel:${city.phone.replace(/\s+/g, '')}`} style={{ padding: '18px 40px', borderRadius: 16, fontWeight: 700, fontSize: 16, background: 'rgba(255,255,255,.06)', border: '1px solid rgba(255,255,255,.15)', color: '#CBD5E1', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8, transition: 'transform .2s' }} {...hover('1.05')}>📞 Call +91 8725072730</a>
+              <a href="https://wa.me/918725072730?text=Hi%20DigiexplodeAI,%20I'm%20interested%20in%20digital%20marketing%20services" target="_blank" rel="noopener noreferrer" style={{ padding: '18px 36px', borderRadius: 16, fontWeight: 700, fontSize: 16, background: 'rgba(37,211,102,.12)', border: '1px solid rgba(37,211,102,.35)', color: '#25D366', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8, transition: 'transform .2s' }} {...hover('1.05')}>💬 WhatsApp Support</a>
             </div>
           </div>
         </section>

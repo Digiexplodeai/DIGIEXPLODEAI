@@ -538,7 +538,7 @@ export const buildDocumentHTML = (
           <strong>Digiexplode Digital Media Private Limited</strong><br/>
           Corporate Identity: U72900UP2024PTC189201<br/>
           Innovate Hub, Sector 62, Noida, NCR 201301<br/>
-          hr@digiexplode.com | +91 98765 43210
+          hr@digiexplode.com | +91 8725072730
         </div>
       </div>
 

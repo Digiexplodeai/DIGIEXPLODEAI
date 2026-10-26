@@ -188,8 +188,12 @@ export function normalizeTaskDateModel(raw: any): Task {
   const assignedEmpName = raw.assigneeName || raw.assignee_name || raw.employeeName || raw.employee_name || (assignedEmpId ? 'Team Member' : 'Unassigned');
 
   const isDone = normalizedStatus === 'Done';
+  // IMPORTANT: Do NOT fall back to createdAt as completedAt.
+  // Using createdAt as completedAt causes tasks created on report date to falsely
+  // appear as "Completed Today" in the daily classifier — even if completion was days ago.
+  // Only use a real, explicit completion timestamp.
   const resolvedCompletedAt = isDone
-    ? (raw.completedAt || raw.completed_at || raw.updatedAt || nowIso)
+    ? (raw.completedAt || raw.completed_at || undefined)
     : undefined;
 
   return {
@@ -1031,6 +1035,10 @@ export const bulkRescheduleTasks = async (
   const tasksToPersist: Task[] = [];
   const updatedList = currentCached.map(task => {
     if (taskIds.includes(task.id)) {
+      if (normalizeTaskStatus(task.status) === 'Done') {
+        // Guard: Never reschedule or alter scheduledDate of already completed tasks
+        return task;
+      }
       updatedCount++;
       const updated = normalizeTaskDateModel({
         ...task,

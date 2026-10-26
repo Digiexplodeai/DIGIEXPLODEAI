@@ -366,7 +366,10 @@ export default {
               targetClientId = user.clientId || 'unassigned_client_scope';
             }
 
-            let q = 'SELECT * FROM tasks WHERE 1=1';
+            let q = `SELECT id, taskId, title, description, status, priority, category,
+              clientId, clientName, assigneeId, assigneeName, dueDate, scheduledDate,
+              completedAt, createdAt, updatedAt, createdBy, format, platform, notes
+              FROM tasks WHERE (status != 'Cancelled')`;
             const binds: any[] = [];
             if (targetClientId) { q += ' AND clientId = ?'; binds.push(targetClientId); }
             if (assigneeId) { q += ' AND assigneeId = ?'; binds.push(assigneeId); }
@@ -552,7 +555,20 @@ export default {
               targetEmployeeId = user.employeeId || user.uid;
             }
 
-            let q = 'SELECT * FROM workLogs WHERE 1=1';
+            // Return both field-name conventions so the frontend classifier works
+            // regardless of whether it reads work_date/date or hours/hoursWorked
+            let q = `SELECT id,
+              taskId, taskTitle,
+              taskId AS task_id,
+              employeeId, employeeName,
+              employeeId AS employee_id,
+              clientId, clientName,
+              clientId AS client_id,
+              status,
+              hoursWorked, hoursWorked AS hours,
+              date, date AS work_date,
+              notes, createdAt
+              FROM workLogs WHERE 1=1`;
             const binds: any[] = [];
             if (targetEmployeeId) { q += ' AND employeeId = ?'; binds.push(targetEmployeeId); }
             q += ' ORDER BY date DESC';
@@ -564,18 +580,36 @@ export default {
           if (method === 'POST') {
             const now = new Date().toISOString();
             const logId = body.id || uid('log');
-            const targetEmployeeId = user.role === 'employee' ? (user.employeeId || user.uid) : (body.employeeId || user.uid);
+            const targetEmployeeId = user.role === 'employee' ? (user.employeeId || user.uid) : (body.employeeId || body.employee_id || user.uid);
+            // Accept both field-name conventions: hours (timer) and hoursWorked (task completion)
+            const resolvedHours = Number(body.hoursWorked) || Number(body.hours) || 0;
+            // Accept both date field conventions: work_date (snake_case) and date (camelCase)
+            const resolvedDate = body.work_date || body.date || now.split('T')[0];
+            // Accept both taskId conventions
+            const resolvedTaskId = body.taskId || body.task_id || '';
 
             await env.DB.prepare(`
               INSERT INTO workLogs (id,taskId,taskTitle,employeeId,employeeName,clientId,clientName,status,hoursWorked,date,notes,createdAt)
               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-              ON CONFLICT(id) DO UPDATE SET status=excluded.status, hoursWorked=excluded.hoursWorked, notes=excluded.notes
+              ON CONFLICT(id) DO UPDATE SET
+                status=excluded.status,
+                hoursWorked=CASE WHEN excluded.hoursWorked > 0 THEN excluded.hoursWorked ELSE hoursWorked END,
+                notes=CASE WHEN excluded.notes != '' THEN excluded.notes ELSE notes END
             `).bind(
-              logId, body.taskId||'', body.taskTitle||'', targetEmployeeId, body.employeeName||'',
-              body.clientId||'', body.clientName||'', body.status||'Completed',
-              body.hoursWorked||0, body.date||now.split('T')[0], body.notes||'', now
+              logId,
+              resolvedTaskId,
+              body.taskTitle || body.work_description || body.workDone || '',
+              targetEmployeeId,
+              body.employeeName || body.employee_name || '',
+              body.clientId || body.client_id || '',
+              body.clientName || body.client_name || '',
+              body.status || 'Completed',
+              resolvedHours,
+              resolvedDate,
+              body.notes || body.work_description || '',
+              now
             ).run();
-            return json({ id: logId, ...body, employeeId: targetEmployeeId }, 201, cors);
+            return json({ id: logId, ...body, employeeId: targetEmployeeId, hoursWorked: resolvedHours }, 201, cors);
           }
 
           if (method === 'PUT' && id) {

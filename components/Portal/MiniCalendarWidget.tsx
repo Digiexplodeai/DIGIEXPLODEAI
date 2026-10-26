@@ -52,12 +52,14 @@ export const MiniCalendarWidget: React.FC<MiniCalendarWidgetProps> = ({
   const taskCountByDate = useMemo(() => {
     const map: Record<string, { total: number; overdue: number; urgent: number }> = {};
     tasks.forEach(t => {
-      const d = t.scheduledDate || t.scheduled_date || (t.createdAt ? t.createdAt.slice(0, 10) : todayStr);
+      const isDone = (t.status || '').toLowerCase().includes('done') || (t.status || '').toLowerCase().includes('completed');
+      const compDate = (t.completedAt || t.completed_at || (t.createdAt ? t.createdAt.slice(0, 10) : '')).slice(0, 10);
+      const schDate = (t.scheduledDate || t.scheduled_date || (t.createdAt ? t.createdAt.slice(0, 10) : todayStr)).slice(0, 10);
+      const d = isDone ? (compDate || schDate) : schDate;
       if (!map[d]) {
         map[d] = { total: 0, overdue: 0, urgent: 0 };
       }
       map[d].total += 1;
-      const isDone = (t.status || '').toLowerCase().includes('done') || (t.status || '').toLowerCase().includes('completed');
       if (!isDone && t.dueDate && t.dueDate < todayStr) {
         map[d].overdue += 1;
       }

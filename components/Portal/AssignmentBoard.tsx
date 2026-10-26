@@ -63,10 +63,12 @@ export const AssignmentBoard: React.FC<AssignmentBoardProps> = ({
   onUpdateTask,
 }) => {
   const { profile, user } = useAuth();
+  const isSuperAdmin = profile?.role === 'superAdmin' || user?.email?.toLowerCase() === 'digiexplodeai@gmail.com';
 
   // Search & Filter state
   const [search, setSearch] = useState('');
   const [filterClient, setFilterClient] = useState('');
+  const [filterEmployee, setFilterEmployee] = useState('');
   const [filterPriority, setFilterPriority] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -93,10 +95,15 @@ export const AssignmentBoard: React.FC<AssignmentBoardProps> = ({
       const matchesPriority = !filterPriority || t.priority === filterPriority;
       const matchesCategory = !filterCategory || t.category === filterCategory;
       const matchesStatus = !filterStatus || t.status === filterStatus;
+      const matchesEmployee = !filterEmployee || (
+        filterEmployee === 'unassigned'
+          ? (!t.assigneeId || t.assigneeId === 'unassigned' || t.assigneeName === 'Unassigned')
+          : isTaskAssignedToEmployee(t, filterEmployee) || t.assigneeId === filterEmployee || t.assigneeName === filterEmployee
+      );
 
-      return matchesSearch && matchesClient && matchesPriority && matchesCategory && matchesStatus;
+      return matchesSearch && matchesClient && matchesPriority && matchesCategory && matchesStatus && matchesEmployee;
     });
-  }, [tasks, search, filterClient, filterPriority, filterCategory, filterStatus]);
+  }, [tasks, search, filterClient, filterEmployee, filterPriority, filterCategory, filterStatus]);
 
   // Handle Reassignment
   const handleReassign = useCallback(async (taskId: string, targetEmpId?: string, targetEmpName?: string) => {
@@ -258,6 +265,28 @@ export const AssignmentBoard: React.FC<AssignmentBoardProps> = ({
             })}
           </select>
 
+          {/* Employee-wise filter: Exclusively for Super Admin */}
+          {isSuperAdmin && (
+            <select
+              value={filterEmployee}
+              onChange={e => setFilterEmployee(e.target.value)}
+              className={`border rounded-xl px-2.5 py-2 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-all ${
+                filterEmployee
+                  ? 'bg-[#EEECFF] dark:bg-[#201D45] text-[#5B4BFF] dark:text-[#806CFF] border-[#5B4BFF] font-black'
+                  : 'bg-[#F7F8FC] dark:bg-[#161B31] text-[#101828] dark:text-[#F7F8FC] border-[#D8DEE9] dark:border-white/10'
+              }`}
+              title="Super Admin Only: View tasks employee-wise (just like client-wise)"
+            >
+              <option value="" className="bg-white dark:bg-[#161B31] text-[#101828] dark:text-white">👤 All Employees</option>
+              <option value="unassigned" className="bg-white dark:bg-[#161B31] text-[#101828] dark:text-white">⚠️ Unassigned Tasks</option>
+              {employees.map(emp => (
+                <option key={emp.id} value={emp.id} className="bg-white dark:bg-[#161B31] text-[#101828] dark:text-white">
+                  {emp.name} ({emp.role || 'Member'})
+                </option>
+              ))}
+            </select>
+          )}
+
           {/* Priority filter */}
           <select
             value={filterPriority}
@@ -284,10 +313,10 @@ export const AssignmentBoard: React.FC<AssignmentBoardProps> = ({
             <option value="Done">Done</option>
           </select>
 
-          {(search || filterPriority || filterStatus || filterClient) && (
+          {(search || filterPriority || filterStatus || filterClient || filterEmployee) && (
             <button
-              onClick={() => { setSearch(''); setFilterPriority(''); setFilterStatus(''); setFilterClient(''); }}
-              className="px-2.5 py-2 rounded-xl text-xs font-bold text-rose-600 border border-rose-200 bg-rose-50 hover:bg-rose-100 transition-all flex items-center gap-1"
+              onClick={() => { setSearch(''); setFilterPriority(''); setFilterStatus(''); setFilterClient(''); setFilterEmployee(''); }}
+              className="px-2.5 py-2 rounded-xl text-xs font-bold text-rose-600 border border-rose-200 bg-rose-50 hover:bg-rose-100 transition-all flex items-center gap-1 cursor-pointer"
             >
               <X className="w-3.5 h-3.5" /> Clear
             </button>
@@ -318,9 +347,10 @@ export const AssignmentBoard: React.FC<AssignmentBoardProps> = ({
       {/* ─── Super Admin Employee Assignment Kanban Columns ───────── */}
       <div className="flex gap-4 overflow-x-auto pb-6 scrollbar-thin select-none w-full min-w-0 max-w-full">
         
-        {/* Column 1: Unassigned Lane */}
-        <div
-          onDragOver={e => { e.preventDefault(); setDragOverColumnId('unassigned'); }}
+        {/* Column 1: Unassigned Lane (shown if no employee filter or unassigned filter) */}
+        {(!filterEmployee || filterEmployee === 'unassigned') && (
+          <div
+            onDragOver={e => { e.preventDefault(); setDragOverColumnId('unassigned'); }}
           onDragLeave={() => setDragOverColumnId(null)}
           onDrop={e => {
             e.preventDefault();
@@ -376,9 +406,12 @@ export const AssignmentBoard: React.FC<AssignmentBoardProps> = ({
             )}
           </div>
         </div>
+      )}
 
-        {/* Columns 2..N: Active Employees */}
-        {employees.map(emp => {
+        {/* Columns 2..N: Active Employees (filtered to specific employee if selected) */}
+        {employees
+          .filter(emp => !filterEmployee || filterEmployee === emp.id || filterEmployee === (emp as any).employeeId)
+          .map(emp => {
           const empTasks = filteredTasks.filter(t => isTaskAssignedToEmployee(t, emp));
           const dueTodayCount = empTasks.filter(t => (t.dueDate || '').slice(0, 10) === todayStr).length;
           const capacity = getCapacityBadge(empTasks.length);

@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 
 import { useActiveEmployee } from '../../hooks/useActiveEmployee';
+import { doc, deleteDoc } from 'firebase/firestore';
+import { db } from '../../lib/firebase';
 import { DEFAULT_CLIENTS_MASTER, ensureCentralClientsSeeded, getCachedClients, subscribeToCanonicalClients } from '../../lib/clientMaster';
 import { cfGetClients, cfGetEmployees } from '../../lib/cloudflareApi';
 import { isTaskAssignedToEmployee, getCachedEmployees, subscribeToCanonicalEmployees, CENTRAL_EMPLOYEES_MASTER_LIST } from '../../lib/employeeMaster';
@@ -111,6 +113,7 @@ const priorityStyles: Record<string, { badge: string; text: string; dot: string 
 
 export const TasksView: React.FC = () => {
   const { profile, user } = useAuth();
+  const isSuperAdmin = profile?.role === 'superAdmin' || user?.email?.toLowerCase() === 'digiexplodeai@gmail.com';
   const [tasks, setTasks] = useState<Task[]>(() => getCachedTasks());
   const [clients, setClients] = useState<any[]>(() => getCachedClients());
   const [employees, setEmployees] = useState<any[]>(() => getCachedEmployees());
@@ -389,21 +392,35 @@ export const TasksView: React.FC = () => {
     if (!taskToDelete) return;
     setIsDeletingTask(true);
     try {
+      // 1. Delete the task from Firebase Firestore using its unique ID
+      try {
+        await deleteDoc(doc(db, 'tasks', taskToDelete.id));
+      } catch (fbErr) {
+        console.warn('[Firebase] Task deleteDoc non-fatal warning:', fbErr);
+      }
+
+      // 2. Authoritative deletion from Cloudflare D1 database & persistent cache
       await persistDeleteTask(taskToDelete.id, {
         uid: user?.uid,
         name: profile?.name,
         role: profile?.role
       }, { softDelete: true });
 
+      // 3. Remove the task from the Kanban board only after successful deletion
       setTasks(prev => prev.filter(t => t.id !== taskToDelete.id));
+      setSelectedTaskIds(prev => {
+        const next = new Set(prev);
+        next.delete(taskToDelete.id);
+        return next;
+      });
       if (selectedTask?.id === taskToDelete.id) {
         setSelectedTask(null);
       }
-      triggerToast(`✓ Deleted "${taskToDelete.title}"`);
+      triggerToast(`Task "${taskToDelete.title}" deleted successfully`);
       setTaskToDelete(null);
     } catch (err) {
       console.error('Delete task error:', err);
-      triggerToast('Failed to delete task');
+      triggerToast('Failed to delete task. Please try again.');
     } finally {
       setIsDeletingTask(false);
     }
@@ -501,14 +518,21 @@ export const TasksView: React.FC = () => {
     return () => window.removeEventListener('click', handleClick);
   }, []);
 
-  // Filter computation with Unified Date Model
-  const filteredTasks = useMemo(() => {
+  // Base scope tasks accounts for view ('delivery / kanban' vs 'my-tasks') and excludes archived/deleted/cancelled
+  const baseScopeTasks = useMemo(() => {
     return tasks.filter(t => {
       if (t.status === 'Cancelled' || t.isArchived || t.is_deleted) return false;
       if (view === 'my-tasks') {
         const isMine = isTaskAssignedToEmployee(t, activeEmployee || resolvedEmployeeId);
         if (!isMine) return false;
       }
+      return true;
+    });
+  }, [tasks, view, activeEmployee, resolvedEmployeeId]);
+
+  // Filter computation with Unified Date Model
+  const filteredTasks = useMemo(() => {
+    return baseScopeTasks.filter(t => {
       if (search) {
         const q = search.toLowerCase();
         const matchesTitle = t.title?.toLowerCase().includes(q);
@@ -516,7 +540,19 @@ export const TasksView: React.FC = () => {
         const matchesAssignee = t.assigneeName?.toLowerCase().includes(q);
         if (!matchesTitle && !matchesClient && !matchesAssignee) return false;
       }
-      if (filterAssignee && t.assigneeId !== filterAssignee && t.assigneeName !== filterAssignee) return false;
+      if (filterAssignee) {
+        if (filterAssignee === 'unassigned') {
+          const hasOwner = t.assigneeId || t.assigned_employee_id || t.employee_id || t.assigneeName;
+          if (hasOwner && hasOwner !== 'unassigned' && hasOwner !== 'Unassigned') return false;
+        } else {
+          const isMatch = isTaskAssignedToEmployee(t, filterAssignee) ||
+            t.assigneeId === filterAssignee ||
+            t.assigned_employee_id === filterAssignee ||
+            t.employee_id === filterAssignee ||
+            t.assigneeName === filterAssignee;
+          if (!isMatch) return false;
+        }
+      }
       if (filterPriority && t.priority !== filterPriority) return false;
       if (filterCategory && t.category !== filterCategory) return false;
       if (filterClient && t.clientId !== filterClient && t.clientName !== filterClient) return false;
@@ -524,43 +560,58 @@ export const TasksView: React.FC = () => {
       // Canonical Date Model comparison (YYYY-MM-DD)
       const schDate = (t.scheduledDate || t.scheduled_date || todayStr).slice(0, 10);
       const dueDate = (t.dueDate || t.due_date || schDate).slice(0, 10);
-      const compDate = (t.completedAt || t.completed_at || '').slice(0, 10);
       const normStatus = normalizeTaskStatus(t.status);
       const isDone = normStatus === 'Done';
+      // Fallback only to createdAt if completedAt timestamp is missing on historical record (never fallback to today)
+      const effectiveCompDate = (t.completedAt || t.completed_at || (t.createdAt ? t.createdAt.slice(0, 10) : '')).slice(0, 10);
 
       // 1. Day View (The primary operational mode for selectedOperationalDate)
       if (dateFilterMode === 'day') {
+        if (isDone) {
+          // Completed tasks strictly belong to their actual completion date
+          return effectiveCompDate === selectedOperationalDate;
+        }
+
         if (selectedOperationalDate === todayStr) {
-          // When viewing TODAY:
-          // Unfinished tasks: scheduled today, active carried-forward rollover, or due today
-          // Completed tasks: completed today (regardless of scheduledDate), or scheduled today, or due today
-          const isTodayWork = isDone
-            ? (compDate === todayStr || schDate === todayStr || dueDate === todayStr)
-            : (schDate === todayStr || (t.rolloverCount || 0) > 0 || dueDate === todayStr);
-          if (!isTodayWork) return false;
+          // Unfinished tasks belonging to Today: scheduled today, active rollover, or due today
+          return (
+            schDate === todayStr ||
+            (t.rolloverCount || 0) > 0 ||
+            (t.originalScheduledDate && t.originalScheduledDate < todayStr && schDate === todayStr) ||
+            dueDate === todayStr
+          );
         } else {
-          // When viewing another specific date:
-          // Include: scheduled on that date, due on that date, or completed on that date
-          const isSelectedDayWork = schDate === selectedOperationalDate || dueDate === selectedOperationalDate || (isDone && compDate === selectedOperationalDate);
-          if (!isSelectedDayWork) return false;
+          // Unfinished tasks for a historical or future operational date
+          return (
+            schDate === selectedOperationalDate ||
+            (t.originalScheduledDate && t.originalScheduledDate === selectedOperationalDate) ||
+            dueDate === selectedOperationalDate
+          );
         }
       } else if (dateFilterMode === 'tomorrow') {
         const tmrwStr = addDaysToDateStr(todayStr, 1);
-        const isTmrw = schDate === tmrwStr || dueDate === tmrwStr;
-        if (!isTmrw) return false;
+        if (isDone) return effectiveCompDate === tmrwStr;
+        return schDate === tmrwStr || dueDate === tmrwStr;
       } else if (dateFilterMode === 'week') {
+        if (isDone) {
+          const diff = differenceInCalendarDays(effectiveCompDate, todayStr);
+          return diff >= 0 && diff <= 7;
+        }
         const diff = differenceInCalendarDays(schDate, todayStr);
-        if (diff < 0 || diff > 7) return false;
+        const dueDiff = differenceInCalendarDays(dueDate, todayStr);
+        return (diff >= 0 && diff <= 7) || (dueDiff >= 0 && dueDiff <= 7);
       } else if (dateFilterMode === 'overdue') {
-        if (isDone || !dueDate || dueDate >= todayStr) return false;
+        if (isDone) return false;
+        return !!(dueDate && dueDate < todayStr);
       } else if (dateFilterMode === 'carried_forward') {
-        if ((t.rolloverCount || 0) === 0 && (!t.originalScheduledDate || t.originalScheduledDate >= schDate)) return false;
+        if (isDone) return false;
+        return (t.rolloverCount || 0) > 0 || (t.originalScheduledDate && t.originalScheduledDate < schDate);
       }
-      // 'all' allows all dates through
 
+      // 'all' allows all dates through
       return true;
     });
-  }, [tasks, search, filterAssignee, filterPriority, filterCategory, filterClient, dateFilterMode, selectedOperationalDate, view, activeEmployee, resolvedEmployeeId, todayStr]);
+  }, [baseScopeTasks, search, filterAssignee, filterPriority, filterCategory, filterClient, dateFilterMode, selectedOperationalDate, todayStr]);
 
   // Mandatory Debugging Logs
   useEffect(() => {
@@ -589,59 +640,79 @@ export const TasksView: React.FC = () => {
 
   // Real canonical counts for the selected operational date summary context
   const dayContextStats = useMemo(() => {
-    const scheduled = tasks.filter(t => {
-      if (t.isArchived || t.is_deleted || t.status === 'Cancelled') return false;
-      const sch = (t.scheduledDate || t.scheduled_date || '').slice(0, 10);
-      return sch === selectedOperationalDate;
-    }).length;
+    const isViewingToday = selectedOperationalDate === todayStr;
 
-    const overdue = tasks.filter(t => {
-      if (t.isArchived || t.is_deleted || t.status === 'Cancelled') return false;
-      if (normalizeTaskStatus(t.status) === 'Done') return false;
+    let scheduled = 0;
+    let overdue = 0;
+    let carried = 0;
+    let completed = 0;
+
+    baseScopeTasks.forEach(t => {
+      const sch = (t.scheduledDate || t.scheduled_date || '').slice(0, 10);
       const due = (t.dueDate || t.due_date || '').slice(0, 10);
-      return due && due < todayStr;
-    }).length;
+      const normStatus = normalizeTaskStatus(t.status);
+      const isDone = normStatus === 'Done';
+      const comp = (t.completedAt || t.completed_at || (t.createdAt ? t.createdAt.slice(0, 10) : '')).slice(0, 10);
 
-    const carried = tasks.filter(t => {
-      if (t.isArchived || t.is_deleted || t.status === 'Cancelled') return false;
-      if (normalizeTaskStatus(t.status) === 'Done') return false;
-      const sch = (t.scheduledDate || t.scheduled_date || '').slice(0, 10);
-      return (t.rolloverCount || 0) > 0 || (t.originalScheduledDate && t.originalScheduledDate < sch);
-    }).length;
+      if (isDone) {
+        if (comp === selectedOperationalDate) {
+          completed++;
+          scheduled++; // Belongs to this operational date's work
+        }
+      } else {
+        const belongsToDay = isViewingToday
+          ? (sch === todayStr || (t.rolloverCount || 0) > 0 || due === todayStr)
+          : (sch === selectedOperationalDate || (t.originalScheduledDate && t.originalScheduledDate === selectedOperationalDate) || due === selectedOperationalDate);
 
-    const completed = tasks.filter(t => {
-      if (t.isArchived || t.is_deleted || t.status === 'Cancelled') return false;
-      if (normalizeTaskStatus(t.status) !== 'Done') return false;
-      const comp = (t.completedAt ? t.completedAt.slice(0, 10) : '') || (t.scheduledDate || t.scheduled_date || '').slice(0, 10);
-      return comp === selectedOperationalDate;
-    }).length;
+        if (belongsToDay) {
+          scheduled++;
+        }
+
+        if (due && due < todayStr) {
+          overdue++;
+        }
+
+        if ((t.rolloverCount || 0) > 0 || (t.originalScheduledDate && t.originalScheduledDate < sch)) {
+          carried++;
+        }
+      }
+    });
 
     return { scheduled, overdue, carried, completed };
-  }, [tasks, selectedOperationalDate, todayStr]);
+  }, [baseScopeTasks, selectedOperationalDate, todayStr]);
 
   // Counts for quick date filter pills
   const dateCounts = useMemo(() => {
-    const todayCount = tasks.filter(t => 
-      !t.isArchived && !t.is_deleted && t.status !== 'Cancelled' &&
-      ((t.scheduledDate || t.scheduled_date || '').slice(0, 10) === todayStr || 
-       (t.completedAt || t.completed_at || '').slice(0, 10) === todayStr ||
-       (normalizeTaskStatus(t.status) !== 'Done' && (t.rolloverCount || 0) > 0))
-    ).length;
+    let todayCount = 0;
+    let overdueCount = 0;
+    let carriedCount = 0;
 
-    const overdueCount = tasks.filter(t => 
-      !t.isArchived && !t.is_deleted && t.status !== 'Cancelled' &&
-      normalizeTaskStatus(t.status) !== 'Done' && 
-      t.dueDate && t.dueDate < todayStr
-    ).length;
+    baseScopeTasks.forEach(t => {
+      const sch = (t.scheduledDate || t.scheduled_date || '').slice(0, 10);
+      const due = (t.dueDate || t.due_date || '').slice(0, 10);
+      const normStatus = normalizeTaskStatus(t.status);
+      const isDone = normStatus === 'Done';
+      const comp = (t.completedAt || t.completed_at || (t.createdAt ? t.createdAt.slice(0, 10) : '')).slice(0, 10);
 
-    const carriedCount = tasks.filter(t => 
-      !t.isArchived && !t.is_deleted && t.status !== 'Cancelled' &&
-      normalizeTaskStatus(t.status) !== 'Done' && 
-      ((t.rolloverCount || 0) > 0 || (t.originalScheduledDate && t.originalScheduledDate < (t.scheduledDate || t.scheduled_date || '')))
-    ).length;
+      if (isDone) {
+        if (comp === todayStr) {
+          todayCount++;
+        }
+      } else {
+        if (sch === todayStr || (t.rolloverCount || 0) > 0 || due === todayStr) {
+          todayCount++;
+        }
+        if (due && due < todayStr) {
+          overdueCount++;
+        }
+        if ((t.rolloverCount || 0) > 0 || (t.originalScheduledDate && t.originalScheduledDate < sch)) {
+          carriedCount++;
+        }
+      }
+    });
 
     return { todayCount, overdueCount, carriedCount };
-  }, [tasks, todayStr]);
+  }, [baseScopeTasks, todayStr]);
 
   // Suggestive search results for board search input
   const suggestiveTasks = useMemo(() => {
@@ -729,17 +800,21 @@ export const TasksView: React.FC = () => {
                 <span>Delivery Board</span>
               </button>
 
-              <button
-                onClick={() => setView('assignment')}
-                className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                  view === 'assignment'
-                    ? 'bg-white dark:bg-[#111728] text-[#5B4BFF] dark:text-[#806CFF] shadow-xs border border-[#D7DEE9] dark:border-[#293248]'
-                    : 'text-[#475467] dark:text-[#BAC1D1] hover:text-[#101828] dark:hover:text-white'
-                }`}
-              >
-                <Users className="w-4 h-4 text-[#2864FF]" />
-                <span>Assignment Board</span>
-              </button>
+              {isSuperAdmin && (
+                <button
+                  onClick={() => setView('assignment')}
+                  className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                    view === 'assignment'
+                      ? 'bg-white dark:bg-[#111728] text-[#5B4BFF] dark:text-[#806CFF] shadow-xs border border-[#D7DEE9] dark:border-[#293248]'
+                      : 'text-[#475467] dark:text-[#BAC1D1] hover:text-[#101828] dark:hover:text-white'
+                  }`}
+                  title="Super Admin Only: Team Assignment Board"
+                >
+                  <Users className="w-4 h-4 text-[#2864FF]" />
+                  <span>Assignment Board</span>
+                  <span className="text-[9px] font-black uppercase px-1.5 py-0.2 rounded bg-[#5B4BFF]/10 text-[#5B4BFF] dark:text-[#806CFF]">Admin</span>
+                </button>
+              )}
 
               <button
                 onClick={() => setView('my-tasks')}
@@ -920,7 +995,7 @@ export const TasksView: React.FC = () => {
               <Filter className="w-3.5 h-3.5" /> Filter:
             </span>
             {[
-              { key: 'all', label: 'All Dates', count: tasks.length },
+              { key: 'all', label: 'All Dates', count: baseScopeTasks.length },
               { key: 'day', label: isViewingToday ? "Today’s Work" : `${operationalDateInfo.shortDate} Work`, count: isViewingToday ? dateCounts.todayCount : dayContextStats.scheduled, accent: 'text-blue-600 dark:text-blue-400' },
               { key: 'tomorrow', label: 'Tomorrow', count: null },
               { key: 'week', label: 'This Week', count: null },
@@ -1075,6 +1150,41 @@ export const TasksView: React.FC = () => {
                 </option>
               ))}
             </select>
+
+            {/* Employee-wise filter: Exclusively for Super Admin */}
+            {isSuperAdmin && (
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={filterAssignee}
+                  onChange={e => setFilterAssignee(e.target.value)}
+                  className={`border rounded-xl px-2.5 py-1.5 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-all ${
+                    filterAssignee
+                      ? 'bg-[#EEECFF] dark:bg-[#201D45] text-[#5B4BFF] dark:text-[#806CFF] border-[#5B4BFF] font-black'
+                      : 'bg-[#F8FAFC] dark:bg-[#161B31] text-[#344054] dark:text-[#AEB3C5] border-[#D8DEE9] dark:border-white/10'
+                  }`}
+                  title="Super Admin Only: View tasks employee-wise (just like client-wise)"
+                >
+                  <option value="">👤 All Employees</option>
+                  <option value="unassigned">⚠️ Unassigned Tasks</option>
+                  {canonicalEmployees.map(emp => (
+                    <option key={emp.id || emp.employeeId} value={emp.id || emp.employeeId}>
+                      {emp.name} {emp.role ? `(${emp.role})` : ''}
+                    </option>
+                  ))}
+                </select>
+
+                {filterAssignee && (
+                  <button
+                    type="button"
+                    onClick={() => setFilterAssignee('')}
+                    title="Clear employee filter"
+                    className="p-1 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-900 cursor-pointer transition-all"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            )}
 
             <select
               value={filterPriority}
@@ -1578,7 +1688,21 @@ export const TasksView: React.FC = () => {
                                     </span>
                                   </div>
 
-                                  <div className="text-right flex flex-col items-end">
+                                  <div className="text-right flex flex-col items-end gap-1">
+                                    {isAdmin && (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setTaskToDelete(task);
+                                        }}
+                                        title="Delete Task"
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold text-rose-600 dark:text-rose-400 border border-rose-300 dark:border-rose-800/80 bg-transparent hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer shadow-2xs"
+                                      >
+                                        <Trash2 className="w-2.5 h-2.5 text-rose-600 dark:text-rose-400 shrink-0" />
+                                        <span>Delete</span>
+                                      </button>
+                                    )}
                                     <span className="font-bold text-[#334155] dark:text-[#E2E8F0] text-[10px]">
                                       Work: {ageing.scheduledBadge}
                                     </span>
@@ -2781,9 +2905,9 @@ const DeleteTaskConfirmationModal: React.FC<{
               <Trash2 className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-black text-[#101828] dark:text-white">Delete this task?</h2>
+              <h2 className="text-base font-black text-[#101828] dark:text-white">Delete Task?</h2>
               <p className="text-xs text-[#64748B] dark:text-[#94A3B8]">
-                This task will be removed from active operational views.
+                Are you sure you want to permanently delete this task? This action cannot be undone.
               </p>
             </div>
           </div>

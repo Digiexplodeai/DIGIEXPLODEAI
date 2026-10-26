@@ -1,6 +1,201 @@
 {
   "auditLogs": [
     {
+      "audit_id": "audit_1792995164171_tik9z",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792995164171_jzdnny",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "action": "Deleted",
+      "module": "Tasks & Work",
+      "entity_type": "task",
+      "entity_id": "task_1791987765597_j2ejo",
+      "description": "Task \"meta ads\" was deleted by Digiexplode Super Admin",
+      "metadata": {
+        "taskId": "task_1791987765597_j2ejo",
+        "taskTitle": "meta ads",
+        "clientName": "TESTINGGGGG",
+        "assigneeName": "Mohd Aakib",
+        "deletedAt": "2026-10-26T06:12:43.534Z"
+      },
+      "created_at": "2026-10-26T06:12:44.171Z"
+    },
+    {
+      "audit_id": "audit_1792995159086_tdz11",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792995159086_sk2vei",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "action": "Deleted",
+      "module": "Tasks & Work",
+      "entity_type": "task",
+      "entity_id": "task_1791987823028_qj9cc",
+      "description": "Task \"video bnao\" was deleted by Digiexplode Super Admin",
+      "metadata": {
+        "taskId": "task_1791987823028_qj9cc",
+        "taskTitle": "video bnao",
+        "clientName": "Dr. Akash Gandotra",
+        "assigneeName": "Mohd Aakib",
+        "deletedAt": "2026-10-26T06:12:38.456Z"
+      },
+      "created_at": "2026-10-26T06:12:39.086Z"
+    },
+    {
+      "audit_id": "audit_1792993352772_wrchx",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792993352772_qsjaxi",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "action": "Deleted",
+      "module": "Tasks & Work",
+      "entity_type": "task",
+      "entity_id": "task_1791988508677_zsaqr",
+      "description": "Task \"kaam krto\" was deleted by Digiexplode Super Admin",
+      "metadata": {
+        "taskId": "task_1791988508677_zsaqr",
+        "taskTitle": "kaam krto",
+        "clientName": "TESTINGGGGG",
+        "assigneeName": "Unassigned",
+        "deletedAt": "2026-10-26T05:42:32.282Z"
+      },
+      "created_at": "2026-10-26T05:42:32.772Z"
+    },
+    {
+      "audit_id": "audit_1792992307234_d7533",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792992307234_6q66vx",
+      "actor_id": "emp_vansh",
+      "actor_name": "Vansh",
+      "actor_role": "employee",
+      "action": "Completed",
+      "module": "Tasks & Work",
+      "entity_type": "task",
+      "entity_id": "task_1791988508677_zsaqr",
+      "description": "Task \"kaam krto\" moved from To Do to Done (right_arrow) by Vansh",
+      "metadata": {
+        "taskTitle": "kaam krto",
+        "previousStatus": "To Do",
+        "newStatus": "Done",
+        "clientName": "TESTINGGGGG",
+        "assigneeName": "Unassigned",
+        "source": "right_arrow"
+      },
+      "created_at": "2026-10-26T05:25:07.234Z"
+    },
+    {
+      "audit_id": "audit_1792991831717_6hzcc",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792991831716_bt5t3q",
+      "actor_id": "emp_aakib",
+      "actor_name": "Mohd Aakib",
+      "actor_role": "employee",
+      "action": "Completed",
+      "module": "Tasks & Work",
+      "entity_type": "task",
+      "entity_id": "task_1792643517864_jp9tq",
+      "description": "Task \"Google Adds\" moved from To Do to Done (right_arrow) by Mohd Aakib",
+      "metadata": {
+        "taskTitle": "Google Adds",
+        "previousStatus": "To Do",
+        "newStatus": "Done",
+        "clientName": "Dr. Bhushan Parmar",
+        "assigneeName": "Vansh",
+        "source": "right_arrow"
+      },
+      "created_at": "2026-10-26T05:17:11.716Z"
+    },
+    {
+      "audit_id": "audit_1792991769752_3ndpu",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792991769752_ds55ku",
+      "actor_id": "emp_aakib",
+      "actor_name": "Mohd Aakib",
+      "actor_role": "employee",
+      "action": "Completed",
+      "module": "Tasks & Work",
+      "entity_type": "task",
+      "entity_id": "task_1791996769034_5386y",
+      "description": "Task \"AI VIdeo\" moved from To Do to Done (right_arrow) by Mohd Aakib",
+      "metadata": {
+        "taskTitle": "AI VIdeo",
+        "previousStatus": "To Do",
+        "newStatus": "Done",
+        "clientName": "Dr. Anupam Jindal",
+        "assigneeName": "Ravinder",
+        "source": "right_arrow"
+      },
+      "created_at": "2026-10-26T05:16:09.752Z"
+    },
+    {
+      "audit_id": "audit_1792991761915_geuso",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792991761915_zyk3xj",
+      "actor_id": "emp_aakib",
+      "actor_name": "Mohd Aakib",
+      "actor_role": "employee",
+      "action": "Completed",
+      "module": "Tasks & Work",
+      "entity_type": "task",
+      "entity_id": "task_1792643195639_e7pf6",
+      "description": "Task \"Instagram add in Srinagar\" moved from To Do to Done (right_arrow) by Mohd Aakib",
+      "metadata": {
+        "taskTitle": "Instagram add in Srinagar",
+        "previousStatus": "To Do",
+        "newStatus": "Done",
+        "clientName": "Dr. Anupam Jindal",
+        "assigneeName": "Priyanshu",
+        "source": "right_arrow"
+      },
+      "created_at": "2026-10-26T05:16:01.915Z"
+    },
+    {
+      "audit_id": "audit_1792991761275_t84en",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792991761275_a9qsy2",
+      "actor_id": "emp_aakib",
+      "actor_name": "Mohd Aakib",
+      "actor_role": "employee",
+      "action": "Completed",
+      "module": "Tasks & Work",
+      "entity_type": "task",
+      "entity_id": "task_1792665341859_ixflv",
+      "description": "Task \"Post Upload\" moved from To Do to Done (right_arrow) by Mohd Aakib",
+      "metadata": {
+        "taskTitle": "Post Upload",
+        "previousStatus": "To Do",
+        "newStatus": "Done",
+        "clientName": "Dr. Anupam Jindal",
+        "assigneeName": "Priyanshu",
+        "source": "right_arrow"
+      },
+      "created_at": "2026-10-26T05:16:01.275Z"
+    },
+    {
+      "audit_id": "audit_1792991563798_3pdsc",
+      "workspace_id": "default_workspace",
+      "event_id": "evt_1792991563798_6mjkq7",
+      "actor_id": "emp_aakib",
+      "actor_name": "Mohd Aakib",
+      "actor_role": "employee",
+      "action": "Completed",
+      "module": "Tasks & Work",
+      "entity_type": "task",
+      "entity_id": "task_1792641922187_4l6w5",
+      "description": "Task \"rahul sandhu website\" moved from In Progress to Done (right_arrow) by Mohd Aakib",
+      "metadata": {
+        "taskTitle": "rahul sandhu website",
+        "previousStatus": "In Progress",
+        "newStatus": "Done",
+        "clientName": "General",
+        "assigneeName": "Unassigned",
+        "source": "right_arrow"
+      },
+      "created_at": "2026-10-26T05:12:43.798Z"
+    },
+    {
       "audit_id": "audit_1792676007835_vg5ek",
       "workspace_id": "default_workspace",
       "event_id": "evt_1792676007835_hjrtx8",
@@ -1232,6 +1427,213 @@
   },
   "settings": {},
   "events": [
+    {
+      "event_id": "evt_1792995164171_jzdnny",
+      "event_type": "task.deleted",
+      "workspace_id": "default_workspace",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "entity_type": "task",
+      "entity_id": "task_1791987765597_j2ejo",
+      "client_id": "client_7ip1qe4bm",
+      "target_member_ids": [
+        "emp_aakib"
+      ],
+      "timestamp": "2026-10-26T06:12:44.171Z",
+      "metadata": {
+        "taskId": "task_1791987765597_j2ejo",
+        "taskTitle": "meta ads",
+        "clientName": "TESTINGGGGG",
+        "assigneeName": "Mohd Aakib",
+        "deletedAt": "2026-10-26T06:12:43.534Z"
+      },
+      "idempotency_key": "task.deleted_task_1791987765597_j2ejo_1792995164171"
+    },
+    {
+      "event_id": "evt_1792995159086_sk2vei",
+      "event_type": "task.deleted",
+      "workspace_id": "default_workspace",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "entity_type": "task",
+      "entity_id": "task_1791987823028_qj9cc",
+      "client_id": "client_dr_akash_gandotra",
+      "target_member_ids": [
+        "emp_aakib"
+      ],
+      "timestamp": "2026-10-26T06:12:39.086Z",
+      "metadata": {
+        "taskId": "task_1791987823028_qj9cc",
+        "taskTitle": "video bnao",
+        "clientName": "Dr. Akash Gandotra",
+        "assigneeName": "Mohd Aakib",
+        "deletedAt": "2026-10-26T06:12:38.456Z"
+      },
+      "idempotency_key": "task.deleted_task_1791987823028_qj9cc_1792995159086"
+    },
+    {
+      "event_id": "evt_1792993352772_qsjaxi",
+      "event_type": "task.deleted",
+      "workspace_id": "default_workspace",
+      "actor_id": "demo-super-admin-01",
+      "actor_name": "Digiexplode Super Admin",
+      "actor_role": "superAdmin",
+      "entity_type": "task",
+      "entity_id": "task_1791988508677_zsaqr",
+      "client_id": "client_7ip1qe4bm",
+      "target_member_ids": [],
+      "timestamp": "2026-10-26T05:42:32.772Z",
+      "metadata": {
+        "taskId": "task_1791988508677_zsaqr",
+        "taskTitle": "kaam krto",
+        "clientName": "TESTINGGGGG",
+        "assigneeName": "Unassigned",
+        "deletedAt": "2026-10-26T05:42:32.282Z"
+      },
+      "idempotency_key": "task.deleted_task_1791988508677_zsaqr_1792993352772"
+    },
+    {
+      "event_id": "evt_1792992307234_6q66vx",
+      "event_type": "task.completed",
+      "workspace_id": "default_workspace",
+      "actor_id": "emp_vansh",
+      "actor_name": "Vansh",
+      "actor_role": "employee",
+      "entity_type": "task",
+      "entity_id": "task_1791988508677_zsaqr",
+      "client_id": "client_7ip1qe4bm",
+      "target_member_ids": [],
+      "timestamp": "2026-10-26T05:25:07.234Z",
+      "metadata": {
+        "taskTitle": "kaam krto",
+        "previousStatus": "To Do",
+        "newStatus": "Done",
+        "clientName": "TESTINGGGGG",
+        "assigneeName": "Unassigned",
+        "source": "right_arrow"
+      },
+      "idempotency_key": "task.completed_task_1791988508677_zsaqr_1792992307234"
+    },
+    {
+      "event_id": "evt_1792991831716_bt5t3q",
+      "event_type": "task.completed",
+      "workspace_id": "default_workspace",
+      "actor_id": "emp_aakib",
+      "actor_name": "Mohd Aakib",
+      "actor_role": "employee",
+      "entity_type": "task",
+      "entity_id": "task_1792643517864_jp9tq",
+      "client_id": "client_dr_bhushan_parmar",
+      "target_member_ids": [
+        "emp_vansh"
+      ],
+      "timestamp": "2026-10-26T05:17:11.716Z",
+      "metadata": {
+        "taskTitle": "Google Adds",
+        "previousStatus": "To Do",
+        "newStatus": "Done",
+        "clientName": "Dr. Bhushan Parmar",
+        "assigneeName": "Vansh",
+        "source": "right_arrow"
+      },
+      "idempotency_key": "task.completed_task_1792643517864_jp9tq_1792991831716"
+    },
+    {
+      "event_id": "evt_1792991769752_ds55ku",
+      "event_type": "task.completed",
+      "workspace_id": "default_workspace",
+      "actor_id": "emp_aakib",
+      "actor_name": "Mohd Aakib",
+      "actor_role": "employee",
+      "entity_type": "task",
+      "entity_id": "task_1791996769034_5386y",
+      "client_id": "client_dr_anupam_jindal",
+      "target_member_ids": [
+        "emp_ravinder"
+      ],
+      "timestamp": "2026-10-26T05:16:09.752Z",
+      "metadata": {
+        "taskTitle": "AI VIdeo",
+        "previousStatus": "To Do",
+        "newStatus": "Done",
+        "clientName": "Dr. Anupam Jindal",
+        "assigneeName": "Ravinder",
+        "source": "right_arrow"
+      },
+      "idempotency_key": "task.completed_task_1791996769034_5386y_1792991769752"
+    },
+    {
+      "event_id": "evt_1792991761915_zyk3xj",
+      "event_type": "task.completed",
+      "workspace_id": "default_workspace",
+      "actor_id": "emp_aakib",
+      "actor_name": "Mohd Aakib",
+      "actor_role": "employee",
+      "entity_type": "task",
+      "entity_id": "task_1792643195639_e7pf6",
+      "client_id": "client_dr_anupam_jindal",
+      "target_member_ids": [
+        "emp_priyanshu"
+      ],
+      "timestamp": "2026-10-26T05:16:01.915Z",
+      "metadata": {
+        "taskTitle": "Instagram add in Srinagar",
+        "previousStatus": "To Do",
+        "newStatus": "Done",
+        "clientName": "Dr. Anupam Jindal",
+        "assigneeName": "Priyanshu",
+        "source": "right_arrow"
+      },
+      "idempotency_key": "task.completed_task_1792643195639_e7pf6_1792991761915"
+    },
+    {
+      "event_id": "evt_1792991761275_a9qsy2",
+      "event_type": "task.completed",
+      "workspace_id": "default_workspace",
+      "actor_id": "emp_aakib",
+      "actor_name": "Mohd Aakib",
+      "actor_role": "employee",
+      "entity_type": "task",
+      "entity_id": "task_1792665341859_ixflv",
+      "client_id": "client_dr_anupam_jindal",
+      "target_member_ids": [
+        "emp_priyanshu"
+      ],
+      "timestamp": "2026-10-26T05:16:01.275Z",
+      "metadata": {
+        "taskTitle": "Post Upload",
+        "previousStatus": "To Do",
+        "newStatus": "Done",
+        "clientName": "Dr. Anupam Jindal",
+        "assigneeName": "Priyanshu",
+        "source": "right_arrow"
+      },
+      "idempotency_key": "task.completed_task_1792665341859_ixflv_1792991761275"
+    },
+    {
+      "event_id": "evt_1792991563798_6mjkq7",
+      "event_type": "task.completed",
+      "workspace_id": "default_workspace",
+      "actor_id": "emp_aakib",
+      "actor_name": "Mohd Aakib",
+      "actor_role": "employee",
+      "entity_type": "task",
+      "entity_id": "task_1792641922187_4l6w5",
+      "client_id": "",
+      "target_member_ids": [],
+      "timestamp": "2026-10-26T05:12:43.798Z",
+      "metadata": {
+        "taskTitle": "rahul sandhu website",
+        "previousStatus": "In Progress",
+        "newStatus": "Done",
+        "clientName": "General",
+        "assigneeName": "Unassigned",
+        "source": "right_arrow"
+      },
+      "idempotency_key": "task.completed_task_1792641922187_4l6w5_1792991563798"
+    },
     {
       "event_id": "evt_1792676007835_hjrtx8",
       "event_type": "permissions.updated",

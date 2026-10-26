@@ -256,7 +256,7 @@ export const buildPayslipHTML = (p: PayrollRecord, monthLabel: string): string =
         <div class="company-meta">
           <strong>Digiexplode Digital Media Private Limited</strong><br/>
           CIN: U72900UP2024PTC189201 | Sector 62, Noida, NCR<br/>
-          payroll@digiexplode.com | +91 98765 43210
+          payroll@digiexplode.com | +91 8725072730
         </div>
       </div>
 

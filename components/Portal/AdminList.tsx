@@ -5,8 +5,9 @@ import {
 import { db } from '../../lib/firebase';
 import { useAuth, type UserProfile } from '../../context/AuthContext';
 import { type ClientData } from './ClientList';
-import { mergeWithSuperAdmin, PERMANENT_SUPER_ADMIN_MEMBER, CENTRAL_EMPLOYEES_MASTER_LIST, getCachedEmployees } from '../../lib/employeeMaster';
+import { mergeWithSuperAdmin, PERMANENT_SUPER_ADMIN_MEMBER, CENTRAL_EMPLOYEES_MASTER_LIST, getCachedEmployees, isTaskAssignedToEmployee } from '../../lib/employeeMaster';
 import { cfGetEmployees, cfCreateEmployee, cfUpdateEmployee, cfDeleteEmployee } from '../../lib/cloudflareApi';
+import { type Task, subscribeToCanonicalTasks, getCachedTasks } from '../../lib/taskStorage';
 import {
   Users, Plus, Search, X, Loader2, Check, Edit2, UserCheck, UserX,
   Mail, Phone, Calendar, Shield, Briefcase, ChevronRight, Star,
@@ -53,6 +54,12 @@ export const AdminList: React.FC = () => {
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
   const [showCreate, setShowCreate]   = useState(false);
   const [activeProfileTab, setActiveProfileTab] = useState('overview');
+  const [tasks, setTasks]             = useState<Task[]>(() => getCachedTasks());
+
+  useEffect(() => {
+    const unsubTasks = subscribeToCanonicalTasks(setTasks);
+    return () => unsubTasks();
+  }, []);
 
   const isAdmin = currentUser?.role === 'superAdmin' || currentUser?.role === 'admin';
 
@@ -367,6 +374,7 @@ export const AdminList: React.FC = () => {
       {selectedEmployee && (
         <EmployeeProfileDrawer
           emp={selectedEmployee}
+          tasks={tasks}
           isAdmin={isAdmin}
           activeTab={activeProfileTab}
           setActiveTab={setActiveProfileTab}
@@ -472,6 +480,7 @@ const EmployeeCard: React.FC<{
 // ─── EMPLOYEE PROFILE DRAWER ──────────────────────────────────────────
 interface DrawerProps {
   emp: Employee;
+  tasks: Task[];
   isAdmin: boolean;
   activeTab: string;
   setActiveTab: (t: string) => void;
@@ -481,7 +490,7 @@ interface DrawerProps {
 
 const PROFILE_TABS = ['overview', 'attendance', 'tasks', 'skills'];
 
-const EmployeeProfileDrawer: React.FC<DrawerProps> = ({ emp, isAdmin, activeTab, setActiveTab, onClose, onUpdate }) => {
+const EmployeeProfileDrawer: React.FC<DrawerProps> = ({ emp, tasks, isAdmin, activeTab, setActiveTab, onClose, onUpdate }) => {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<Partial<Employee>>({});
   const [saving, setSaving] = useState(false);
@@ -627,6 +636,100 @@ const EmployeeProfileDrawer: React.FC<DrawerProps> = ({ emp, isAdmin, activeTab,
                   </span>
                 ))}
               </div>
+            </div>
+          ) : activeTab === 'tasks' ? (
+            <div className="space-y-4">
+              {(() => {
+                const empTasks = tasks.filter(t => isTaskAssignedToEmployee(t, emp) && !t.isArchived && !t.is_deleted && t.status !== 'Cancelled');
+                const doneCount = empTasks.filter(t => t.status === 'Done').length;
+                const inProgressCount = empTasks.filter(t => t.status === 'In Progress').length;
+                const inReviewCount = empTasks.filter(t => t.status === 'In Review').length;
+                const todoCount = empTasks.filter(t => t.status === 'To Do').length;
+
+                return (
+                  <>
+                    <div className="grid grid-cols-4 gap-2 text-center">
+                      <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                        <p className="text-lg font-black text-slate-800 dark:text-slate-100">{empTasks.length}</p>
+                        <p className="text-[10px] font-bold uppercase text-slate-500">Total</p>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900">
+                        <p className="text-lg font-black text-blue-700 dark:text-blue-300">{inProgressCount}</p>
+                        <p className="text-[10px] font-bold uppercase text-blue-600 dark:text-blue-400">In Progress</p>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900">
+                        <p className="text-lg font-black text-amber-700 dark:text-amber-300">{inReviewCount}</p>
+                        <p className="text-[10px] font-bold uppercase text-amber-600 dark:text-amber-400">In Review</p>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900">
+                        <p className="text-lg font-black text-emerald-700 dark:text-emerald-300">{doneCount}</p>
+                        <p className="text-[10px] font-bold uppercase text-emerald-600 dark:text-emerald-400">Done</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 pt-2">
+                      <h4 className="text-xs font-black uppercase tracking-wider text-[#101828] dark:text-[#F7F8FC]">
+                        Specialist Task Queue ({empTasks.length})
+                      </h4>
+
+                      {empTasks.length === 0 ? (
+                        <div className="p-6 text-center border border-dashed border-[#D7DEE9] dark:border-[#293248] rounded-2xl">
+                          <Check className="w-8 h-8 text-emerald-500 mx-auto mb-1.5" />
+                          <p className="text-xs font-bold text-[#101828] dark:text-white">No active tasks</p>
+                          <p className="text-[10px] text-[#7A8496] mt-0.5">This specialist has no tasks assigned currently.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+                          {empTasks.map(t => (
+                            <div
+                              key={t.id}
+                              className="p-3 bg-[#F8FAFC] dark:bg-[#161B31] border border-[#D7DEE9] dark:border-[#293248] rounded-xl flex flex-col gap-1.5 shadow-2xs hover:border-[#5B4BFF]/50 transition-all"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-bold text-[#101828] dark:text-[#F7F8FC] truncate">
+                                  {t.title}
+                                </span>
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                                  t.status === 'Done'
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/50 dark:text-emerald-300'
+                                    : t.status === 'In Progress'
+                                    ? 'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/50 dark:text-blue-300'
+                                    : t.status === 'In Review'
+                                    ? 'bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/50 dark:text-amber-300'
+                                    : 'bg-slate-100 text-slate-700 border border-slate-200 dark:bg-white/10 dark:text-slate-300'
+                                }`}>
+                                  {t.status}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center justify-between text-[10px] text-[#7A8496] dark:text-[#94A3B8]">
+                                <span className="font-semibold truncate max-w-[150px]">
+                                  {t.clientName || 'General'}
+                                </span>
+                                <div className="flex items-center gap-2">
+                                  {t.priority && (
+                                    <span className={`font-bold ${
+                                      t.priority === 'Urgent' ? 'text-rose-600' :
+                                      t.priority === 'High' ? 'text-amber-600' : 'text-slate-500'
+                                    }`}>
+                                      {t.priority}
+                                    </span>
+                                  )}
+                                  {t.dueDate && (
+                                    <span className="font-mono">
+                                      Due: {t.dueDate.slice(0, 10)}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           ) : null}
         </div>

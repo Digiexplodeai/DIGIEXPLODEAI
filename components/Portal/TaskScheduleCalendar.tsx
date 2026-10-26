@@ -203,7 +203,14 @@ export const TaskScheduleCalendar: React.FC<TaskScheduleCalendarProps> = ({
       {/* Calendar Month Grid */}
       <div className="grid grid-cols-7 gap-2">
         {calendarDays.map(day => {
-          const dayTasks = tasks.filter(t => (t.scheduledDate || t.scheduled_date) === day.dateStr);
+          const dayTasks = tasks.filter(t => {
+            const isDone = (t.status || '').toLowerCase().includes('done') || (t.status || '').toLowerCase().includes('completed');
+            if (isDone) {
+              const compDate = (t.completedAt || t.completed_at || (t.createdAt ? t.createdAt.slice(0, 10) : '')).slice(0, 10);
+              return compDate ? compDate === day.dateStr : (t.scheduledDate || t.scheduled_date) === day.dateStr;
+            }
+            return (t.scheduledDate || t.scheduled_date) === day.dateStr;
+          });
 
           return (
             <div

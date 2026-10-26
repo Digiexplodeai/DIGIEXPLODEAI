@@ -91,6 +91,9 @@ const App: React.FC = () => {
               <Route path="/start-project" element={<StartProject />} />
               <Route path="/portal" element={<PortalDashboard key="portal" defaultTab="attendance" />} />
               <Route path="/admin" element={<PortalDashboard key="admin" defaultTab="attendance" />} />
+              <Route path="/marketing" element={<PortalDashboard key="marketing" defaultTab="marketing" />} />
+              <Route path="/marketing-dashboard" element={<PortalDashboard key="marketing-dashboard" defaultTab="marketing" />} />
+              <Route path="/admin/marketing" element={<PortalDashboard key="admin-marketing" defaultTab="marketing" />} />
               <Route path="/attendance" element={<PortalDashboard key="attendance" defaultTab="attendance" />} />
               <Route path="/attendence" element={<PortalDashboard key="attendence" defaultTab="attendance" />} />
               {/* Location SEO Pages — North India */}

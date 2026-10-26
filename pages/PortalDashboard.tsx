@@ -63,8 +63,8 @@ const getDefaultTab = (role: string): string => {
 };
 
 const PortalDashboard: React.FC<PortalDashboardProps> = ({ defaultTab }) => {
-  const { user, profile, loading, signOutUser, loginAsDemoRole } = useAuth();
-  const [activeTab, setActiveTab] = useState<string>(defaultTab || 'attendance');
+  const searchTab = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('tab') : null;
+  const [activeTab, setActiveTab] = useState<string>(searchTab || defaultTab || 'attendance');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isCommandOpen, setIsCommandOpen] = useState(false);
   const [showSlowLoadFallback, setShowSlowLoadFallback] = useState(false);
@@ -80,10 +80,12 @@ const PortalDashboard: React.FC<PortalDashboardProps> = ({ defaultTab }) => {
 
   // Set role-based default tab once profile loads
   useEffect(() => {
-    if (profile && !defaultTab) {
+    if (searchTab) {
+      setActiveTab(searchTab);
+    } else if (profile && !defaultTab) {
       setActiveTab(getDefaultTab(profile.role));
     }
-  }, [profile, defaultTab]);
+  }, [profile, defaultTab, searchTab]);
 
   // Global keyboard shortcut Ctrl+K / Cmd+K
   useEffect(() => {

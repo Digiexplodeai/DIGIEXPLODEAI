@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { collection, onSnapshot, query, where, doc, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../lib/firebase';
 import { useAuth } from '../../context/AuthContext';
@@ -23,7 +23,8 @@ import {
   Film,
   CheckCircle,
   Video,
-  Trash2
+  Trash2,
+  Target
 } from 'lucide-react';
 
 export interface VideoEntry {
@@ -279,6 +280,35 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ setActiveT
                 : 'Our designs are waiting for your overview. Examine calendar entries below.'}
           </p>
         </div>
+
+        {/* Quick Launch Marketing & Leads Command Center Banner for Admin */}
+        {(profile?.role === 'superAdmin' || profile?.role === 'admin') && (
+          <div className="mt-5 p-4 rounded-2xl bg-gradient-to-r from-blue-600/30 via-indigo-600/30 to-sky-600/30 border border-blue-400/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg relative z-10 backdrop-blur-md">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#6C4CFF] to-[#2563FF] flex items-center justify-center text-white shadow-md flex-shrink-0">
+                <Target className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="flex h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
+                  <span className="text-xs font-black text-white uppercase tracking-wider">
+                    Live Marketing & Inbound Telemetry Center
+                  </span>
+                </div>
+                <p className="text-xs text-slate-300 mt-0.5">
+                  Track live visitors browsing the site, check inbound lead submissions, and manage sales outreach.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setActiveTab('marketing')}
+              className="px-4 py-2 rounded-xl bg-[#2563FF] hover:bg-[#1E4FE6] text-white text-xs font-black flex items-center gap-2 shadow-md transition-all whitespace-nowrap cursor-pointer hover:scale-105"
+            >
+              <span>Open Marketing Dashboard</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* KPI Stats Panel Grid */}

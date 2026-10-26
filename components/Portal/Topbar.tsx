@@ -4,7 +4,7 @@ import { useTheme } from '../../context/ThemeContext';
 import {
   Search, Command, Bell, Sun, Moon, Plus, ChevronDown,
   CheckSquare, Zap, Calendar, Film, Briefcase, User, LogOut,
-  Shield, Menu, Check, Eye, X
+  Shield, Menu, Check, Eye, X, Target
 } from 'lucide-react';
 import { NotificationsDropdown } from './NotificationsDropdown';
 import { NotificationService } from '../../lib/controlPlane/NotificationService';
@@ -140,6 +140,22 @@ export const Topbar: React.FC<TopbarProps> = ({
               <span className="w-2 h-2 rounded-full bg-teal-500 animate-pulse" />
               <span className="truncate max-w-[180px]">Specialist Hub · {profile.name}</span>
             </div>
+          )}
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('marketing')}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'marketing'
+                  ? 'bg-[#2563FF] text-white shadow-xs'
+                  : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-300/40 hover:bg-emerald-500 hover:text-white'
+              }`}
+              title="Open Live Marketing & Leads Dashboard"
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+              <Target className="w-3.5 h-3.5" />
+              <span className="font-extrabold">Marketing & Leads</span>
+            </button>
           )}
           {isAdmin && (
             <button

@@ -22,6 +22,7 @@ import { HRDocumentsView }    from '../components/Portal/HRDocumentsView';
 import { PayrollView }        from '../components/Portal/PayrollView';
 import { AuditLogView }       from '../components/Portal/AuditLogView';
 import { PermissionsView }    from '../components/Portal/PermissionsView';
+import { MarketingDashboardView } from '../components/Portal/MarketingDashboardView';
 import { Topbar }             from '../components/Portal/Topbar';
 import { CommandPalette }     from '../components/Portal/CommandPalette';
 import { Menu, ShieldAlert, LogOut, Loader2, Command, Bell } from 'lucide-react';
@@ -41,6 +42,7 @@ const TAB_MODULE_MAP: Record<string, string> = {
   'hr-docs': 'HR Documents',
   'payroll': 'Payroll',
   'seo': 'SEO Studio',
+  'marketing': 'Marketing & Leads',
   'files': 'Files & Assets',
   'settings': 'Settings',
 };
@@ -273,7 +275,8 @@ const PortalDashboard: React.FC<PortalDashboardProps> = ({ defaultTab }) => {
       case 'hr-docs':         return <HRDocumentsView />;
       case 'payroll':         return <PayrollView />;
 
-      // ─── Analytics ────────────────────────────────────────
+      // ─── Analytics & Growth ───────────────────────────────
+      case 'marketing':       return <MarketingDashboardView />;
       case 'reports':         return <ReportsView />;
 
       // ─── Tools ────────────────────────────────────────────

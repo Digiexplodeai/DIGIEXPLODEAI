@@ -14,13 +14,15 @@ import DoctorMarketingPage from './pages/DoctorMarketingPage';
 import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { MotionalBackground } from './components/UI/MotionalBackground';
+import LeadCaptureModal from './components/Marketing/LeadCaptureModal';
+import { trackPageView } from './lib/marketingTracker';
 
 
 const ScrollToTop = () => {
   const { pathname } = useLocation();
   useEffect(() => {
     window.scrollTo(0, 0);
-
+    trackPageView(pathname);
   }, [pathname]);
   return null;
 };
@@ -44,6 +46,7 @@ const LayoutContainer: React.FC<{ children: React.ReactNode }> = ({ children }) 
         {children}
       </main>
       {!isPortal && <Footer />}
+      <LeadCaptureModal />
 
       {/* Back to Top */}
       {!isPortal && (

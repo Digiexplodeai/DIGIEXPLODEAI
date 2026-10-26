@@ -28,6 +28,7 @@ export const CANONICAL_MODULES = [
   'HR Documents',
   'Payroll',
   'SEO Studio',
+  'Marketing & Leads',
   'Files & Assets',
   'Settings',
 ];

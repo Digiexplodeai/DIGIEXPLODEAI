@@ -5,7 +5,7 @@ import {
   CheckSquare, UserCheck, TrendingUp, BarChart3, Globe, FolderOpen,
   Bell, Settings, LogOut, X, ChevronDown, ChevronRight, Plus,
   Wifi, Search, PanelLeftClose, PanelLeft, Shield, Zap, Clock,
-  ClipboardList, FileText, CreditCard, ShieldCheck, Lock
+  ClipboardList, FileText, CreditCard, ShieldCheck, Lock, Target
 } from 'lucide-react';
 import { PermissionService } from '../../lib/controlPlane/PermissionService';
 
@@ -43,6 +43,7 @@ const TAB_MODULE_MAP: Record<string, string> = {
   'hr-docs': 'HR Documents',
   'payroll': 'Payroll',
   'seo': 'SEO Studio',
+  'marketing': 'Marketing & Leads',
   'files': 'Files & Assets',
   'settings': 'Settings',
 };
@@ -79,9 +80,10 @@ const getNavGroups = (role: string, notifCount: number): NavGroup[] => {
       ]
     },
     {
-      label: 'Analytics',
+      label: 'Growth & Analytics',
       items: [
-        { id: 'reports', label: 'Reports', icon: BarChart3, roles: ['superAdmin','admin','employee','teamLeader','accounts','client'] },
+        { id: 'marketing', label: 'Marketing & Leads', icon: Target, roles: ['superAdmin','admin'] },
+        { id: 'reports',   label: 'Reports',           icon: BarChart3, roles: ['superAdmin','admin','employee','teamLeader','accounts','client'] },
       ]
     },
     {

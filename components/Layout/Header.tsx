@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Menu, X, ArrowRight, Sparkles, Phone, MessageSquare, Briefcase, Layers, Users, Mail, ExternalLink, Stethoscope } from 'lucide-react';
 import { siteConfig } from '../../config/site';
 import ThemeToggle from '../UI/ThemeToggle';
+import { useTheme } from '../../context/ThemeContext';
 
 const Header: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -12,6 +13,8 @@ const Header: React.FC = () => {
   const navigate = useNavigate();
   const [btnOffset, setBtnOffset] = useState({ x: 0, y: 0 });
   const btnRef = useRef<HTMLAnchorElement>(null);
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === 'dark';
 
   // Scroll detection for navbar background opacity & height transition
   useEffect(() => {
@@ -98,15 +101,12 @@ const Header: React.FC = () => {
   return (
     <header
       className={`fixed top-0 left-0 w-full z-50 transition-all duration-200 ${
-        isOpen ? 'h-[100dvh] flex flex-col' : ''
+        isOpen
+          ? 'h-[100dvh] flex flex-col bg-white dark:bg-[#07101E]'
+          : scrolled
+            ? 'bg-white/95 dark:bg-[#07101E]/95 backdrop-blur-xl border-b border-black/10 dark:border-white/10 shadow-sm dark:shadow-[0_4px_24px_rgba(0,0,0,0.5)]'
+            : 'bg-white/85 dark:bg-[#07101E]/85 backdrop-blur-md border-b border-black/5 dark:border-white/10 shadow-xs dark:shadow-none'
       }`}
-      style={{
-        background: isOpen || scrolled ? 'var(--bg-page)' : 'transparent',
-        backdropFilter: isOpen ? 'none' : (scrolled ? 'blur(18px)' : 'none'),
-        WebkitBackdropFilter: isOpen ? 'none' : (scrolled ? 'blur(18px)' : 'none'),
-        borderBottom: (scrolled || isOpen) ? '1px solid var(--border-subtle)' : '1px solid transparent',
-        boxShadow: scrolled && !isOpen ? '0 4px 24px rgba(17, 19, 29, 0.05)' : 'none',
-      }}
     >
       <div
         className="editorial-container flex items-center justify-between transition-all duration-200 w-full flex-shrink-0"
@@ -134,20 +134,19 @@ const Header: React.FC = () => {
             </svg>
           </div>
 
-          {/* Wordmark */}
+          {/* Wordmark — razor sharp contrast in both light and dark mode */}
           <span 
-            className="font-extrabold text-xl sm:text-[22px] tracking-tight transition-colors duration-200 leading-none select-none"
+            className="font-extrabold text-xl sm:text-[22px] tracking-tight transition-colors duration-200 leading-none select-none text-[#101828] dark:text-[#FFFFFF]"
             style={{ 
               fontFamily: 'Manrope, sans-serif', 
-              color: 'var(--text-primary)',
             }}
           >
-            Digiexplode<span className="text-[#6C4CFF] ml-0.5">AI</span>
+            Digiexplode<span className="text-[#6C4CFF] dark:text-[#8A5CFF] font-black ml-0.5">AI</span>
           </span>
         </Link>
 
         {/* ── Desktop Primary Navigation ── */}
-        <nav className="hidden lg:flex items-center gap-1.5 p-1 rounded-2xl bg-black/[0.03] dark:bg-white/[0.04] border border-black/5 dark:border-white/10 backdrop-blur-md">
+        <nav className="hidden lg:flex items-center gap-1.5 p-1 rounded-2xl bg-black/[0.04] dark:bg-white/[0.05] border border-black/8 dark:border-white/10 backdrop-blur-md">
           {navLinks.map(link => {
             const isRouteActive = !link.isAnchor && location.pathname === link.path;
             const isSectionActive = link.isAnchor && location.pathname === '/' && activeSection === link.sectionId;
@@ -159,8 +158,8 @@ const Header: React.FC = () => {
                 to={link.path}
                 className={`px-4 py-2 rounded-xl text-[14.5px] font-bold tracking-wide transition-all duration-200 h-10 flex items-center justify-center ${
                   isActive
-                    ? 'bg-[#6C4CFF]/12 dark:bg-[#6C4CFF]/25 text-[#6C4CFF] dark:text-[#F3F1FF] shadow-sm'
-                    : 'text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5'
+                    ? 'bg-[#6C4CFF]/15 dark:bg-[#6C4CFF]/30 text-[#6C4CFF] dark:text-[#E0E7FF] shadow-xs'
+                    : 'text-neutral-700 dark:text-neutral-200 hover:text-black dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/10'
                 }`}
               >
                 {link.label}
@@ -176,7 +175,7 @@ const Header: React.FC = () => {
             className={`px-4 py-2 rounded-xl text-[14px] font-bold tracking-wide transition-all duration-200 h-10 flex items-center justify-center gap-1.5 border ${
               location.pathname.startsWith('/portal')
                 ? 'bg-[#6C4CFF] text-white border-[#6C4CFF] shadow-md'
-                : 'border-black/10 dark:border-white/15 text-neutral-600 dark:text-neutral-300 hover:text-[#6C4CFF] dark:hover:text-white hover:border-[#6C4CFF] bg-white/40 dark:bg-black/20'
+                : 'border-black/10 dark:border-white/15 text-neutral-700 dark:text-neutral-200 hover:text-[#6C4CFF] dark:hover:text-white hover:border-[#6C4CFF] bg-white/70 dark:bg-black/30'
             }`}
           >
             Portal

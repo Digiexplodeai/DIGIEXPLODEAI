@@ -32,14 +32,51 @@ export const LeadCaptureModal: React.FC = () => {
 
     // Check if dismissed in this session
     const sessionDismissed = sessionStorage.getItem('digiexplode_lead_modal_dismissed');
+
+    // Intent-driven triggers: Listen for custom event dispatch from buttons across the site
+    const handleOpenModal = () => {
+      setIsOpen(true);
+      logVisitorAction('Lead Capture Modal Opened by User');
+    };
+
+    window.addEventListener('open_lead_modal', handleOpenModal);
+    window.addEventListener('open_audit_modal', handleOpenModal);
+
+    // Optional desktop exit-intent after at least 35 seconds of browsing
+    let pageTimer: NodeJS.Timeout | null = null;
+    let canTriggerExit = false;
+
     if (!sessionDismissed && !hasInteracted) {
-      const timer = setTimeout(() => {
-        setIsOpen(true);
-        logVisitorAction('Lead Capture Popup Displayed');
-      }, 2800);
-      return () => clearTimeout(timer);
+      pageTimer = setTimeout(() => {
+        canTriggerExit = true;
+      }, 35000);
     }
-  }, [location.pathname, isPortal, hasInteracted]);
+
+    const handleMouseLeave = (e: MouseEvent) => {
+      if (canTriggerExit && e.clientY <= 10 && !sessionDismissed && !hasInteracted && !isOpen) {
+        setIsOpen(true);
+        canTriggerExit = false;
+        logVisitorAction('Lead Capture Displayed via Exit Intent');
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        handleClose();
+      }
+    };
+
+    document.addEventListener('mouseleave', handleMouseLeave);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('open_lead_modal', handleOpenModal);
+      window.removeEventListener('open_audit_modal', handleOpenModal);
+      document.removeEventListener('mouseleave', handleMouseLeave);
+      window.removeEventListener('keydown', handleKeyDown);
+      if (pageTimer) clearTimeout(pageTimer);
+    };
+  }, [location.pathname, isPortal, hasInteracted, isOpen]);
 
   const handleClose = () => {
     setIsOpen(false);

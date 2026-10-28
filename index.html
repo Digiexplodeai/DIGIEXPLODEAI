@@ -2,6 +2,18 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Domain Enforcement: Redirect all vercel.app traffic to official custom domain -->
+    <script>
+      (function() {
+        try {
+          var h = window.location.hostname;
+          if (h && (h.endsWith('.vercel.app') || h === 'digiexplodeai.vercel.app')) {
+            var target = 'https://www.digiexplodeai.com' + window.location.pathname + window.location.search + window.location.hash;
+            window.location.replace(target);
+          }
+        } catch (e) {}
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
     <meta name="theme-color" content="#090D18" />
     <meta name="apple-mobile-web-app-capable" content="yes" />

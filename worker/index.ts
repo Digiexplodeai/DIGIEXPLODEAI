@@ -46,12 +46,11 @@ export type { Env, AuthenticatedUser };
 // ── CORS Headers Generator ──────────────────────────────────────────────────
 function getCorsHeaders(request: Request, env: Env) {
   const origin = request.headers.get('Origin') || '';
-  const defaultAllowed = 'https://www.digiexplodeai.com,https://digiexplodeai.com,https://digiexplodeai.vercel.app,http://localhost:3000,http://localhost:5173';
+  const defaultAllowed = 'https://www.digiexplodeai.com,https://digiexplodeai.com,http://localhost:3000,http://localhost:5173';
   const allowed = (env.ALLOWED_ORIGINS || defaultAllowed).split(',').map(o => o.trim());
 
   const isAllowed =
     allowed.includes(origin) ||
-    origin.endsWith('.vercel.app') ||
     origin.endsWith('digiexplodeai.com') ||
     origin.startsWith('http://localhost:');
 

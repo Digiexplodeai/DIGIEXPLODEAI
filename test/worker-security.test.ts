@@ -344,7 +344,7 @@ async function runAllSecurityTests() {
   const env: Env = {
     DB: mockDb as any,
     FIREBASE_PROJECT_ID: PROJECT_ID,
-    ALLOWED_ORIGINS: 'https://digiexplodeai.vercel.app,http://localhost:3000',
+    ALLOWED_ORIGINS: 'https://www.digiexplodeai.com,http://localhost:3000',
     TEST_JWKS: [PRIMARY_KEY.jwk],
   };
 

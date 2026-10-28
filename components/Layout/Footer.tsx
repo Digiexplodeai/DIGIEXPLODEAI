@@ -175,8 +175,43 @@ const Footer: React.FC = () => {
 
           </div>
 
+          {/* Regional Growth Hubs (Location Specific SEO & Client Acquisition Pages) */}
+          <div className="pt-8 pb-4 border-t border-white/10">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+              <span className="text-xs font-bold uppercase tracking-wider text-white/40">
+                Regional Growth Hubs (North India)
+              </span>
+              <span className="text-[11px] text-white/35">
+                Local Performance Marketing & Web Development
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-white/60">
+              {[
+                { name: 'Chandigarh', path: '/chandigarh' },
+                { name: 'Mohali', path: '/mohali' },
+                { name: 'Panchkula', path: '/panchkula' },
+                { name: 'Delhi NCR', path: '/delhi' },
+                { name: 'Gurugram', path: '/gurugram' },
+                { name: 'Noida', path: '/noida' },
+                { name: 'Ludhiana', path: '/ludhiana' },
+                { name: 'Amritsar', path: '/amritsar' },
+                { name: 'Jalandhar', path: '/jalandhar' },
+                { name: 'Shimla', path: '/shimla' },
+                { name: 'Dehradun', path: '/dehradun' },
+              ].map(city => (
+                <Link
+                  key={city.path}
+                  to={city.path}
+                  className="hover:text-[#6C4CFF] hover:underline transition-colors"
+                >
+                  {city.name}
+                </Link>
+              ))}
+            </div>
+          </div>
+
           {/* Bottom Copyright & Legal */}
-          <div className="pt-8 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-white/45">
+          <div className="pt-6 border-t border-white/10 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-white/45">
             <p className="m-0">
               © {year} Digiexplode AI Agency. All rights reserved. Crafted with precision for high-growth brands.
             </p>

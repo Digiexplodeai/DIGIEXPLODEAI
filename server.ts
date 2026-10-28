@@ -10,6 +10,15 @@ const PORT = 3000;
 
 app.use(express.json({ limit: '50mb' }));
 
+// Domain Enforcement: Redirect any vercel.app traffic to official custom domain
+app.use((req, res, next) => {
+  const host = req.headers.host || '';
+  if (host.includes('.vercel.app')) {
+    return res.redirect(308, `https://www.digiexplodeai.com${req.originalUrl}`);
+  }
+  next();
+});
+
 // Initialize Gemini SDK
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY || '',
@@ -640,6 +649,182 @@ const DEFAULT_SEO_CONFIG: Record<string, any> = {
     twitterCard: 'summary_large_image',
     robots: 'index, follow',
     schema: 'WebApplication',
+    publishedAt: new Date().toISOString(),
+    history: []
+  },
+  chandigarh: {
+    pageKey: 'chandigarh',
+    path: '/chandigarh',
+    title: "Chandigarh's #1 Digital Marketing & Web Development Agency | DigiExplodeAI",
+    description: "Dominate Google search, scale Meta Ads, and explode ROI with Tricity's top digital marketing agency.",
+    keywords: 'digital marketing agency Chandigarh, SEO Chandigarh, Meta Ads Chandigarh, web development Chandigarh',
+    canonical: 'https://www.digiexplodeai.com/chandigarh',
+    ogTitle: "Chandigarh's #1 Digital Marketing Agency — DigiExplodeAI",
+    ogDescription: "Dominate Google search and scale Meta Ads with Tricity's fastest-growing digital agency.",
+    ogImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80',
+    twitterCard: 'summary_large_image',
+    robots: 'index, follow',
+    schema: 'LocalBusiness',
+    publishedAt: new Date().toISOString(),
+    history: []
+  },
+  panchkula: {
+    pageKey: 'panchkula',
+    path: '/panchkula',
+    title: "Panchkula's Fastest-Growing Digital Marketing Agency | DigiExplodeAI",
+    description: "Generate verified leads and revenue for your Panchkula business with hyper-local performance marketing.",
+    keywords: 'digital marketing agency Panchkula, SEO Panchkula, Meta Ads Panchkula, real estate leads Panchkula',
+    canonical: 'https://www.digiexplodeai.com/panchkula',
+    ogTitle: "Panchkula's Fastest-Growing Digital Marketing Agency — DigiExplodeAI",
+    ogDescription: "Generate verified leads and revenue for your Panchkula business.",
+    ogImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80',
+    twitterCard: 'summary_large_image',
+    robots: 'index, follow',
+    schema: 'LocalBusiness',
+    publishedAt: new Date().toISOString(),
+    history: []
+  },
+  mohali: {
+    pageKey: 'mohali',
+    path: '/mohali',
+    title: "Mohali's Premier Digital Agency — IT Hub Meets Marketing Power | DigiExplodeAI",
+    description: "Silicon Valley-grade digital marketing for Mohali IT companies, startups, and real estate brands.",
+    keywords: 'digital agency Mohali, IT marketing Mohali, B2B lead gen Mohali, web development Mohali',
+    canonical: 'https://www.digiexplodeai.com/mohali',
+    ogTitle: "Mohali's Premier Digital Agency — DigiExplodeAI",
+    ogDescription: "Silicon Valley-grade digital marketing for Mohali IT companies and startups.",
+    ogImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80',
+    twitterCard: 'summary_large_image',
+    robots: 'index, follow',
+    schema: 'LocalBusiness',
+    publishedAt: new Date().toISOString(),
+    history: []
+  },
+  gurugram: {
+    pageKey: 'gurugram',
+    path: '/gurugram',
+    title: "Gurugram's ROI-Obsessed Digital Marketing Agency | DigiExplodeAI",
+    description: "Enterprise-grade performance marketing delivering 8x+ ROAS for Gurugram fintech, real estate, and corporate brands.",
+    keywords: 'digital marketing agency Gurugram, Gurgaon digital marketing, real estate leads Gurgaon, SEO Gurugram',
+    canonical: 'https://www.digiexplodeai.com/gurugram',
+    ogTitle: "Gurugram's ROI-Obsessed Digital Marketing Agency — DigiExplodeAI",
+    ogDescription: "Enterprise-grade performance marketing delivering 8x+ ROAS in Gurugram.",
+    ogImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80',
+    twitterCard: 'summary_large_image',
+    robots: 'index, follow',
+    schema: 'LocalBusiness',
+    publishedAt: new Date().toISOString(),
+    history: []
+  },
+  delhi: {
+    pageKey: 'delhi',
+    path: '/delhi',
+    title: "Delhi's Performance Marketing Agency — Rs. 18 Cr+ Generated | DigiExplodeAI",
+    description: "High-converting Meta Ads, Google Ads, SEO, and web development for Delhi NCR brands.",
+    keywords: 'digital marketing agency Delhi, Delhi performance marketing, SEO agency Delhi, lead generation Delhi',
+    canonical: 'https://www.digiexplodeai.com/delhi',
+    ogTitle: "Delhi's Performance Marketing Agency — DigiExplodeAI",
+    ogDescription: "Rs. 18 Cr+ revenue generated. Dominating Delhi NCR digital growth.",
+    ogImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80',
+    twitterCard: 'summary_large_image',
+    robots: 'index, follow',
+    schema: 'LocalBusiness',
+    publishedAt: new Date().toISOString(),
+    history: []
+  },
+  noida: {
+    pageKey: 'noida',
+    path: '/noida',
+    title: "Noida's #1 Digital Agency — IT Sector to Consumer Brands | DigiExplodeAI",
+    description: "The digital growth partner Noida brands trust for Meta Ads, SEO, and high-conversion web development.",
+    keywords: 'digital marketing agency Noida, real estate leads Noida, SEO company Noida, web development Noida',
+    canonical: 'https://www.digiexplodeai.com/noida',
+    ogTitle: "Noida's #1 Digital Agency — DigiExplodeAI",
+    ogDescription: "Sector 18 to Sector 62. Noida's proven digital growth partner.",
+    ogImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80',
+    twitterCard: 'summary_large_image',
+    robots: 'index, follow',
+    schema: 'LocalBusiness',
+    publishedAt: new Date().toISOString(),
+    history: []
+  },
+  ludhiana: {
+    pageKey: 'ludhiana',
+    path: '/ludhiana',
+    title: "Ludhiana's Digital Marketing Agency — Punjab's Industrial Capital | DigiExplodeAI",
+    description: "Export inquiries, manufacturer lead generation, and real estate marketing in Ludhiana.",
+    keywords: 'digital marketing agency Ludhiana, export marketing Ludhiana, industrial SEO Ludhiana, real estate Ludhiana',
+    canonical: 'https://www.digiexplodeai.com/ludhiana',
+    ogTitle: "Ludhiana's Digital Marketing Agency — DigiExplodeAI",
+    ogDescription: "Powering Ludhiana's exporters and businesses with global digital marketing.",
+    ogImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80',
+    twitterCard: 'summary_large_image',
+    robots: 'index, follow',
+    schema: 'LocalBusiness',
+    publishedAt: new Date().toISOString(),
+    history: []
+  },
+  amritsar: {
+    pageKey: 'amritsar',
+    path: '/amritsar',
+    title: "Amritsar's Digital Marketing Agency — Holy City, Explosive Growth | DigiExplodeAI",
+    description: "Tourism marketing, hotel bookings, real estate lead generation, and local SEO in Amritsar.",
+    keywords: 'digital marketing agency Amritsar, hotel marketing Amritsar, real estate Amritsar, SEO Amritsar',
+    canonical: 'https://www.digiexplodeai.com/amritsar',
+    ogTitle: "Amritsar's Digital Marketing Agency — DigiExplodeAI",
+    ogDescription: "Tourism, hospitality, healthcare, and real estate growth in Amritsar.",
+    ogImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80',
+    twitterCard: 'summary_large_image',
+    robots: 'index, follow',
+    schema: 'LocalBusiness',
+    publishedAt: new Date().toISOString(),
+    history: []
+  },
+  jalandhar: {
+    pageKey: 'jalandhar',
+    path: '/jalandhar',
+    title: "Jalandhar's Digital Marketing Agency — Sports Capital Meets Digital | DigiExplodeAI",
+    description: "Sports goods exports, NRI real estate leads, and educational admissions marketing in Jalandhar.",
+    keywords: 'digital marketing agency Jalandhar, sports goods export marketing Jalandhar, NRI real estate Jalandhar',
+    canonical: 'https://www.digiexplodeai.com/jalandhar',
+    ogTitle: "Jalandhar's Digital Marketing Agency — DigiExplodeAI",
+    ogDescription: "Sports goods exporters, real estate developers, and schools winning globally from Jalandhar.",
+    ogImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80',
+    twitterCard: 'summary_large_image',
+    robots: 'index, follow',
+    schema: 'LocalBusiness',
+    publishedAt: new Date().toISOString(),
+    history: []
+  },
+  shimla: {
+    pageKey: 'shimla',
+    path: '/shimla',
+    title: "Shimla's Digital Marketing Agency — Mountain Business, Global Reach | DigiExplodeAI",
+    description: "Direct hotel and homestay bookings, tourism marketing, and holiday home real estate in Shimla and Himachal.",
+    keywords: 'digital marketing agency Shimla, hotel direct bookings Shimla, tourism marketing Himachal',
+    canonical: 'https://www.digiexplodeai.com/shimla',
+    ogTitle: "Shimla's Digital Marketing Agency — DigiExplodeAI",
+    ogDescription: "Attract pan-India and international clients to your Shimla business.",
+    ogImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80',
+    twitterCard: 'summary_large_image',
+    robots: 'index, follow',
+    schema: 'LocalBusiness',
+    publishedAt: new Date().toISOString(),
+    history: []
+  },
+  dehradun: {
+    pageKey: 'dehradun',
+    path: '/dehradun',
+    title: "Dehradun's Digital Marketing Agency — Uttarakhand's Capital | DigiExplodeAI",
+    description: "School admissions marketing, real estate lead generation, and tourism growth in Dehradun and Uttarakhand.",
+    keywords: 'digital marketing agency Dehradun, school admissions marketing Dehradun, real estate Dehradun',
+    canonical: 'https://www.digiexplodeai.com/dehradun',
+    ogTitle: "Dehradun's Digital Marketing Agency — DigiExplodeAI",
+    ogDescription: "Education hub, real estate boom, and tourism digital marketing in Dehradun.",
+    ogImage: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1200&q=80',
+    twitterCard: 'summary_large_image',
+    robots: 'index, follow',
+    schema: 'LocalBusiness',
     publishedAt: new Date().toISOString(),
     history: []
   }

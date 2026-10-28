@@ -2,6 +2,8 @@
 export const siteConfig = {
   brandName: "DigiexplodeAI",
   tagline: "Digital Dreams, Explosive Result",
+  url: "https://www.digiexplodeai.com",
+  domain: "digiexplodeai.com",
   email: "digiexploadai@gmail.com",
   phone: "+91 8725072730",
   whatsappLink: "https://wa.me/918725072730?text=Hi%20DigiexplodeAI,%20I'm%20interested%20in%20transforming%20my%20digital%20dreams%20into%20explosive%20results!",

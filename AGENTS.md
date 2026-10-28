@@ -11,6 +11,7 @@
 
 ## 2. Infrastructure & Deployment Links
 - **Local Dev Server**: `http://localhost:3000` (runs Vite via `tsx server.ts`)
-- **Live Frontend (Vercel)**: `https://digiexplodeai.vercel.app`
+- **Official Live Website (GoDaddy Custom Domain)**: `https://www.digiexplodeai.com` (Apex domain: `https://digiexplodeai.com`)
+- **Live Doctors / Healthcare Page**: `https://www.digiexplodeai.com/doctors`
 - **Live Backend & Database (Cloudflare Worker)**: `https://digiexplodai.digiexplodeai.workers.dev`
 - **GitHub Repository**: `https://github.com/Digiexplodeai/DIGIEXPLODEAI`

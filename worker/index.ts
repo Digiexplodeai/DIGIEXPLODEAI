@@ -46,15 +46,16 @@ export type { Env, AuthenticatedUser };
 // ── CORS Headers Generator ──────────────────────────────────────────────────
 function getCorsHeaders(request: Request, env: Env) {
   const origin = request.headers.get('Origin') || '';
-  const defaultAllowed = 'https://digiexplodeai.vercel.app,http://localhost:3000,http://localhost:5173';
+  const defaultAllowed = 'https://www.digiexplodeai.com,https://digiexplodeai.com,https://digiexplodeai.vercel.app,http://localhost:3000,http://localhost:5173';
   const allowed = (env.ALLOWED_ORIGINS || defaultAllowed).split(',').map(o => o.trim());
 
   const isAllowed =
     allowed.includes(origin) ||
     origin.endsWith('.vercel.app') ||
+    origin.endsWith('digiexplodeai.com') ||
     origin.startsWith('http://localhost:');
 
-  const allowOrigin = isAllowed && origin ? origin : 'https://digiexplodeai.vercel.app';
+  const allowOrigin = isAllowed && origin ? origin : 'https://www.digiexplodeai.com';
 
   return {
     'Access-Control-Allow-Origin': allowOrigin,

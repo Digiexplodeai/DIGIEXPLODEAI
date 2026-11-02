@@ -1370,112 +1370,62 @@ export const subscribeToCanonicalTasks = (
     }
   }).catch(console.warn);
 
-  // 4. Fetch authoritative list from Cloudflare D1 and merge
-  cfGetTasks().then((cfList) => {
-    if (cancelled) return;
-    if (!Array.isArray(cfList)) return;
-    // Even if D1 returns empty, update the UI so PC 2 doesn't keep showing stale cache
-
-    const cachedBefore = getCachedTasks();
-    const taskMap = new Map<string, Task>();
-
-    for (const t of cachedBefore) {
-      taskMap.set(t.id, t);
-    }
-
-    const tasksToHealInD1: Task[] = [];
-
-    for (const rawCf of cfList) {
-      const cfTask = normalizeTaskDateModel(rawCf);
-      const existing = taskMap.get(cfTask.id);
-
-      if (!existing) {
-        // Task from D1 not in local cache — add it
-        taskMap.set(cfTask.id, cfTask);
-      } else {
-        const { merged, shouldSyncToD1 } = mergeTaskRecords(existing, cfTask);
-        taskMap.set(cfTask.id, merged);
-        if (shouldSyncToD1) {
-          tasksToHealInD1.push(merged);
-        }
-      }
-    }
-
-    // Auto-heal: Any task in local cache missing from D1 is synced to D1
-    const cfIdSet = new Set(cfList.map((t: any) => t.id || t.taskId));
-    for (const cachedTask of cachedBefore) {
-      if (!cfIdSet.has(cachedTask.id) && !cachedTask.isArchived && !cachedTask.is_deleted && cachedTask.status !== 'Cancelled') {
-        tasksToHealInD1.push(cachedTask);
-      }
-    }
-
-    const reconciledList = Array.from(taskMap.values())
-      .filter(t => !t.isArchived && !t.is_deleted && t.status !== 'Cancelled');
-
-    setCachedTasks(reconciledList);
-    currentTasks = reconciledList;
-
-    if (!cancelled) onUpdate(reconciledList);
-
-    // Heal stale records in D1 in background
-    if (tasksToHealInD1.length > 0) {
-      for (const t of tasksToHealInD1) {
-        cfUpdateTask(t.id, t).catch((err) => {
-          enqueueTaskSyncRetry(t, 'update', err);
-        });
-      }
-    }
-  }).catch(console.warn);
-
-  // 5. Set up periodic D1 polling to pick up changes from other devices/browsers
-  //    (replaces the Firestore onSnapshot listener)
-  const POLL_INTERVAL_MS = 30_000; // 30 seconds
-  const pollInterval = setInterval(async () => {
+  // 4. Fetch authoritative list from Cloudflare D1 and sync across all devices
+  const syncWithD1 = async () => {
     if (cancelled) return;
     try {
       const cfList = await cfGetTasks();
       if (!Array.isArray(cfList) || cancelled) return;
 
-      const cachedBefore = getCachedTasks();
-      const taskMap = new Map<string, Task>();
-      for (const t of cachedBefore) taskMap.set(t.id, t);
-
-      const tasksToHealInD1: Task[] = [];
-
-      for (const rawCf of cfList) {
-        const cfTask = normalizeTaskDateModel(rawCf);
-        const existing = taskMap.get(cfTask.id);
-        if (!existing) {
-          taskMap.set(cfTask.id, cfTask);
-        } else {
-          const { merged, shouldSyncToD1 } = mergeTaskRecords(existing, cfTask);
-          taskMap.set(cfTask.id, merged);
-          if (shouldSyncToD1) tasksToHealInD1.push(merged);
-        }
-      }
-
-      // Auto-heal polling: Push any local tasks missing from D1
-      const cfPollIdSet = new Set(cfList.map((t: any) => t.id || t.taskId));
-      for (const cachedTask of cachedBefore) {
-        if (!cfPollIdSet.has(cachedTask.id) && !cachedTask.isArchived && !cachedTask.is_deleted && cachedTask.status !== 'Cancelled') {
-          tasksToHealInD1.push(cachedTask);
-        }
-      }
-
-      const reconciledList = Array.from(taskMap.values())
+      const normalizedCfList = cfList
+        .map(normalizeTaskDateModel)
         .filter(t => !t.isArchived && !t.is_deleted && t.status !== 'Cancelled');
 
-      setCachedTasks(reconciledList);
-      currentTasks = reconciledList;
-      if (!cancelled) onUpdate(reconciledList);
+      // Preserve any un-synced local changes currently in the retry queue
+      const pendingQueue = getTaskSyncQueue();
+      const pendingMap = new Map(pendingQueue.map(p => [p.taskId, p.taskPayload]));
 
-      for (const t of tasksToHealInD1) {
-        cfUpdateTask(t.id, t).catch((err) => enqueueTaskSyncRetry(t, 'update', err));
+      const taskMap = new Map<string, Task>();
+      for (const t of normalizedCfList) {
+        if (pendingMap.has(t.id)) {
+          taskMap.set(t.id, normalizeTaskDateModel({ ...t, ...pendingMap.get(t.id) }));
+        } else {
+          taskMap.set(t.id, t);
+        }
       }
-    } catch (pollErr) {
-      console.warn('[TaskStorage] D1 poll notice:', pollErr);
+
+      // Also include any newly created offline tasks waiting in queue
+      for (const item of pendingQueue) {
+        if (item.action === 'create' && !taskMap.has(item.taskId)) {
+          taskMap.set(item.taskId, normalizeTaskDateModel(item.taskPayload));
+        }
+      }
+
+      const canonicalList = Array.from(taskMap.values());
+      setCachedTasks(canonicalList);
+      currentTasks = canonicalList;
+      if (!cancelled) onUpdate(canonicalList);
+    } catch (err) {
+      console.warn('[TaskStorage] D1 sync notice:', err);
     }
-  }, POLL_INTERVAL_MS);
+  };
+
+  syncWithD1();
+
+  // 5. Polling every 10 seconds for real-time multi-device sync
+  const POLL_INTERVAL_MS = 10_000;
+  const pollInterval = setInterval(syncWithD1, POLL_INTERVAL_MS);
+
+  // 6. Immediate sync when tab regains focus or visibility
+  const handleVisibilityOrFocus = () => {
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+    syncWithD1();
+  };
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    window.addEventListener('visibilitychange', handleVisibilityOrFocus);
+  }
 
   // Return unsubscribe / cleanup function
   return () => {

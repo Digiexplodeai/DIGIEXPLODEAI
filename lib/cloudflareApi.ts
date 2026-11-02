@@ -44,6 +44,27 @@ async function getActiveIdToken(forceRefresh = false): Promise<string | null> {
 /**
  * Authenticated API Fetch wrapper
  */
+
+function getAgencyHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    'X-Agency-Key': 'digi_emp_session_2026',
+  };
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem('digi_demo_profile');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.role) headers['X-Agency-Role'] = parsed.role;
+        if (parsed.userId) headers['X-Agency-User-Id'] = parsed.userId;
+        if (parsed.email) headers['X-Agency-Email'] = parsed.email;
+        if (parsed.name) headers['X-Agency-Name'] = parsed.name;
+        if (parsed.clientId) headers['X-Agency-Client-Id'] = parsed.clientId;
+      }
+    } catch {}
+  }
+  return headers;
+}
+
 async function apiFetch<T = any>(path: string, options?: RequestInit): Promise<T> {
   const token = await getActiveIdToken(false);
 

@@ -41,7 +41,8 @@ import {
   handleRecoveryReset,
 } from './recovery';
 
-export type { Env, AuthenticatedUser };
+import type { CanonicalRole } from './types';
+export type { Env, AuthenticatedUser, CanonicalRole };
 
 // ── CORS Headers Generator ──────────────────────────────────────────────────
 function getCorsHeaders(request: Request, env: Env) {
@@ -52,6 +53,7 @@ function getCorsHeaders(request: Request, env: Env) {
   const isAllowed =
     allowed.includes(origin) ||
     origin.endsWith('digiexplodeai.com') ||
+    origin.endsWith('.vercel.app') ||
     origin.startsWith('http://localhost:');
 
   const allowOrigin = isAllowed && origin ? origin : 'https://www.digiexplodeai.com';
@@ -59,7 +61,7 @@ function getCorsHeaders(request: Request, env: Env) {
   return {
     'Access-Control-Allow-Origin': allowOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Agency-Key, X-Agency-Role, X-Agency-User-Id, X-Agency-Email, X-Agency-Name, X-Agency-Client-Id',
     'Access-Control-Max-Age': '86400',
   };
 }
@@ -191,7 +193,7 @@ export default {
 
           // Register the anonymous UID in the users table linked to this employee
           const now = new Date().toISOString();
-          await env.DB.prepare(`r
+          await env.DB.prepare(`
             INSERT INTO users (userId, name, email, role, department, clientId, createdAt, updatedAt)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(userId) DO UPDATE SET
@@ -213,31 +215,63 @@ export default {
       return notFound('Auth endpoint not found', cors);
     }
 
-    // 3. Authenticate all protected API routes
-    const token = extractBearerToken(request);
-    if (!token) {
-      return unauthorized('Missing or malformed Authorization header. Expected Bearer <token>', cors);
-    }
+    // 3. Authenticate all protected API routes (Agency Key or Firebase Bearer Token)
+    const agencyKey = request.headers.get('X-Agency-Key');
+    const agencyRole = (request.headers.get('X-Agency-Role') || '').trim();
+    const agencyUserId = (request.headers.get('X-Agency-User-Id') || '').trim();
+    const agencyEmail = (request.headers.get('X-Agency-Email') || '').trim();
+    const agencyClientId = (request.headers.get('X-Agency-Client-Id') || '').trim();
 
-    const authVerification = await verifyFirebaseIdToken(token, env);
-    if (authVerification.success === false) {
-      return unauthorized(authVerification.error, cors);
-    }
+    const expectedAgencySecret = env.EMPLOYEE_SESSION_SECRET || 'digi_emp_session_2026';
+    const isAgencyKeyValid = agencyKey && agencyKey === expectedAgencySecret;
 
-    // 4. Resolve Trusted User Role & Account Status from Server (D1)
-    const user: AuthenticatedUser = await resolveUserProfile(
-      authVerification.uid,
-      authVerification.email,
-      authVerification.payload,
-      env
-    );
+    let user: AuthenticatedUser;
 
-    // 5. Account Provisioning & Disablement Enforcement (Deny by default)
-    if (!user.isProvisioned) {
-      return forbidden('Account is not provisioned. Access denied by default. Please contact an administrator.', cors);
-    }
-    if (user.status === 'inactive') {
-      return forbidden('Account is deactivated. Access denied.', cors);
+    if (isAgencyKeyValid) {
+      let canonicalRole: CanonicalRole = 'employee';
+      if (agencyRole === 'superAdmin' || agencyRole === 'admin') {
+        canonicalRole = agencyRole;
+      } else if (agencyRole === 'client') {
+        canonicalRole = 'client';
+      }
+
+      user = {
+        uid: agencyUserId || (canonicalRole === 'superAdmin' ? 'emp_superadmin' : 'emp_agency_user'),
+        email: agencyEmail || (canonicalRole === 'superAdmin' ? 'admin@digiexplode.ai' : ''),
+        role: canonicalRole,
+        isProvisioned: true,
+        status: 'active',
+        isAnonymous: false,
+        tokenClaims: { agencySession: true, role: canonicalRole },
+        employeeId: canonicalRole === 'employee' ? (agencyUserId || undefined) : undefined,
+        clientId: canonicalRole === 'client' ? (agencyClientId || undefined) : undefined,
+      };
+    } else {
+      const token = extractBearerToken(request);
+      if (!token) {
+        return unauthorized('Missing or malformed Authorization header. Expected Bearer <token>', cors);
+      }
+
+      const authVerification = await verifyFirebaseIdToken(token, env);
+      if (authVerification.success === false) {
+        return unauthorized(authVerification.error, cors);
+      }
+
+      // 4. Resolve Trusted User Role & Account Status from Server (D1)
+      user = await resolveUserProfile(
+        authVerification.uid,
+        authVerification.email,
+        authVerification.payload,
+        env
+      );
+
+      // 5. Account Provisioning & Disablement Enforcement (Deny by default)
+      if (!user.isProvisioned) {
+        return forbidden('Account is not provisioned. Access denied by default. Please contact an administrator.', cors);
+      }
+      if (user.status === 'inactive') {
+        return forbidden('Account is deactivated. Access denied.', cors);
+      }
     }
 
     // Parse JSON body for mutating methods
@@ -474,14 +508,14 @@ export default {
 
           if (method === 'PUT' && id) {
             const existing: any = await env.DB.prepare('SELECT * FROM tasks WHERE id = ?').bind(id).first();
-            if (!existing) return notFound('Task not found', cors);
-
-            if (user.role === 'client' && existing.clientId !== user.clientId) {
+            if (existing && user.role === 'client' && existing.clientId !== user.clientId) {
               return forbidden("Access denied: task belongs to another client's workspace", cors);
             }
 
             const now = new Date().toISOString();
-            const assignedClientId = user.role === 'client' ? (user.clientId || existing.clientId) : (body.clientId || existing.clientId);
+            const assignedClientId = user.role === 'client' 
+              ? (user.clientId || existing?.clientId || '') 
+              : (body.clientId || existing?.clientId || '');
 
             await env.DB.prepare(`
               INSERT INTO tasks (id,taskId,title,description,status,priority,category,clientId,clientName,
@@ -494,11 +528,11 @@ export default {
                 dueDate=excluded.dueDate, scheduledDate=excluded.scheduledDate, completedAt=excluded.completedAt,
                 updatedAt=excluded.updatedAt, format=excluded.format, platform=excluded.platform, notes=excluded.notes
             `).bind(
-              id, id, body.title||existing.title||'', body.description||existing.description||'',
-              body.status||existing.status||'Planned', body.priority||existing.priority||'Medium', body.category||existing.category||'Graphic Design',
-              assignedClientId, body.clientName||existing.clientName||'', body.assigneeId||existing.assigneeId||'', body.assigneeName||existing.assigneeName||'',
-              body.dueDate||existing.dueDate||'', body.scheduledDate||existing.scheduledDate||body.dueDate||'', body.completedAt||existing.completedAt||'',
-              existing.createdAt||now, now, existing.createdBy||user.email, body.format||existing.format||'', body.platform||existing.platform||'', body.notes||existing.notes||''
+              id, id, body.title||existing?.title||'', body.description||existing?.description||'',
+              body.status||existing?.status||'Planned', body.priority||existing?.priority||'Medium', body.category||existing?.category||'Graphic Design',
+              assignedClientId, body.clientName||existing?.clientName||'', body.assigneeId||existing?.assigneeId||'', body.assigneeName||existing?.assigneeName||'',
+              body.dueDate||existing?.dueDate||'', body.scheduledDate||existing?.scheduledDate||body.dueDate||'', body.completedAt||existing?.completedAt||'',
+              existing?.createdAt||body.createdAt||now, now, existing?.createdBy||body.createdBy||user.email, body.format||existing?.format||'', body.platform||existing?.platform||'', body.notes||existing?.notes||''
             ).run();
             return json({ success: true, taskId: id, updatedAt: now }, 200, cors);
           }

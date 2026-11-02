@@ -1400,6 +1400,14 @@ export const subscribeToCanonicalTasks = (
       }
     }
 
+    // Auto-heal: Any task in local cache missing from D1 is synced to D1
+    const cfIdSet = new Set(cfList.map((t: any) => t.id || t.taskId));
+    for (const cachedTask of cachedBefore) {
+      if (!cfIdSet.has(cachedTask.id) && !cachedTask.isArchived && !cachedTask.is_deleted && cachedTask.status !== 'Cancelled') {
+        tasksToHealInD1.push(cachedTask);
+      }
+    }
+
     const reconciledList = Array.from(taskMap.values())
       .filter(t => !t.isArchived && !t.is_deleted && t.status !== 'Cancelled');
 
@@ -1442,6 +1450,14 @@ export const subscribeToCanonicalTasks = (
           const { merged, shouldSyncToD1 } = mergeTaskRecords(existing, cfTask);
           taskMap.set(cfTask.id, merged);
           if (shouldSyncToD1) tasksToHealInD1.push(merged);
+        }
+      }
+
+      // Auto-heal polling: Push any local tasks missing from D1
+      const cfPollIdSet = new Set(cfList.map((t: any) => t.id || t.taskId));
+      for (const cachedTask of cachedBefore) {
+        if (!cfPollIdSet.has(cachedTask.id) && !cachedTask.isArchived && !cachedTask.is_deleted && cachedTask.status !== 'Cancelled') {
+          tasksToHealInD1.push(cachedTask);
         }
       }
 

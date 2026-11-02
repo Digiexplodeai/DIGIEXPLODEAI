@@ -70,6 +70,7 @@ async function apiFetch<T = any>(path: string, options?: RequestInit): Promise<T
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    ...getAgencyHeaders(),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...((options?.headers as Record<string, string>) || {}),
   };

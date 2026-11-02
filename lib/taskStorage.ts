@@ -1373,7 +1373,8 @@ export const subscribeToCanonicalTasks = (
   // 4. Fetch authoritative list from Cloudflare D1 and merge
   cfGetTasks().then((cfList) => {
     if (cancelled) return;
-    if (!Array.isArray(cfList) || cfList.length === 0) return;
+    if (!Array.isArray(cfList)) return;
+    // Even if D1 returns empty, update the UI so PC 2 doesn't keep showing stale cache
 
     const cachedBefore = getCachedTasks();
     const taskMap = new Map<string, Task>();

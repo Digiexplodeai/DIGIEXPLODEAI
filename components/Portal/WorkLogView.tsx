@@ -963,7 +963,12 @@ const CreateLogModal: React.FC<{
       saveFormFieldHistory('work_title', workDone.trim());
       if (workDetails.trim()) saveFormFieldHistory('work_notes', workDetails.trim());
 
-      // 3. Persist to Firestore
+      // 3. Persist to Cloudflare D1 + Firestore
+      try {
+        await cfCreateWorkLog(sanitized);
+      } catch (cfErr) {
+        console.warn('WorkLog D1 write notice:', cfErr);
+      }
       try {
         await setDoc(doc(db, 'workLogs', logId), sanitized, { merge: true });
         await addDoc(collection(db, 'activityLogs'), {

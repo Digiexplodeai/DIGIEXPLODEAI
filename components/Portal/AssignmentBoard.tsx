@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+﻿import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import {
   Users, UserX, UserCheck, Search, Filter, Calendar,
@@ -10,6 +10,7 @@ import { db } from '../../lib/firebase';
 import { collection, updateDoc, doc, addDoc, getDocs, onSnapshot } from 'firebase/firestore';
 import { syncTaskToVideoProduction } from '../../lib/productionBridge';
 import { isTaskAssignedToEmployee } from '../../lib/employeeMaster';
+import { cfUpdateTask } from '../../lib/cloudflareApi';
 
 export interface Task {
   id: string;

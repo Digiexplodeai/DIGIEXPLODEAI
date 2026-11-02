@@ -6,6 +6,7 @@ import { db } from './firebase';
 import { ensureActiveFirebaseAuth, getCachedCalendarEntries } from './calendarStorage';
 import { persistUpdateTask, getCachedTasks, type Task } from './taskStorage';
 import { syncTaskCompletionToWorkLog } from './taskWorkLogSync';
+import { cfGetApprovals, cfUpdateApproval, cfCreateApproval } from './cloudflareApi';
 
 export type ApprovalSourceType = 'task' | 'content' | 'video';
 export type ApprovalStatus = 'pending' | 'approved' | 'revision_requested';
@@ -620,6 +621,7 @@ export async function approveApprovalRecord(
   // 2. Persist Approval to Firestore
   try {
     await ensureActiveFirebaseAuth().catch(console.warn);
+    try { await cfUpdateApproval(target.id, updatedApproval); } catch (e) { console.warn('D1 approval save notice:', e); }
     await setDoc(doc(db, 'approvals', target.id), updatedApproval, { merge: true });
   } catch (err) {
     console.warn('Firestore approval update notice (cached locally):', err);
@@ -776,6 +778,7 @@ export async function requestRevisionApprovalRecord(
   // 2. Persist Approval to Firestore
   try {
     await ensureActiveFirebaseAuth().catch(console.warn);
+    try { await cfUpdateApproval(target.id, updatedApproval); } catch (e) { console.warn('D1 approval save notice:', e); }
     await setDoc(doc(db, 'approvals', target.id), updatedApproval, { merge: true });
   } catch (err) {
     console.warn('Firestore revision request update notice (cached locally):', err);

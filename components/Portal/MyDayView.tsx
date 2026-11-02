@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+﻿import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useActiveEmployee } from '../../hooks/useActiveEmployee';
 import {
@@ -14,7 +14,15 @@ import {
   doc, orderBy, limit, Timestamp, onSnapshot, setDoc
 } from 'firebase/firestore';
 import { DEFAULT_CLIENTS_MASTER, getCachedClients, subscribeToCanonicalClients } from '../../lib/clientMaster';
-import { cfGetClients } from '../../lib/cloudflareApi';
+import {
+  cfGetClients,
+  cfGetWorkLogs,
+  cfCreateWorkLog,
+  cfDeleteWorkLog,
+  cfGetAttendance,
+  cfCreateAttendance,
+  cfUpdateAttendance
+} from '../../lib/cloudflareApi';
 import { isTaskAssignedToEmployee, EMPLOYEE_ID_ALIASES } from '../../lib/employeeMaster';
 import { SuggestiveCombobox, type SuggestiveOption } from './SuggestiveCombobox';
 import { SuggestiveInput, SuggestiveTextarea } from './SuggestiveInput';
@@ -267,6 +275,18 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
   useEffect(() => {
     if (!resolvedEmployeeId) return;
 
+    // 1. Authoritative Cloudflare D1 fetch
+    cfGetAttendance({ date: todayStr }).then((d1AttList: any[]) => {
+      if (Array.isArray(d1AttList) && d1AttList.length > 0) {
+        const matched = d1AttList.find((a: any) => 
+          a.employeeId === resolvedEmployeeId || 
+          a.employee_id === resolvedEmployeeId ||
+          EMPLOYEE_ID_ALIASES[a.employeeId] === resolvedEmployeeId
+        );
+        if (matched) setAttendanceRecord(matched);
+      }
+    }).catch((err) => console.warn('Attendance D1 sync notice in MyDay:', err));
+
     const unsubAttendance = onSnapshot(
       query(collection(db, 'attendance'), where('date', '==', todayStr)),
       (snap) => {
@@ -344,6 +364,13 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
 
   useEffect(() => {
     if (!resolvedEmployeeId) return;
+
+    // Authoritative Cloudflare D1 fetch
+    cfGetWorkLogs().then((cfList: any[]) => {
+      if (Array.isArray(cfList) && cfList.length > 0) {
+        setWorkLogs(filterTodaysLogs(cfList));
+      }
+    }).catch((err) => console.warn('WorkLogs D1 sync notice in MyDay:', err));
 
     // Load from local storage immediately
     try {
@@ -441,7 +468,8 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
       const isDueToday = dueDate === todayStr;
       const isScheduledToday = schDate === todayStr;
 
-      return isOverdue || isCarriedForward || isDueToday || isScheduledToday;
+      const isPendingFromPast = schDate <= todayStr;
+      return isOverdue || isCarriedForward || isDueToday || isScheduledToday || isPendingFromPast;
     });
 
     const priorityWeight: Record<string, number> = { Urgent: 4, High: 3, Medium: 2, Low: 1 };
@@ -578,6 +606,7 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
           markedBy: profile?.name || 'Self',
         };
         const ref = await addDoc(collection(db, 'attendance'), newRecord);
+        try { await cfCreateAttendance({ attendanceId: resolvedEmployeeId + '_' + todayStr, ...newRecord }); } catch (cfErr) { console.warn('D1 checkin notice:', cfErr); }
         setAttendanceRecord({ id: ref.id, ...newRecord });
         triggerToast(`✓ Checked in successfully at ${timeStr}`);
       } else if (!attendanceRecord.checkOut) {
@@ -586,6 +615,7 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
           checkOut: timeStr,
           updatedAt: new Date().toISOString(),
         });
+        try { await cfUpdateAttendance(attendanceRecord.attendanceId || attendanceRecord.id || (resolvedEmployeeId + '_' + todayStr), { checkOut: timeStr, updatedAt: new Date().toISOString() }); } catch (cfErr) { console.warn('D1 checkout notice:', cfErr); }
         setAttendanceRecord((prev: any) => ({ ...prev, checkOut: timeStr }));
         triggerToast(`✓ Checked out at ${timeStr}`);
       }
@@ -976,6 +1006,7 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
       const sanitized = sanitizeFirestorePayload(canonicalPayload);
       (async () => {
         try {
+          try { await cfCreateWorkLog(canonicalPayload); } catch (cfErr) { console.warn('D1 workLog write notice:', cfErr); }
           await ensureActiveFirebaseAuth().catch(console.warn);
           await setDoc(doc(db, 'workLogs', logId), sanitized, { merge: true });
         } catch (fbErr) {
@@ -1014,7 +1045,8 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
       triggerToast('✓ Work log deleted');
       window.dispatchEvent(new Event('worklogs_updated'));
 
-      // 2. Delete from Firestore
+      // 2. Delete from Cloudflare D1 + Firestore
+      try { await cfDeleteWorkLog(logId); } catch (e) { console.warn('D1 delete worklog notice:', e); }
       await deleteDoc(doc(db, 'workLogs', logId)).catch(console.warn);
     } catch (err) {
       console.error('Delete work log error:', err);
@@ -1029,9 +1061,9 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
       : allCompletedTasks;
 
   const displayedTasks = activeTaskTab === 'today' 
-    ? todayFocusTasks 
+    ? (todayFocusTasks.length > 0 ? todayFocusTasks : (allActiveTasks.length > 0 ? allActiveTasks : myAssignedTasks))
     : activeTaskTab === 'all'
-      ? allActiveTasks
+      ? (allActiveTasks.length > 0 ? allActiveTasks : myAssignedTasks)
       : activeTaskTab === 'overdue' 
         ? overdueTasks 
         : activeTaskTab === 'upcoming' 

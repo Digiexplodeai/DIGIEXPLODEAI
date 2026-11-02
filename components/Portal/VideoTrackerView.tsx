@@ -44,7 +44,7 @@ import {
   UserCheck
 } from 'lucide-react';
 import { DEFAULT_CLIENTS_MASTER, getCachedClients, subscribeToCanonicalClients } from '../../lib/clientMaster';
-import { cfGetClients } from '../../lib/cloudflareApi';
+import { cfGetClients, cfGetVideoEntries, cfCreateVideoEntry, cfUpdateVideoEntry, cfDeleteVideoEntry } from '../../lib/cloudflareApi';
 import { 
   subscribeToCanonicalEmployees, 
   getCachedEmployees, 
@@ -344,6 +344,20 @@ export const VideoTrackerView: React.FC = () => {
       // ignore
     }
 
+    // Fetch from Cloudflare D1 first — authoritative cross-device source
+    cfGetVideoEntries().then((d1List: any[]) => {
+      if (Array.isArray(d1List) && d1List.length > 0) {
+        const normalized = d1List.map((d: any) => normalizeVideoEntry(d.id || d.videoId, d));
+        normalized.sort((a, b) => {
+          if (b.shootDate !== a.shootDate) return b.shootDate.localeCompare(a.shootDate);
+          return b.createdAt.localeCompare(a.createdAt);
+        });
+        setVideos(normalized);
+        saveToLocalCache(normalized);
+        setLoading(false);
+      }
+    }).catch((err: any) => console.warn('[VideoTracker] D1 fetch notice:', err));
+
     const unsubVideos = onSnapshot(query(collection(db, 'videoTracker')), (snapshot) => {
       const list: VideoProductionEntry[] = [];
       let contradictionsFound = 0;
@@ -617,7 +631,12 @@ export const VideoTrackerView: React.FC = () => {
         return next;
       });
 
-      // 3. Persist to Firestore with auto-auth retry
+      // 3. Persist to Cloudflare D1 (authoritative) + Firestore
+      try {
+        await cfCreateVideoEntry(payload);
+      } catch (d1Err: any) {
+        console.warn('[VideoTracker] D1 create notice:', d1Err);
+      }
       try {
         await setDoc(doc(db, 'videoTracker', docId), payload);
       } catch (writeErr: any) {
@@ -712,7 +731,12 @@ export const VideoTrackerView: React.FC = () => {
         return next;
       });
 
-      // Persist to Firebase with retry
+      // Persist to Cloudflare D1 + Firebase with retry
+      try {
+        await cfUpdateVideoEntry(entry.id, updates);
+      } catch (d1Err: any) {
+        console.warn('[VideoTracker] D1 update notice:', d1Err);
+      }
       try {
         await updateDoc(docRef, updates);
       } catch (upErr: any) {
@@ -808,6 +832,11 @@ export const VideoTrackerView: React.FC = () => {
       setDeletingId(null);
       if (activeDetailEntry?.id === id) setActiveDetailEntry(null);
 
+      try {
+        await cfDeleteVideoEntry(id);
+      } catch (d1DelErr: any) {
+        console.warn('[VideoTracker] D1 delete notice:', d1DelErr);
+      }
       try {
         await deleteDoc(doc(db, 'videoTracker', id));
       } catch (delErr) {

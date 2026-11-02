@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+﻿import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import {
   Plus, Filter, Search, List, Kanban, ChevronDown, ChevronRight, ChevronUp,
@@ -140,7 +140,7 @@ export const TasksView: React.FC = () => {
     }
     return getTodayDateStr();
   });
-  const [dateFilterMode, setDateFilterMode] = useState<'day' | 'all' | 'tomorrow' | 'week' | 'overdue' | 'carried_forward'>('day');
+  const [dateFilterMode, setDateFilterMode] = useState<'day' | 'all' | 'tomorrow' | 'week' | 'overdue' | 'carried_forward'>('all');
   const [showMiniCalendar, setShowMiniCalendar] = useState(true);
 
   // Done column management state (collapsible overflow)
@@ -574,12 +574,14 @@ export const TasksView: React.FC = () => {
         }
 
         if (selectedOperationalDate === todayStr) {
-          // Unfinished tasks belonging to Today: scheduled today, active rollover, or due today
+          // Unfinished tasks belonging to Today: scheduled today, due today, or pending/carried forward from past
           return (
             schDate === todayStr ||
+            schDate <= todayStr ||
+            dueDate === todayStr ||
+            dueDate <= todayStr ||
             (t.rolloverCount || 0) > 0 ||
-            (t.originalScheduledDate && t.originalScheduledDate < todayStr && schDate === todayStr) ||
-            dueDate === todayStr
+            (t.originalScheduledDate && t.originalScheduledDate <= todayStr)
           );
         } else {
           // Unfinished tasks for a historical or future operational date

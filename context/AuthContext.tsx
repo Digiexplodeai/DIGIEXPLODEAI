@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
+﻿import React, { createContext, useContext, useState, useEffect } from "react";
 import {
   onAuthStateChanged,
   signOut,
@@ -129,14 +129,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
               if (cachedDemoRole && cachedDemoRole !== "client" && data.role === "client" && (currentUser.isAnonymous || !currentUser.email)) {
                 const upgradedProfile: UserProfile = {
                   ...data,
+                  userId: cachedDemoObj?.userId || data.userId,
                   name: cachedDemoObj?.name || data.name || "Digiexplode Super Admin",
                   role: cachedDemoRole,
                   email: cachedDemoObj?.email || "admin@digiexplode.ai"
                 };
                 setProfile(upgradedProfile);
+                try { localStorage.setItem("digi_demo_profile", JSON.stringify(upgradedProfile)); } catch {}
                 setDoc(doc(db, "users", currentUser.uid), upgradedProfile, { merge: true }).catch(console.warn);
               } else {
                 setProfile(data);
+                try { localStorage.setItem("digi_demo_profile", JSON.stringify(data)); } catch {}
               }
               setLoading(false);
 
@@ -214,6 +217,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
               try {
                 await setDoc(doc(db, "users", currentUser.uid), newProfile, { merge: true });
                 setProfile(newProfile);
+                try { localStorage.setItem("digi_demo_profile", JSON.stringify(newProfile)); } catch {}
               } catch (err) {
                 console.error("Error creating user profile in Firestore", err);
               }

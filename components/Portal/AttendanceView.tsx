@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+﻿import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   collection,
   onSnapshot,
@@ -15,7 +15,7 @@ import {
 import { db, handleFirestoreError, OperationType } from "../../lib/firebase";
 import { useAuth } from "../../context/AuthContext";
 import { CENTRAL_EMPLOYEES_MASTER_LIST, getCachedEmployees, mergeWithSuperAdmin } from "../../lib/employeeMaster";
-import { cfGetEmployees, cfCreateEmployee, cfUpdateEmployee } from "../../lib/cloudflareApi";
+import { cfGetEmployees, cfCreateEmployee, cfUpdateEmployee, cfGetAttendance, cfCreateAttendance } from "../../lib/cloudflareApi";
 import {
   Calendar as CalendarIcon,
   Clock,
@@ -443,6 +443,38 @@ export const AttendanceView: React.FC = () => {
         localStorage.setItem('digi_local_employees', JSON.stringify(merged));
       }
     }).catch(console.warn);
+    // Fetch attendance from Cloudflare D1 (cross-device authoritative source)
+    cfGetAttendance().then((d1AttList: any[]) => {
+      if (Array.isArray(d1AttList) && d1AttList.length > 0) {
+        const normalized: Attendance[] = d1AttList.map((item: any) => ({
+          attendanceId: item.id || item.attendanceId,
+          employeeId: item.employeeId,
+          employeeName: item.employeeName || item.name || '',
+          employeeEmail: item.employeeEmail || item.email || '',
+          date: item.date,
+          status: (item.status || 'Present') as Attendance['status'],
+          checkIn: item.checkIn || item.check_in || '',
+          checkOut: item.checkOut || item.check_out || '',
+          notes: item.notes || '',
+          markedAt: item.markedAt || item.createdAt || item.created_at || new Date().toISOString(),
+          markedBy: item.markedBy || 'system',
+        }));
+        const byId = new Map<string, Attendance>();
+        try {
+          const cached = localStorage.getItem('digi_local_attendance');
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed)) parsed.forEach((r: any) => { if (r.attendanceId) byId.set(r.attendanceId, r); });
+          }
+        } catch (e) {}
+        normalized.forEach(r => { if (r.attendanceId) byId.set(r.attendanceId, r); });
+        const merged = Array.from(byId.values());
+        if (merged.length > 0) {
+          setAttendance(merged);
+          localStorage.setItem('digi_local_attendance', JSON.stringify(merged));
+        }
+      }
+    }).catch((err: any) => console.warn('[Attendance] D1 fetch notice:', err));
 
     const unsubEmp = onSnapshot(
       empQuery,
@@ -805,6 +837,7 @@ export const AttendanceView: React.FC = () => {
       return next;
     });
 
+    try { await cfCreateAttendance(payload); } catch (cfErr) { console.warn('D1 single attendance save notice:', cfErr); }
     try {
       await setDoc(doc(db, "attendance", attId), payload, { merge: true });
     } catch (err) {
@@ -847,6 +880,7 @@ export const AttendanceView: React.FC = () => {
           markedBy: profile?.name || "Admin",
         };
 
+        try { cfCreateAttendance(payload).catch(() => {}); } catch {}
         const docRef = doc(db, "attendance", attId);
         batch.set(docRef, payload, { merge: true });
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+﻿import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   collection, 
   getDocs, 
@@ -130,7 +130,7 @@ interface TeamMember {
 }
 
 import { ensureCentralClientsSeeded, DEFAULT_CLIENTS_MASTER, getCachedClients, setCachedClients } from '../../lib/clientMaster';
-import { cfGetClients, cfSaveClient, cfDeleteClient } from '../../lib/cloudflareApi';
+import { cfGetClients, cfSaveClient, cfDeleteClient, cfGetTasks, cfCreateTask, cfUpdateTask } from '../../lib/cloudflareApi';
 
 const DEFAULT_AGENCY_TEAM: TeamMember[] = [];
 

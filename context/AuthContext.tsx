@@ -11,6 +11,7 @@ import {
 } from "firebase/auth";
 import { doc, getDoc, setDoc, onSnapshot, collection, query, where, getDocs, updateDoc } from "firebase/firestore";
 import { auth, db } from "../lib/firebase";
+import { cfRegisterEmployeeSession } from '../lib/cloudflareApi';
 
 export interface UserProfile {
   userId: string;
@@ -163,16 +164,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
                 cleanEmail === "dilseinvite@gmail.com" ||
                 cleanEmail.includes("admin") ||
                 cleanEmail.endsWith("@digiexplode.ai");
-              const isVansh = cleanEmail.includes("vansh") || cleanEmail.includes("employee");
+              const matchedSpecialist = REGISTERED_SPECIALISTS.find(e => 
+                e.email.toLowerCase() === cleanEmail || 
+                e.aliases.some(a => a.toLowerCase() === cleanEmail) ||
+                (e.id && cleanEmail.includes(e.id.toLowerCase()))
+              );
+              const isEmployeeAccount = !!matchedSpecialist || cleanEmail.includes("employee") || cleanEmail.includes("vansh") || cleanEmail.includes("aakib") || cleanEmail.includes("ravinder") || cleanEmail.includes("priyanshu");
 
               let autoClientId: string | undefined = undefined;
               const assignedRole: "superAdmin" | "admin" | "employee" | "client" = cachedDemoRole
                 ? cachedDemoRole
                 : isBootstrappedAdmin
                   ? "superAdmin"
-                  : isVansh
+                  : isEmployeeAccount
                     ? "employee"
-                    : "client"; // Anonymous users no longer auto-assigned superAdmin
+                    : "client";
 
               if (assignedRole === "client" && currentUser.email) {
                 try {
@@ -188,15 +194,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
               }
 
               const newProfile: UserProfile = {
-                userId: currentUser.uid,
+                userId: matchedSpecialist ? matchedSpecialist.id : (cachedDemoObj?.userId || currentUser.uid),
                 name:
                   cachedDemoObj?.name ||
+                  matchedSpecialist?.name ||
                   currentUser.displayName ||
                   currentUser.email?.split("@")[0] ||
                   (assignedRole === "superAdmin" ? "Digiexplode Super Admin" : "User"),
-                email: cachedDemoObj?.email || currentUser.email || (assignedRole === "superAdmin" ? "admin@digiexplode.ai" : ""),
-                phone: cachedDemoObj?.phone || currentUser.phoneNumber || "+91 87250 72730",
+                email: cachedDemoObj?.email || matchedSpecialist?.email || currentUser.email || (assignedRole === "superAdmin" ? "admin@digiexplode.ai" : ""),
+                phone: cachedDemoObj?.phone || matchedSpecialist?.phone || currentUser.phoneNumber || "+91 87250 72730",
                 role: assignedRole,
+                department: matchedSpecialist?.department || "",
+                designation: matchedSpecialist?.designation || "",
                 clientId: autoClientId || cachedDemoObj?.clientId,
                 status: "active",
                 createdAt: new Date().toISOString(),
@@ -288,9 +297,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
         activeUser = cred.user;
       }
       if (activeUser) {
-        const fullProf: UserProfile = { ...empData, userId: activeUser.uid };
-        await setDoc(doc(db, "users", activeUser.uid), fullProf, { merge: true });
+        // Keep userId as canonical employee ID, record authUid for Firebase lookup
+        const fullProf: UserProfile = { ...empData };
+        await setDoc(doc(db, "users", activeUser.uid), { ...fullProf, authUid: activeUser.uid }, { merge: true });
         setProfile(fullProf);
+        // Register session in Cloudflare D1 for API authorization
+        cfRegisterEmployeeSession(activeUser.uid, empData.userId, empData.name, empData.email).catch(() => {});
       }
       await setDoc(doc(db, "users", empData.userId), empData, { merge: true });
     } catch (err) {

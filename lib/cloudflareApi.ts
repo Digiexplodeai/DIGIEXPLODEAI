@@ -248,6 +248,28 @@ export const cfSavePermissions = (matrix: any) =>
   apiFetch('/system/permissions', { method: 'POST', body: JSON.stringify(matrix) });
 
 
+// ── EMPLOYEE SESSION REGISTRATION ────────────────────────────────────────────
+
+/**
+ * Registers an anonymous Firebase session UID into the Cloudflare D1 users table,
+ * linking it to the employee's canonical record so they can access the Worker API.
+ * Called automatically after signInAnonymously() in loginAsCustomEmployee().
+ */
+export const cfRegisterEmployeeSession = (uid: string, employeeId: string, name: string, email: string): Promise<any> => {
+  const BASE = ((import.meta as any).env?.VITE_WORKER_URL || 'https://digiexplodai.digiexplodeai.workers.dev').replace(/\/$/, '');
+  return fetch(`${BASE}/api/auth/employee-session`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      uid,
+      employeeId,
+      name,
+      email,
+      secret: 'digi_emp_session_2026',
+    }),
+  }).then(r => r.json()).catch(console.warn);
+};
+
 // ── AUTH & PASSWORD RECOVERY ──────────────────────────────────────────────────
 
 export const cfRequestPasswordRecovery = (identifier: string, channel: 'email' | 'sms' = 'email') =>

@@ -121,6 +121,7 @@ export const TasksView: React.FC = () => {
 
   // View state: 5 tabs
   const [view, setView] = useState<'kanban' | 'assignment' | 'calendar' | 'my-tasks' | 'list'>('kanban');
+
   const [search, setSearch] = useState('');
   const [filterAssignee, setFilterAssignee] = useState('');
   const [filterPriority, setFilterPriority] = useState('');
@@ -637,6 +638,10 @@ export const TasksView: React.FC = () => {
   }, [selectedOperationalDate]);
 
   const isViewingToday = selectedOperationalDate === todayStr;
+
+  const myAssignedTasksCount = useMemo(() => {
+    return tasks.filter(t => !t.isArchived && !t.is_deleted && t.status !== 'Cancelled' && isTaskAssignedToEmployee(t, activeEmployee || resolvedEmployeeId)).length;
+  }, [tasks, activeEmployee, resolvedEmployeeId]);
 
   // Real canonical counts for the selected operational date summary context
   const dayContextStats = useMemo(() => {

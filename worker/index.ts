@@ -158,6 +158,58 @@ export default {
         }
       }
 
+        // Employee Session Registration: links anonymous Firebase UID to a known employee record in D1
+        // This allows employees who log in via signInAnonymously to access the Cloudflare Worker API
+        if (action === 'employee-session' && method === 'POST') {
+          let body: any = {};
+          try { body = await request.json(); } catch {}
+          const { uid, employeeId, name, email, secret } = body;
+
+          // Validate required fields
+          if (!uid || !employeeId) {
+            return json({ success: false, error: 'uid and employeeId are required' }, 400, cors);
+          }
+
+          // Validate the shared secret (app-level security)
+          const expectedSecret = env.EMPLOYEE_SESSION_SECRET || 'digi_emp_session_2026';
+          if (secret !== expectedSecret) {
+            return json({ success: false, error: 'Invalid session secret' }, 401, cors);
+          }
+
+          // Verify the employeeId exists in D1 employees table
+          const empRow: any = await env.DB.prepare(
+            'SELECT id, name, email, role, status FROM employees WHERE id = ?'
+          ).bind(employeeId).first();
+
+          if (!empRow) {
+            return json({ success: false, error: 'Employee not found in D1' }, 404, cors);
+          }
+
+          if (empRow.status && empRow.status.toLowerCase() === 'inactive') {
+            return json({ success: false, error: 'Employee account is inactive' }, 403, cors);
+          }
+
+          // Register the anonymous UID in the users table linked to this employee
+          const now = new Date().toISOString();
+          await env.DB.prepare(`r
+            INSERT INTO users (userId, name, email, role, department, clientId, createdAt, updatedAt)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(userId) DO UPDATE SET
+              name=excluded.name, email=excluded.email, role=excluded.role, updatedAt=excluded.updatedAt
+          `).bind(
+            uid,
+            name || empRow.name || '',
+            email || empRow.email || '',
+            'employee',
+            '',
+            '',
+            now,
+            now
+          ).run();
+
+          return json({ success: true, employeeId, uid, role: 'employee' }, 200, cors);
+        }
+
       return notFound('Auth endpoint not found', cors);
     }
 
@@ -1047,7 +1099,7 @@ export default {
             }
 
             if (method === 'POST') {
-              if (!hasRole(user, 'superAdmin', env)) {
+              if (!hasRole(user, ['superAdmin'])) {
                 return forbidden('Super Admin authorization required to update platform permissions', cors);
               }
               const now = new Date().toISOString();

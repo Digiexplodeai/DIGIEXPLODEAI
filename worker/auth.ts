@@ -142,6 +142,7 @@ export async function verifyFirebaseIdToken(
   uid: string;
   email: string;
   payload: Record<string, any>;
+  isAnonymous: boolean;
 } | {
   success: false;
   status: 401;
@@ -240,20 +241,18 @@ export async function verifyFirebaseIdToken(
     return { success: false, status: 401, error: 'Authentication time in the future' };
   }
 
-  // 5. Reject Anonymous Sessions
+  // 5. Flag Anonymous Sessions — allowed if provisioned in D1 (employees use signInAnonymously)
+  // Anonymous sessions are NOT rejected here; RBAC resolveUserProfile enforces access control.
   const isAnonymous =
     payload.firebase?.sign_in_provider === 'anonymous' ||
     payload.provider_id === 'anonymous';
-
-  if (isAnonymous) {
-    return { success: false, status: 401, error: 'Anonymous authentication is not permitted on this API' };
-  }
 
   return {
     success: true,
     uid: payload.sub,
     email: payload.email || '',
     payload,
+    isAnonymous: isAnonymous || false,
   };
 }
 

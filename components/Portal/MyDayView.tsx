@@ -173,7 +173,7 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
   const [clients, setClients] = useState<any[]>(() => getCachedClients());
 
   // Tab & View Selection
-  const [activeTaskTab, setActiveTaskTab] = useState<'today' | 'overdue' | 'upcoming' | 'completed'>('today');
+  const [activeTaskTab, setActiveTaskTab] = useState<'today' | 'all' | 'overdue' | 'upcoming' | 'completed'>('today');
   const [completedTimeScope, setCompletedTimeScope] = useState<'today' | 'yesterday' | 'all'>('today');
   const [workLogModalOpen, setWorkLogModalOpen] = useState(false);
   const [editingLogId, setEditingLogId] = useState<string | null>(null);
@@ -421,9 +421,13 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
   const myAssignedTasks = useMemo(() => {
     return allTasks.filter(t => {
       if (t.isArchived || t.status === 'Cancelled') return false;
-      return isTaskAssignedToEmployee(t, resolvedEmployeeId);
+      return isTaskAssignedToEmployee(t, activeEmployee || resolvedEmployeeId);
     });
-  }, [allTasks, resolvedEmployeeId]);
+  }, [allTasks, activeEmployee, resolvedEmployeeId]);
+
+  const allActiveTasks = useMemo(() => {
+    return myAssignedTasks.filter(t => normalizeTaskStatus(t.status) !== 'Done');
+  }, [myAssignedTasks]);
 
   // ─── 7. Actionable Today Focus Tasks & Ordering ────────────────────────
   const todayFocusTasks = useMemo(() => {
@@ -1026,11 +1030,13 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
 
   const displayedTasks = activeTaskTab === 'today' 
     ? todayFocusTasks 
-    : activeTaskTab === 'overdue' 
-      ? overdueTasks 
-      : activeTaskTab === 'upcoming' 
-        ? upcomingTasks 
-        : activeCompletedList;
+    : activeTaskTab === 'all'
+      ? allActiveTasks
+      : activeTaskTab === 'overdue' 
+        ? overdueTasks 
+        : activeTaskTab === 'upcoming' 
+          ? upcomingTasks 
+          : activeCompletedList;
 
   return (
     <div className="space-y-6 font-sans pb-12">
@@ -1292,6 +1298,20 @@ export const MyDayView: React.FC<MyDayProps> = ({ setActiveTab }) => {
                   <span>Due Today</span>
                   <span className="text-[10px] px-1.5 py-0.2 rounded-full font-black bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300">
                     {todayFocusTasks.length}
+                  </span>
+                </button>
+
+                <button
+                  onClick={() => setActiveTaskTab('all')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    activeTaskTab === 'all'
+                      ? 'bg-white dark:bg-[#111728] text-[#5B4BFF] dark:text-[#806CFF] shadow-xs'
+                      : 'text-[#64748B] dark:text-[#94A3B8] hover:text-[#101828]'
+                  }`}
+                >
+                  <span>All My Tasks</span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full font-black bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300">
+                    {allActiveTasks.length}
                   </span>
                 </button>
 

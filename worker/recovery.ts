@@ -423,7 +423,7 @@ export async function handleRecoveryReset(
   env: Env
 ): Promise<{
   success: boolean;
-  message: string;
+  message?: string;
   error?: string;
 }> {
   const token = (payload.resetAuthToken || '').trim();

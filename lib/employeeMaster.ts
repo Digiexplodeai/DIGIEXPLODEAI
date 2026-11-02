@@ -279,12 +279,32 @@ export function subscribeToCanonicalEmployees(
 export const EMPLOYEE_ID_ALIASES: Record<string, string> = {
   'demo-super-admin-01': 'emp_superadmin',
   'emp_superadmin': 'demo-super-admin-01',
+  'superadmin': 'emp_superadmin',
   'superAdmin': 'emp_superadmin',
   'admin': 'emp_superadmin',
   'emp_admin': 'emp_superadmin',
-  'superadmin': 'emp_superadmin',
-  'emp_vansh_01': 'emp_5',
-  'emp_5': 'emp_vansh_01',
+
+  // Vansh
+  'vansh': 'emp_vansh',
+  'emp_vansh': 'vansh',
+  'emp_vansh_01': 'emp_vansh',
+  'emp_5': 'emp_vansh',
+
+  // Priyanshu
+  'priyanshu': 'emp_priyanshu',
+  'emp_priyanshu': 'priyanshu',
+
+  // Ravinder
+  'ravinder': 'emp_ravinder',
+  'emp_ravinder': 'ravinder',
+
+  // Mohd Aakib
+  'mohdaakib': 'emp_aakib',
+  'aakib': 'emp_aakib',
+  'mohd aakib': 'emp_aakib',
+  'emp_aakib': 'aakib',
+
+  // Legacy team aliases
   'emp_aman_02': 'emp_1',
   'emp_1': 'emp_aman_02',
   'emp_neha_03': 'emp_2',
@@ -295,15 +315,6 @@ export const EMPLOYEE_ID_ALIASES: Record<string, string> = {
   'emp_4': 'emp_priya_05',
   'emp_rohit_06': 'emp_6',
   'emp_6': 'emp_rohit_06',
-  'priyanshu': 'emp_priyanshu',
-  'emp_priyanshu': 'priyanshu',
-  'vansh': 'emp_vansh',
-  'emp_vansh': 'vansh',
-  'ravinder': 'emp_ravinder',
-  'emp_ravinder': 'ravinder',
-  'mohdaakib': 'emp_aakib',
-  'aakib': 'emp_aakib',
-  'emp_aakib': 'mohdaakib',
 };
 
 /**
@@ -457,7 +468,6 @@ export function resolveCurrentEmployee(
     const matchedByEmail = masterList.find(e => e.email?.trim().toLowerCase() === userEmail);
     if (matchedByEmail) return matchedByEmail;
 
-    // Email prefix matching (e.g. vansh@... -> Vansh)
     const emailPrefix = userEmail.split('@')[0];
     const matchedByPrefix = masterList.find(e => 
       e.name?.trim().toLowerCase().includes(emailPrefix) || 
@@ -468,34 +478,56 @@ export function resolveCurrentEmployee(
 
   // 3. Match by ID / employeeId / alias / auth_uid
   if (authUid) {
-    const matchedById = masterList.find(e => 
-      e.id === authUid || 
-      e.employeeId === authUid || 
-      (e as any).auth_uid === authUid || 
-      (e as any).userId === authUid ||
-      EMPLOYEE_ID_ALIASES[authUid] === e.id ||
-      EMPLOYEE_ID_ALIASES[authUid] === e.employeeId
-    );
+    const cleanAuth = authUid.trim().toLowerCase().replace(/[\s_\-.]+/g, '');
+    const matchedById = masterList.find(e => {
+      const eId = (e.id || '').toLowerCase().replace(/[\s_\-.]+/g, '');
+      const empId = (e.employeeId || '').toLowerCase().replace(/[\s_\-.]+/g, '');
+      return e.id === authUid || 
+        e.employeeId === authUid || 
+        (e as any).auth_uid === authUid || 
+        (e as any).userId === authUid ||
+        eId === cleanAuth ||
+        empId === cleanAuth ||
+        eId.replace(/^emp/, '') === cleanAuth.replace(/^emp/, '') ||
+        cleanAuth.replace(/^emp/, '') === eId.replace(/^emp/, '') ||
+        EMPLOYEE_ID_ALIASES[authUid.toLowerCase()] === e.id ||
+        EMPLOYEE_ID_ALIASES[cleanAuth] === eId;
+    });
     if (matchedById) return matchedById;
   }
 
   // 4. Match by name
   if (userName) {
-    const exactNameMatch = masterList.find(e => e.name?.trim().toLowerCase() === userName);
+    const cleanUserName = userName.trim().toLowerCase().replace(/[\s_\-.]+/g, '');
+    const exactNameMatch = masterList.find(e => {
+      const cleanEmp = (e.name || '').trim().toLowerCase().replace(/[\s_\-.]+/g, '');
+      return cleanEmp === cleanUserName;
+    });
     if (exactNameMatch) return exactNameMatch;
 
-    const words = userName.split(/\s+/).filter(w => w.length > 2);
-    for (const word of words) {
-      if (['admin', 'super', 'user', 'team', 'member', 'specialist'].includes(word)) continue;
-      const matched = masterList.find(e => e.name?.trim().toLowerCase().includes(word));
-      if (matched) return matched;
-    }
+    const matchedPartial = masterList.find(e => {
+      const cleanEmp = (e.name || '').trim().toLowerCase().replace(/[\s_\-.]+/g, '');
+      return cleanEmp.includes(cleanUserName) || cleanUserName.includes(cleanEmp);
+    });
+    if (matchedPartial) return matchedPartial;
   }
 
-  // 5. Match if user has employee role or employee name
-  if (profile?.role === 'employee' || userName.includes('employee') || userName.includes('vansh')) {
-    const vanshEmp = masterList.find(e => e.id === 'emp_5' || e.name.toLowerCase().includes('vansh'));
+  // 5. Match specific employee aliases by name
+  if (userName.includes('vansh')) {
+    const vanshEmp = masterList.find(e => e.id === 'emp_vansh' || e.name.toLowerCase().includes('vansh'));
     if (vanshEmp) return vanshEmp;
+  }
+  if (userName.includes('aakib')) {
+    const aakibEmp = masterList.find(e => e.id === 'emp_aakib' || e.name.toLowerCase().includes('aakib'));
+    if (aakibEmp) return aakibEmp;
+  }
+  if (userName.includes('ravinder')) {
+    const ravinderEmp = masterList.find(e => e.id === 'emp_ravinder' || e.name.toLowerCase().includes('ravinder'));
+    if (ravinderEmp) return ravinderEmp;
+  }
+  if (userName.includes('priyanshu')) {
+    const priyanshuEmp = masterList.find(e => e.id === 'emp_priyanshu' || e.name.toLowerCase().includes('priyanshu'));
+    if (priyanshuEmp) return priyanshuEmp;
   }
 
   return masterList[0] || null;
@@ -519,9 +551,27 @@ export function isTaskAssignedToEmployee(
   employee: MasterEmployee | string | null | undefined
 ): boolean {
   if (!task || !employee) return false;
-  
-  const targetId = (typeof employee === 'string' ? employee : (employee.id || employee.employeeId || '')).trim();
-  if (!targetId || targetId === 'unassigned') return false;
+
+  let targetId = '';
+  let targetName = '';
+
+  if (typeof employee === 'string') {
+    targetId = employee.trim();
+    const found = CENTRAL_EMPLOYEES_MASTER_LIST.find(e =>
+      e.id.toLowerCase() === targetId.toLowerCase() ||
+      e.employeeId?.toLowerCase() === targetId.toLowerCase() ||
+      e.name.toLowerCase() === targetId.toLowerCase() ||
+      (EMPLOYEE_ID_ALIASES[targetId.toLowerCase()] && EMPLOYEE_ID_ALIASES[targetId.toLowerCase()].toLowerCase() === e.id.toLowerCase())
+    );
+    if (found) {
+      targetName = found.name;
+    }
+  } else {
+    targetId = (employee.id || employee.employeeId || '').trim();
+    targetName = employee.name || '';
+  }
+
+  if (!targetId || targetId.toLowerCase() === 'unassigned') return false;
 
   const rawTaskId = (
     task.assigned_employee_id || 
@@ -532,14 +582,56 @@ export function isTaskAssignedToEmployee(
     ''
   ).trim();
 
-  if (!rawTaskId || rawTaskId === 'unassigned') return false;
+  const taskAssigneeName = (task.assigneeName || task.assignee_name || '').trim();
 
-  // Direct ID match
-  if (rawTaskId === targetId) return true;
+  // If both task ID and task name are empty or unassigned
+  if ((!rawTaskId || rawTaskId.toLowerCase() === 'unassigned') &&
+      (!taskAssigneeName || taskAssigneeName.toLowerCase() === 'unassigned')) {
+    return false;
+  }
 
-  // Canonical ID aliases (e.g. emp_aman_02 <-> emp_1, emp_vansh_01 <-> emp_5)
-  if (EMPLOYEE_ID_ALIASES[rawTaskId] === targetId) return true;
-  if (EMPLOYEE_ID_ALIASES[targetId] === rawTaskId) return true;
+  const cleanTargetId = targetId.toLowerCase().replace(/[\s_\-.]+/g, '');
+  const cleanRawTaskId = rawTaskId.toLowerCase().replace(/[\s_\-.]+/g, '');
+  const stripEmp = (s) => s.replace(/^emp/i, '');
+
+  // 1. Direct ID match (case-insensitive & trimmed)
+  if (rawTaskId && rawTaskId.toLowerCase() === targetId.toLowerCase()) return true;
+  if (cleanRawTaskId && cleanTargetId && cleanRawTaskId === cleanTargetId) return true;
+
+  // 2. Prefix-stripped ID match (emp_aakib <-> aakib, emp_ravinder <-> ravinder)
+  if (stripEmp(cleanRawTaskId) && stripEmp(cleanRawTaskId) === stripEmp(cleanTargetId)) return true;
+
+  // 3. Canonical ID aliases
+  const lowerRaw = rawTaskId.toLowerCase();
+  const lowerTarget = targetId.toLowerCase();
+  if (EMPLOYEE_ID_ALIASES[lowerRaw] && EMPLOYEE_ID_ALIASES[lowerRaw].toLowerCase() === lowerTarget) return true;
+  if (EMPLOYEE_ID_ALIASES[lowerTarget] && EMPLOYEE_ID_ALIASES[lowerTarget].toLowerCase() === lowerRaw) return true;
+  if (EMPLOYEE_ID_ALIASES[cleanRawTaskId] && EMPLOYEE_ID_ALIASES[cleanRawTaskId].toLowerCase() === cleanTargetId) return true;
+  if (EMPLOYEE_ID_ALIASES[cleanTargetId] && EMPLOYEE_ID_ALIASES[cleanTargetId].toLowerCase() === cleanRawTaskId) return true;
+
+  // 4. Name match (Authoritative: matches when task visibly belongs to employee by name)
+  if (targetName && taskAssigneeName) {
+    const cleanTargetName = targetName.toLowerCase().replace(/[\s_\-.]+/g, '');
+    const cleanTaskName = taskAssigneeName.toLowerCase().replace(/[\s_\-.]+/g, '');
+    if (cleanTargetName === cleanTaskName) return true;
+    if (cleanTargetName.includes(cleanTaskName) || cleanTaskName.includes(cleanTargetName)) return true;
+  }
+
+  // 5. Match rawTaskId against employee name (in case name was saved into assigneeId)
+  if (targetName && cleanRawTaskId) {
+    const cleanTargetName = targetName.toLowerCase().replace(/[\s_\-.]+/g, '');
+    if (cleanRawTaskId === cleanTargetName || cleanRawTaskId.includes(cleanTargetName) || cleanTargetName.includes(cleanRawTaskId)) {
+      return true;
+    }
+  }
+
+  // 6. Match taskAssigneeName against target ID
+  if (taskAssigneeName && cleanTargetId) {
+    const cleanTaskName = taskAssigneeName.toLowerCase().replace(/[\s_\-.]+/g, '');
+    if (cleanTaskName === cleanTargetId || stripEmp(cleanTaskName) === stripEmp(cleanTargetId)) {
+      return true;
+    }
+  }
 
   return false;
 }

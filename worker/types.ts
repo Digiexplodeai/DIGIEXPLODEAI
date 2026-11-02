@@ -49,6 +49,7 @@ export interface Env {
   ALLOWED_ORIGINS?: string;
   ENVIRONMENT?: string;
   TEST_JWKS?: any[];
+  EMPLOYEE_SESSION_SECRET?: string;
 }
 
 export type AuthResult =

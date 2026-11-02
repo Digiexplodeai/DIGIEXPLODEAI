@@ -1035,37 +1035,50 @@ export function subscribeToCanonicalApprovals(
   const initial = getCachedApprovals();
   onUpdate(initial);
 
-  // 2. Perform background sync from active sources if needed
+  // 2. Fetch authoritative list from Cloudflare D1
+  let d1Unsub = false;
+  import('./cloudflareApi').then(({ cfGetApprovals }) => {
+    cfGetApprovals().then((d1List: any[]) => {
+      if (d1Unsub) return;
+      if (Array.isArray(d1List) && d1List.length > 0) {
+        const normalized = d1List.map(normalizeApprovalRecord);
+        setCachedApprovals(normalized);
+        onUpdate(normalized);
+      }
+    }).catch(() => {});
+  }).catch(() => {});
+
+  // 3. Perform background sync from active sources if needed
   syncExistingSourcesToApprovals().then(synced => {
     if (synced.length > 0) {
       onUpdate(synced);
     }
   }).catch(() => {});
 
-  // 3. Set up Firestore real-time listener
-  const colRef = collection(db, 'approvals');
-  const unsub = onSnapshot(colRef, async (snapshot) => {
-    if (!snapshot.empty) {
-      const list: CanonicalApprovalRecord[] = [];
-      snapshot.forEach(docSnap => {
-        list.push(normalizeApprovalRecord({ id: docSnap.id, ...docSnap.data() }));
-      });
-
-      if (list.length > 0) {
-        setCachedApprovals(list);
-        onUpdate(list);
-        return;
+  // 4. Firestore real-time listener (fallback, may fail offline/quota)
+  let fireUnsub: (() => void) = () => {};
+  try {
+    const colRef = collection(db, 'approvals');
+    const unsub2 = onSnapshot(colRef, async (snapshot) => {
+      if (!snapshot.empty) {
+        const list: CanonicalApprovalRecord[] = [];
+        snapshot.forEach(docSnap => {
+          list.push(normalizeApprovalRecord({ id: docSnap.id, ...docSnap.data() }));
+        });
+        if (list.length > 0) {
+          setCachedApprovals(list);
+          onUpdate(list);
+          return;
+        }
       }
-    }
-    // If empty snapshot, fall back to synced/cached items
-    const fallback = getCachedApprovals();
-    onUpdate(fallback);
-  }, (err) => {
-    console.warn('Approvals listener notice (using cached data):', err);
-    if (onError) onError(err);
-    const cached = getCachedApprovals();
-    onUpdate(cached);
-  });
+      const fallback = getCachedApprovals();
+      onUpdate(fallback);
+    }, (err) => {
+      console.warn('Approvals Firestore notice (D1 is authoritative):', err);
+      if (onError) onError(err);
+    });
+    fireUnsub = unsub2;
+  } catch (e) {}
 
-  return unsub;
+  return () => { d1Unsub = true; fireUnsub(); };
 }

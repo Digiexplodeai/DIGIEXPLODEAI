@@ -7,7 +7,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { type ClientData } from '../components/Portal/ClientList';
-import { cfGetClients } from './cloudflareApi';
+import { cfGetClients, cfSaveClient } from './cloudflareApi';
 
 export interface CentralClient extends ClientData {
   id: string;
@@ -528,7 +528,10 @@ export function subscribeToCanonicalClients(
 
   cfGetClients().then((cfList) => {
     if (Array.isArray(cfList) && cfList.length > 0) {
-      const list = cfList.map(c => ({ id: c.clientId, slug: c.clientId, ...c } as CentralClient));
+      const list = cfList.map((c) => ({ id: c.clientId, slug: c.clientId, ...c } as CentralClient));
+      // Also push any locally-cached clients not in D1
+      const d1Ids = new Set(cfList.map((c) => c.clientId));
+      getCachedClients().forEach(c => { if (!d1Ids.has(c.id || c.clientId)) cfSaveClient(c).catch(() => {}); });
       setCachedClients(list);
       onUpdate(list);
     }

@@ -276,7 +276,19 @@ export function subscribeToPayrollRecords(
     onUpdate(matching);
   } catch {}
 
-  // 2. Subscribe to Firestore
+  // 2a. Fetch from Cloudflare D1 first (authoritative)
+  import('./cloudflareApi').then(({ cfGetPayslips }) => {
+    cfGetPayslips(month ? { month } : undefined).then((d1List: any[]) => {
+      if (Array.isArray(d1List) && d1List.length > 0) {
+        const fullList = d1List as PayrollRecord[];
+        setCachedPayrollRecords(fullList);
+        const matching = fullList.filter(r => !month || r.payrollMonth === month);
+        onUpdate(matching);
+      }
+    }).catch(() => {});
+  }).catch(() => {});
+
+  // 2b. Subscribe to Firestore (fallback)
   try {
     const q = collection(db, 'payslips');
     const unsub = onSnapshot(q, (snap) => {

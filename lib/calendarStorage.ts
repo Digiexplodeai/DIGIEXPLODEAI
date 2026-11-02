@@ -140,8 +140,11 @@ export const subscribeToCanonicalCalendarEntries = (
   const fetchFromD1 = async () => {
     try {
       const d1Rows = await cfGetCalendar(clientId);
-      if (Array.isArray(d1Rows) && d1Rows.length > 0) {
+      if (Array.isArray(d1Rows)) {
         const d1Entries = d1Rows.map(d1ToCalendarEntry);
+        // Auto-heal: push any locally-cached entries not in D1
+        const d1Ids = new Set(d1Rows.map((r) => r.id));
+        getCachedCalendarEntries().forEach(e => { if (!d1Ids.has(e.contentId)) cfCreateCalendarEntry(calendarEntryToD1(e)).catch(() => {}); });
         // Merge with any freshly cached items
         const local = getCachedCalendarEntries();
         const map = new Map<string, CalendarEntry>();

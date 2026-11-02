@@ -1434,7 +1434,7 @@ export const subscribeToCanonicalTasks = (
     if (cancelled) return;
     try {
       const cfList = await cfGetTasks();
-      if (!Array.isArray(cfList) || cfList.length === 0 || cancelled) return;
+      if (!Array.isArray(cfList) || cancelled) return;
 
       const cachedBefore = getCachedTasks();
       const taskMap = new Map<string, Task>();

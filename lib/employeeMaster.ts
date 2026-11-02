@@ -229,6 +229,20 @@ export function subscribeToCanonicalEmployees(
     }
   }).catch(e => console.warn('[employeeMaster] Cloudflare fetch notice:', e));
 
+  // 2b. Poll D1 employees every 30s for cross-device sync
+  const d1Poll = setInterval(() => {
+    cfGetEmployees().then((d1List) => {
+      if (Array.isArray(d1List) && d1List.length > 0) {
+        const byId2 = new Map();
+        CENTRAL_EMPLOYEES_MASTER_LIST.forEach((m) => byId2.set(m.id, m));
+        d1List.forEach((n) => byId2.set(n.id || n.employeeId, { ...n, id: n.id || n.employeeId, employeeId: n.id || n.employeeId }));
+        const merged2 = mergeWithSuperAdmin(Array.from(byId2.values()));
+        setCachedEmployees(merged2);
+        onUpdate(merged2);
+      }
+    }).catch(() => {});
+  }, 30000);
+
   // 3. Firestore snapshot listener
   const unsub = onSnapshot(collection(db, 'employees'), (snapshot) => {
     if (!snapshot.empty) {
@@ -273,7 +287,7 @@ export function subscribeToCanonicalEmployees(
     if (onError) onError(err);
   });
 
-  return unsub;
+  return () => { clearInterval(d1Poll); unsub(); };
 }
 
 export const EMPLOYEE_ID_ALIASES: Record<string, string> = {

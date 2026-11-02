@@ -112,6 +112,15 @@ export function subscribeToHRDocuments(
     const cached = getCachedHRDocuments();
     if (cached.length > 0) onUpdate(cached);
   } catch {}
+  // Fetch from Cloudflare D1 first
+  import('./cloudflareApi').then(({ cfGetHRDocuments }) => {
+    cfGetHRDocuments().then((d1List: any[]) => {
+      if (Array.isArray(d1List) && d1List.length > 0) {
+        localStorage.setItem('digi_hr_documents_v1', JSON.stringify(d1List));
+        onUpdate(d1List as HRDocumentRecord[]);
+      }
+    }).catch(() => {});
+  }).catch(() => {});
   try {
     const unsub = onSnapshot(
       query(collection(db, 'hrDocuments'), orderBy('generatedAt', 'desc')),

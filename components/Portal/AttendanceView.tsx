@@ -443,38 +443,42 @@ export const AttendanceView: React.FC = () => {
         localStorage.setItem('digi_local_employees', JSON.stringify(merged));
       }
     }).catch(console.warn);
-    // Fetch attendance from Cloudflare D1 (cross-device authoritative source)
-    cfGetAttendance().then((d1AttList: any[]) => {
-      if (Array.isArray(d1AttList) && d1AttList.length > 0) {
-        const normalized: Attendance[] = d1AttList.map((item: any) => ({
-          attendanceId: item.id || item.attendanceId,
-          employeeId: item.employeeId,
-          employeeName: item.employeeName || item.name || '',
-          employeeEmail: item.employeeEmail || item.email || '',
-          date: item.date,
-          status: (item.status || 'Present') as Attendance['status'],
-          checkIn: item.checkIn || item.check_in || '',
-          checkOut: item.checkOut || item.check_out || '',
-          notes: item.notes || '',
-          markedAt: item.markedAt || item.createdAt || item.created_at || new Date().toISOString(),
-          markedBy: item.markedBy || 'system',
-        }));
-        const byId = new Map<string, Attendance>();
-        try {
-          const cached = localStorage.getItem('digi_local_attendance');
-          if (cached) {
-            const parsed = JSON.parse(cached);
-            if (Array.isArray(parsed)) parsed.forEach((r: any) => { if (r.attendanceId) byId.set(r.attendanceId, r); });
+    // Fetch attendance from Cloudflare D1 with continuous 10s multi-device auto-sync
+    const pollD1Attendance = () => {
+      cfGetAttendance().then((d1AttList: any[]) => {
+        if (Array.isArray(d1AttList) && d1AttList.length > 0) {
+          const normalized: Attendance[] = d1AttList.map((item: any) => ({
+            attendanceId: item.id || item.attendanceId,
+            employeeId: item.employeeId,
+            employeeName: item.employeeName || item.name || '',
+            employeeEmail: item.employeeEmail || item.email || '',
+            date: item.date,
+            status: (item.status || 'Present') as Attendance['status'],
+            checkIn: item.checkIn || item.check_in || '',
+            checkOut: item.checkOut || item.check_out || '',
+            notes: item.notes || '',
+            markedAt: item.markedAt || item.createdAt || item.created_at || new Date().toISOString(),
+            markedBy: item.markedBy || 'system',
+          }));
+          const byId = new Map<string, Attendance>();
+          try {
+            const cached = localStorage.getItem('digi_local_attendance');
+            if (cached) {
+              const parsed = JSON.parse(cached);
+              if (Array.isArray(parsed)) parsed.forEach((r: any) => { if (r.attendanceId) byId.set(r.attendanceId, r); });
+            }
+          } catch (e) {}
+          normalized.forEach(r => { if (r.attendanceId) byId.set(r.attendanceId, r); });
+          const merged = Array.from(byId.values());
+          if (merged.length > 0) {
+            setAttendance(merged);
+            localStorage.setItem('digi_local_attendance', JSON.stringify(merged));
           }
-        } catch (e) {}
-        normalized.forEach(r => { if (r.attendanceId) byId.set(r.attendanceId, r); });
-        const merged = Array.from(byId.values());
-        if (merged.length > 0) {
-          setAttendance(merged);
-          localStorage.setItem('digi_local_attendance', JSON.stringify(merged));
         }
-      }
-    }).catch((err: any) => console.warn('[Attendance] D1 fetch notice:', err));
+      }).catch((err: any) => console.warn('[Attendance] D1 fetch notice:', err));
+    };
+    pollD1Attendance();
+    const attPollTimer = setInterval(pollD1Attendance, 10000);
 
     const unsubEmp = onSnapshot(
       empQuery,
@@ -627,6 +631,7 @@ export const AttendanceView: React.FC = () => {
     );
 
     return () => {
+      clearInterval(attPollTimer);
       unsubEmp();
       unsubAtt();
       unsubLeaves();

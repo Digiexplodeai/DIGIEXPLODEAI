@@ -233,23 +233,27 @@ export const WorkLogView: React.FC = () => {
     };
     window.addEventListener('storage', handleStorage);
 
-    // 3. Cloudflare D1 fetch
-    cfGetWorkLogs().then((cfList) => {
-      if (Array.isArray(cfList) && cfList.length > 0) {
-        const normalized = cfList.map(item => normalizeWorkLog(item, item.id));
-        setLogs(prev => {
-          const byId = new Map<string, WorkLog>();
-          prev.forEach(l => byId.set(l.id, l));
-          normalized.forEach(l => byId.set(l.id, l));
-          const merged = Array.from(byId.values());
-          merged.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-          try {
-            localStorage.setItem('digi_persisted_worklogs_v2', JSON.stringify(merged));
-          } catch (e) {}
-          return merged;
-        });
-      }
-    }).catch(console.warn);
+    // 3. Cloudflare D1 fetch with continuous 10s multi-device auto-sync
+    const pollD1WorkLogs = () => {
+      cfGetWorkLogs().then((cfList) => {
+        if (Array.isArray(cfList) && cfList.length > 0) {
+          const normalized = cfList.map(item => normalizeWorkLog(item, item.id));
+          setLogs(prev => {
+            const byId = new Map<string, WorkLog>();
+            prev.forEach(l => byId.set(l.id, l));
+            normalized.forEach(l => byId.set(l.id, l));
+            const merged = Array.from(byId.values());
+            merged.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+            try {
+              localStorage.setItem('digi_persisted_worklogs_v2', JSON.stringify(merged));
+            } catch (e) {}
+            return merged;
+          });
+        }
+      }).catch(console.warn);
+    };
+    pollD1WorkLogs();
+    const wlInterval = setInterval(pollD1WorkLogs, 10000);
 
     // 4. Firestore snapshot listener
     const unsubLogs = onSnapshot(collection(db, 'workLogs'), snap => {

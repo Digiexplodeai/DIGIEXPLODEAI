@@ -1413,7 +1413,7 @@ export const subscribeToCanonicalTasks = (
   syncWithD1();
 
   // 5. Polling every 10 seconds for real-time multi-device sync
-  const POLL_INTERVAL_MS = 10_000;
+  const POLL_INTERVAL_MS = 5_000;
   const pollInterval = setInterval(syncWithD1, POLL_INTERVAL_MS);
 
   // 6. Immediate sync when tab regains focus or visibility

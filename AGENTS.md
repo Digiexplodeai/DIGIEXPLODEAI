@@ -30,3 +30,16 @@
 - **AUTHENTICATION HEADERS FOR CLOUDFLARE WORKER**:
   - All API calls in lib/cloudflareApi.ts inject X-Agency-Key: digi_emp_session_2026 and X-Agency-* headers (X-Agency-Role, X-Agency-User-Id, X-Agency-Name, X-Agency-Email).
   - Worker authenticates agency sessions seamlessly without relying on third-party auth tokens.
+
+## 4. Marketing Leads & Real-Time Visitor Telemetry (PERMANENT RULE)
+- **DATABASE TABLES**:
+  - `leads`: Inbound prospect inquiries captured from pop-up forms, landing pages, and contact briefs.
+  - `visitorSessions`: Live website visitor traffic telemetry with real-time location and page journeys.
+- **NO MOCK / FAKE DATA ALLOWED**: All mock leads (`INITIAL_LEADS`) and mock visitor sessions (`SEED_SESSIONS`) are strictly prohibited. The Marketing Command Center exclusively displays genuine live data from Cloudflare D1.
+- **CLOUDFLARE EDGE GEO & ATTRIBUTION**:
+  - Visitor geolocation (City, Region, Country) is detected live at Cloudflare edge via `cf-ipcity`, `cf-region`, and `cf-ipcountry` headers and `/api/geo` endpoint.
+  - Referrers and UTM parameters (`utm_source`, `utm_medium`, `utm_campaign`, `gclid`, `fbclid`) are automatically logged and attributed to incoming leads.
+- **INBOUND LEAD PIPELINE**:
+  - `components/Marketing/LeadCaptureModal.tsx` provides a friction-free pop-up with 1-click interest chips and WhatsApp delivery.
+  - All lead captures (`LeadCaptureModal`, `ContactForm`, `DoctorMarketingPage`) write directly to Cloudflare D1 via `cfCreateLead()` (`POST /api/leads`).
+  - Marketing Command Center (`MarketingDashboardView.tsx`) polls every 5 seconds for real-time multi-device sync.

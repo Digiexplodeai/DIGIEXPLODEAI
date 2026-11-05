@@ -143,6 +143,65 @@ export const MarketingDashboardView: React.FC = () => {
     return `₹${sum.toLocaleString('en-IN')}`;
   }, [leads]);
 
+  // Top cities derived dynamically from real visitor sessions
+  const topCities = useMemo(() => {
+    if (visitors.length === 0) return [];
+    const counts: Record<string, number> = {};
+    for (const v of visitors) {
+      const city = v.city || 'India';
+      counts[city] = (counts[city] || 0) + 1;
+    }
+    return Object.entries(counts)
+      .map(([city, count]) => ({
+        city,
+        count,
+        pct: `${Math.round((count / visitors.length) * 100)}%`
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6);
+  }, [visitors]);
+
+  // Top pages derived dynamically from real visitor sessions
+  const topPages = useMemo(() => {
+    if (visitors.length === 0) return [];
+    const counts: Record<string, number> = {};
+    for (const v of visitors) {
+      const p = v.currentPage || '/';
+      counts[p] = (counts[p] || 0) + 1;
+    }
+    return Object.entries(counts)
+      .map(([page, visits]) => {
+        const pageLeads = leads.filter(l => l.sourcePage === page).length;
+        const cr = visits > 0 ? `${((pageLeads / visits) * 100).toFixed(1)}%` : '0.0%';
+        return { page, visits, leads: pageLeads, cr };
+      })
+      .sort((a, b) => b.visits - a.visits)
+      .slice(0, 5);
+  }, [visitors, leads]);
+
+  // Acquisition channels derived dynamically from real visitors
+  const channelBreakdown = useMemo(() => {
+    if (visitors.length === 0) return [];
+    const counts: Record<string, number> = {
+      'Google (Search & Ads)': 0,
+      'Meta & Instagram': 0,
+      'Direct Visit': 0,
+      'Referral & Links': 0
+    };
+    for (const v of visitors) {
+      const ref = (v.referrer || '').toLowerCase();
+      if (ref.includes('google')) counts['Google (Search & Ads)']++;
+      else if (ref.includes('meta') || ref.includes('instagram') || ref.includes('facebook')) counts['Meta & Instagram']++;
+      else if (ref.includes('direct')) counts['Direct Visit']++;
+      else counts['Referral & Links']++;
+    }
+    return Object.entries(counts).map(([name, count]) => ({
+      name,
+      count,
+      pct: `${Math.round((count / visitors.length) * 100)}%`
+    }));
+  }, [visitors]);
+
   const handleCreateManualLead = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newLeadName.trim()) return;
@@ -618,95 +677,103 @@ export const MarketingDashboardView: React.FC = () => {
           </div>
 
           <div className="bg-white dark:bg-[#0D1224] rounded-2xl border border-slate-200 dark:border-white/10 shadow-sm overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-slate-700 dark:text-slate-300">
-                <thead className="bg-slate-50 dark:bg-white/5 text-[10px] font-black uppercase tracking-wider text-slate-500 border-b border-slate-200 dark:border-white/10">
-                  <tr>
-                    <th className="py-3 px-4">Visitor / IP</th>
-                    <th className="py-3 px-4">Detected Location</th>
-                    <th className="py-3 px-4">Active Page</th>
-                    <th className="py-3 px-4">Referrer / Traffic Channel</th>
-                    <th className="py-3 px-4">Device & Browser</th>
-                    <th className="py-3 px-4">Time on Site</th>
-                    <th className="py-3 px-4">Status & Journey</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-white/5">
-                  {visitors.map(v => (
-                    <tr key={v.id} className="hover:bg-slate-50/80 dark:hover:bg-white/5 transition-all">
-                      
-                      {/* IP / ID */}
-                      <td className="py-3.5 px-4 font-mono font-bold text-slate-900 dark:text-white">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`w-2 h-2 rounded-full ${
-                              v.status === 'active'
-                                ? 'bg-emerald-500 animate-pulse'
-                                : v.status === 'idle'
-                                ? 'bg-amber-400'
-                                : 'bg-slate-300'
-                            }`}
-                          />
-                          <span>{v.ipHash}</span>
-                        </div>
-                      </td>
-
-                      {/* Location */}
-                      <td className="py-3.5 px-4">
-                        <div className="flex items-center gap-1.5 font-semibold text-slate-800 dark:text-slate-200">
-                          <MapPin className="w-3.5 h-3.5 text-[#EA580C]" />
-                          <span>{v.city}, {v.country}</span>
-                        </div>
-                      </td>
-
-                      {/* Current Page */}
-                      <td className="py-3.5 px-4">
-                        <span className="px-2.5 py-1 rounded-md bg-blue-50 dark:bg-blue-500/10 text-[#2563FF] font-bold text-[11px]">
-                          {v.currentPage}
-                        </span>
-                      </td>
-
-                      {/* Referrer */}
-                      <td className="py-3.5 px-4 max-w-xs truncate text-slate-600 dark:text-slate-400">
-                        {v.referrer}
-                      </td>
-
-                      {/* Device & Browser */}
-                      <td className="py-3.5 px-4">
-                        <div className="flex items-center gap-1.5">
-                          {v.device === 'Mobile' ? (
-                            <Smartphone className="w-3.5 h-3.5 text-slate-400" />
-                          ) : (
-                            <Laptop className="w-3.5 h-3.5 text-slate-400" />
-                          )}
-                          <span>{v.device} • {v.browser}</span>
-                        </div>
-                      </td>
-
-                      {/* Duration */}
-                      <td className="py-3.5 px-4 font-semibold text-slate-700 dark:text-slate-300">
-                        {Math.floor(v.durationSeconds / 60)}m {v.durationSeconds % 60}s
-                      </td>
-
-                      {/* Actions / Journey */}
-                      <td className="py-3.5 px-4 max-w-xs">
-                        <div className="flex flex-wrap gap-1">
-                          {v.actions.slice(-2).map((act, idx) => (
-                            <span
-                              key={idx}
-                              className="px-2 py-0.5 rounded bg-slate-100 dark:bg-white/5 text-[10px] text-slate-600 dark:text-slate-300 font-medium"
-                            >
-                              {act}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-
+            {visitors.length === 0 ? (
+              <div className="p-12 text-center text-slate-400">
+                <Globe className="w-10 h-10 mx-auto mb-2 text-slate-300 dark:text-slate-600 animate-pulse" />
+                <p className="text-sm font-bold text-slate-700 dark:text-slate-300">Listening for Live Visitors</p>
+                <p className="text-xs text-slate-400 mt-1">Open www.digiexplodeai.com in another tab or mobile device to see your live visitor telemetry stream here automatically.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-700 dark:text-slate-300">
+                  <thead className="bg-slate-50 dark:bg-white/5 text-[10px] font-black uppercase tracking-wider text-slate-500 border-b border-slate-200 dark:border-white/10">
+                    <tr>
+                      <th className="py-3 px-4">Visitor / IP</th>
+                      <th className="py-3 px-4">Detected Location</th>
+                      <th className="py-3 px-4">Active Page</th>
+                      <th className="py-3 px-4">Referrer / Traffic Channel</th>
+                      <th className="py-3 px-4">Device & Browser</th>
+                      <th className="py-3 px-4">Time on Site</th>
+                      <th className="py-3 px-4">Status & Journey</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-white/5">
+                    {visitors.map(v => (
+                      <tr key={v.id} className="hover:bg-slate-50/80 dark:hover:bg-white/5 transition-all">
+                        
+                        {/* IP / ID */}
+                        <td className="py-3.5 px-4 font-mono font-bold text-slate-900 dark:text-white">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`w-2 h-2 rounded-full ${
+                                v.status === 'active'
+                                  ? 'bg-emerald-500 animate-pulse'
+                                  : v.status === 'idle'
+                                  ? 'bg-amber-400'
+                                  : 'bg-slate-300'
+                              }`}
+                            />
+                            <span>{v.ipHash}</span>
+                          </div>
+                        </td>
+
+                        {/* Location */}
+                        <td className="py-3.5 px-4">
+                          <div className="flex items-center gap-1.5 font-semibold text-slate-800 dark:text-slate-200">
+                            <MapPin className="w-3.5 h-3.5 text-[#EA580C]" />
+                            <span>{v.city}, {v.country}</span>
+                          </div>
+                        </td>
+
+                        {/* Current Page */}
+                        <td className="py-3.5 px-4">
+                          <span className="px-2.5 py-1 rounded-md bg-blue-50 dark:bg-blue-500/10 text-[#2563FF] font-bold text-[11px]">
+                            {v.currentPage}
+                          </span>
+                        </td>
+
+                        {/* Referrer */}
+                        <td className="py-3.5 px-4 max-w-xs truncate text-slate-600 dark:text-slate-400">
+                          {v.referrer}
+                        </td>
+
+                        {/* Device & Browser */}
+                        <td className="py-3.5 px-4">
+                          <div className="flex items-center gap-1.5">
+                            {v.device === 'Mobile' ? (
+                              <Smartphone className="w-3.5 h-3.5 text-slate-400" />
+                            ) : (
+                              <Laptop className="w-3.5 h-3.5 text-slate-400" />
+                            )}
+                            <span>{v.device} • {v.browser}</span>
+                          </div>
+                        </td>
+
+                        {/* Duration */}
+                        <td className="py-3.5 px-4 font-semibold text-slate-700 dark:text-slate-300">
+                          {Math.floor(v.durationSeconds / 60)}m {v.durationSeconds % 60}s
+                        </td>
+
+                        {/* Actions / Journey */}
+                        <td className="py-3.5 px-4 max-w-xs">
+                          <div className="flex flex-wrap gap-1">
+                            {v.actions.slice(-2).map((act, idx) => (
+                              <span
+                                key={idx}
+                                className="px-2 py-0.5 rounded bg-slate-100 dark:bg-white/5 text-[10px] text-slate-600 dark:text-slate-300 font-medium"
+                              >
+                                {act}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
         </div>
@@ -722,57 +789,52 @@ export const MarketingDashboardView: React.FC = () => {
               <MapPin className="w-4 h-4 text-[#EA580C]" /> Top Inbound Visitor Cities
             </h3>
             
-            <div className="space-y-3">
-              {[
-                { city: 'Chandigarh & Tricity', count: 94, pct: '38%' },
-                { city: 'New Delhi & NCR', count: 68, pct: '27%' },
-                { city: 'Gurugram', count: 32, pct: '13%' },
-                { city: 'Ludhiana', count: 24, pct: '10%' },
-                { city: 'Mumbai', count: 18, pct: '7%' },
-                { city: 'Other Cities', count: 12, pct: '5%' }
-              ].map((item, i) => (
-                <div key={i} className="space-y-1">
-                  <div className="flex justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
-                    <span>{item.city}</span>
-                    <span>{item.count} visitors ({item.pct})</span>
+            {topCities.length === 0 ? (
+              <p className="text-xs text-slate-400 py-6 text-center">No visitor locations detected yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {topCities.map((item, i) => (
+                  <div key={i} className="space-y-1">
+                    <div className="flex justify-between text-xs font-bold text-slate-700 dark:text-slate-300">
+                      <span>{item.city}</span>
+                      <span>{item.count} visitor{item.count === 1 ? '' : 's'} ({item.pct})</span>
+                    </div>
+                    <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-white/5 overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-[#6C4CFF] to-[#2563FF] rounded-full"
+                        style={{ width: item.pct }}
+                      />
+                    </div>
                   </div>
-                  <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-white/5 overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-[#6C4CFF] to-[#2563FF] rounded-full"
-                      style={{ width: item.pct }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Top Performing Landing Pages */}
           <div className="p-6 rounded-2xl bg-white dark:bg-[#0D1224] border border-slate-200 dark:border-white/10 shadow-sm space-y-4">
             <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
-              <Globe className="w-4 h-4 text-[#2563FF]" /> Top Performing Pages by Inflow
+              <Globe className="w-4 h-4 text-[#2563FF]" /> Top Visited Pages
             </h3>
 
-            <div className="space-y-3">
-              {[
-                { page: '/doctors', label: 'Doctor Marketing Page', visits: 112, leads: 3, cr: '2.7%' },
-                { page: '/', label: 'Agency Homepage', visits: 86, leads: 2, cr: '2.3%' },
-                { page: '/projects', label: 'Featured Portfolio', visits: 45, leads: 1, cr: '2.2%' },
-                { page: '/chandigarh', label: 'Chandigarh Regional Page', visits: 38, leads: 1, cr: '2.6%' },
-                { page: '/gurugram', label: 'Gurugram Regional Page', visits: 24, leads: 1, cr: '4.1%' },
-              ].map((pg, i) => (
-                <div key={i} className="p-3 rounded-xl bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/5 flex items-center justify-between">
-                  <div>
-                    <p className="text-xs font-bold text-slate-900 dark:text-white">{pg.page}</p>
-                    <p className="text-[10px] text-slate-400">{pg.label}</p>
+            {topPages.length === 0 ? (
+              <p className="text-xs text-slate-400 py-6 text-center">No page traffic recorded yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {topPages.map((pg, i) => (
+                  <div key={i} className="p-3 rounded-xl bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/5 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-bold text-slate-900 dark:text-white">{pg.page}</p>
+                      <p className="text-[10px] text-slate-400">{pg.visits} sessions</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs font-black text-[#2563FF]">{pg.leads} leads</p>
+                      <p className="text-[10px] text-emerald-600 font-bold">{pg.cr} CR</p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-xs font-black text-[#2563FF]">{pg.visits} visits</p>
-                    <p className="text-[10px] text-emerald-600 font-bold">{pg.leads} leads ({pg.cr})</p>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Traffic Source Breakdown */}
@@ -781,45 +843,39 @@ export const MarketingDashboardView: React.FC = () => {
               <Target className="w-4 h-4 text-[#059669]" /> Acquisition Channel Breakdown
             </h3>
 
-            <div className="grid grid-cols-2 gap-3 text-center">
-              <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/20">
-                <p className="text-xl font-black text-emerald-600">46%</p>
-                <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300 mt-0.5">Google Search (Organic & Ads)</p>
+            {channelBreakdown.length === 0 ? (
+              <p className="text-xs text-slate-400 py-6 text-center">No traffic channels recorded yet.</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 text-center">
+                {channelBreakdown.map((ch, idx) => (
+                  <div key={idx} className="p-3.5 rounded-xl bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/10">
+                    <p className="text-xl font-black text-[#2563FF]">{ch.pct}</p>
+                    <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300 mt-0.5">{ch.name}</p>
+                    <p className="text-[10px] text-slate-400">{ch.count} visits</p>
+                  </div>
+                ))}
               </div>
-              <div className="p-3.5 rounded-xl bg-blue-50 dark:bg-blue-500/10 border border-blue-100 dark:border-blue-500/20">
-                <p className="text-xl font-black text-[#2563FF]">28%</p>
-                <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300 mt-0.5">Meta & Instagram Ads</p>
-              </div>
-              <div className="p-3.5 rounded-xl bg-purple-50 dark:bg-purple-500/10 border border-purple-100 dark:border-purple-500/20">
-                <p className="text-xl font-black text-[#7C3AED]">16%</p>
-                <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300 mt-0.5">Direct & WhatsApp Links</p>
-              </div>
-              <div className="p-3.5 rounded-xl bg-orange-50 dark:bg-orange-500/10 border border-orange-100 dark:border-orange-500/20">
-                <p className="text-xl font-black text-[#EA580C]">10%</p>
-                <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300 mt-0.5">LinkedIn & Referrals</p>
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Conversion Funnel */}
           <div className="p-6 rounded-2xl bg-white dark:bg-[#0D1224] border border-slate-200 dark:border-white/10 shadow-sm space-y-4">
             <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-[#6C4CFF]" /> Full Funnel Conversion Velocity
+              <TrendingUp className="w-4 h-4 text-[#6C4CFF]" /> Funnel Conversion Summary
             </h3>
 
             <div className="space-y-3">
               {[
-                { stage: '1. Website Impressions & Visits', count: '100%', val: '248 sessions' },
-                { stage: '2. High-Intent Actions (Modal / ROI Calculator)', count: '42%', val: '104 actions' },
-                { stage: '3. Lead Form Submissions', count: '4.2%', val: `${totalLeadsCount} qualified leads` },
-                { stage: '4. WhatsApp Conversations Initiated', count: '3.1%', val: '8 conversations' },
-                { stage: '5. Retainer / Project Closed', count: '1.2%', val: `${convertedLeadsCount} deals closed` }
+                { stage: '1. Total Website Visitors', count: `${visitors.length} sessions`, pct: '100%' },
+                { stage: '2. High-Intent Actions Logged', count: `${visitors.reduce((acc, v) => acc + (v.actions?.length || 0), 0)} actions`, pct: visitors.length > 0 ? `${Math.min(100, Math.round((visitors.filter(v => (v.actions?.length || 0) > 1).length / visitors.length) * 100))}%` : '0%' },
+                { stage: '3. Inbound Leads Captured', count: `${totalLeadsCount} leads`, pct: conversionRate + '%' },
+                { stage: '4. Converted / Onboarded', count: `${convertedLeadsCount} deals`, pct: totalLeadsCount > 0 ? `${((convertedLeadsCount / totalLeadsCount) * 100).toFixed(1)}%` : '0.0%' }
               ].map((f, i) => (
                 <div key={i} className="p-2.5 rounded-xl bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/5 flex items-center justify-between text-xs">
                   <span className="font-bold text-slate-700 dark:text-slate-300">{f.stage}</span>
                   <div className="text-right">
                     <span className="font-black text-[#2563FF] mr-2">{f.count}</span>
-                    <span className="text-[10px] text-slate-400">({f.val})</span>
+                    <span className="text-[10px] text-slate-400">({f.pct})</span>
                   </div>
                 </div>
               ))}

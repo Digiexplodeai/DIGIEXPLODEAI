@@ -121,6 +121,21 @@ export default {
       return json({ status: 'ok', timestamp: new Date().toISOString(), db: 'D1' }, 200, cors);
     }
 
+    // 2a. Geo IP lookup endpoint (Public Cloudflare Edge Telemetry)
+    if (resource === 'geo') {
+      const cf = (request as any).cf || {};
+      const city = cf.city || request.headers.get('cf-ipcity') || '';
+      const region = cf.region || request.headers.get('cf-region') || '';
+      const country = cf.country || request.headers.get('cf-ipcountry') || 'India';
+      return json({
+        city,
+        region,
+        country,
+        formatted: city ? (region ? `${city}, ${region}` : city) : 'India',
+        ip: request.headers.get('cf-connecting-ip') ? 'detected' : 'local'
+      }, 200, cors);
+    }
+
     // 2b. Public Password Recovery & OTP endpoints (Zero-Trust Verified)
     if (resource === 'auth') {
       const action = parts[1]; // e.g. 'recovery'
@@ -1262,7 +1277,7 @@ export default {
             const { results } = await env.DB.prepare(`
               SELECT * FROM visitorSessions
               ORDER BY lastActiveAt DESC
-              LIMIT 50
+              LIMIT 60
             `).all();
             return json(results, 200, cors);
           }
@@ -1271,6 +1286,33 @@ export default {
             const now = new Date().toISOString();
             const visId = body.id || `vis_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
             const actionsStr = Array.isArray(body.actions) ? JSON.stringify(body.actions) : (body.actions || '[]');
+
+            // Extract real visitor IP and Geo attribution from Cloudflare edge
+            const cf = (request as any).cf || {};
+            const cfCity = cf.city || request.headers.get('cf-ipcity') || '';
+            const cfRegion = cf.region || request.headers.get('cf-region') || '';
+            const cfCountry = cf.country || request.headers.get('cf-ipcountry') || body.country || 'India';
+
+            let detectedCity = body.city || '';
+            if (cfCity) {
+              detectedCity = cfRegion ? `${cfCity}, ${cfRegion}` : cfCity;
+            }
+            if (!detectedCity || detectedCity === 'Unknown') {
+              detectedCity = 'India';
+            }
+
+            const connectingIp = request.headers.get('cf-connecting-ip') || request.headers.get('x-real-ip') || request.headers.get('x-forwarded-for') || '';
+            let maskedIp = body.ipHash || 'Visitor';
+            if (connectingIp) {
+              const firstIp = connectingIp.split(',')[0].trim();
+              if (firstIp.includes('.')) {
+                const p = firstIp.split('.');
+                maskedIp = p.length === 4 ? `${p[0]}.${p[1]}.${p[2]}.***` : firstIp;
+              } else if (firstIp.includes(':')) {
+                maskedIp = firstIp.split(':').slice(0, 3).join(':') + ':****';
+              }
+            }
+
             await env.DB.prepare(`
               INSERT INTO visitorSessions (id, ipHash, city, country, currentPage, referrer, device, browser, durationSeconds, status, actions, firstSeenAt, lastActiveAt)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1279,14 +1321,17 @@ export default {
                 durationSeconds=excluded.durationSeconds,
                 status=excluded.status,
                 actions=excluded.actions,
-                lastActiveAt=excluded.lastActiveAt
+                lastActiveAt=excluded.lastActiveAt,
+                city=CASE WHEN excluded.city != '' AND excluded.city != 'India' THEN excluded.city ELSE visitorSessions.city END,
+                country=CASE WHEN excluded.country != '' THEN excluded.country ELSE visitorSessions.country END,
+                ipHash=CASE WHEN excluded.ipHash != '' AND excluded.ipHash != 'Visitor' THEN excluded.ipHash ELSE visitorSessions.ipHash END
             `).bind(
               visId,
-              body.ipHash || '',
-              body.city || '',
-              body.country || 'India',
+              maskedIp,
+              detectedCity,
+              cfCountry,
               body.currentPage || '/',
-              body.referrer || '',
+              body.referrer || 'Direct Visit',
               body.device || 'Desktop',
               body.browser || 'Chrome',
               body.durationSeconds || 0,
@@ -1295,7 +1340,7 @@ export default {
               body.firstSeenAt || now,
               now
             ).run();
-            return json({ success: true, id: visId }, 200, cors);
+            return json({ success: true, id: visId, detectedCity, detectedCountry: cfCountry, ipHash: maskedIp }, 200, cors);
           }
           break;
         }

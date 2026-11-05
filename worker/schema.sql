@@ -231,6 +231,44 @@ CREATE TABLE IF NOT EXISTS system_settings (
   updatedAt    TEXT NOT NULL
 );
 
+-- 14. INBOUND LEADS (Marketing Command Center)
+CREATE TABLE IF NOT EXISTS leads (
+  id             TEXT PRIMARY KEY,
+  name           TEXT NOT NULL,
+  location       TEXT DEFAULT '',
+  email          TEXT DEFAULT '',
+  contact        TEXT DEFAULT '',
+  sourcePage     TEXT DEFAULT '/',
+  interest       TEXT DEFAULT '',
+  status         TEXT DEFAULT 'new',
+  notes          TEXT DEFAULT '',
+  device         TEXT DEFAULT '',
+  referrer       TEXT DEFAULT '',
+  estimatedValue TEXT DEFAULT '',
+  createdAt      TEXT NOT NULL,
+  updatedAt      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
+CREATE INDEX IF NOT EXISTS idx_leads_createdAt ON leads(createdAt);
+
+-- 15. VISITOR SESSIONS (Live Website Traffic Telemetry)
+CREATE TABLE IF NOT EXISTS visitorSessions (
+  id              TEXT PRIMARY KEY,
+  ipHash          TEXT DEFAULT '',
+  city            TEXT DEFAULT '',
+  country         TEXT DEFAULT 'India',
+  currentPage     TEXT DEFAULT '/',
+  referrer        TEXT DEFAULT '',
+  device          TEXT DEFAULT 'Desktop',
+  browser         TEXT DEFAULT 'Chrome',
+  durationSeconds INTEGER DEFAULT 0,
+  status          TEXT DEFAULT 'active',
+  actions         TEXT DEFAULT '[]',
+  firstSeenAt     TEXT NOT NULL,
+  lastActiveAt    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_visitors_status ON visitorSessions(status);
+
 -- Initial Clients
 INSERT OR IGNORE INTO clients (clientId, clientName, businessName, category, contactPerson, phone, email, package, startDate, status, createdAt, updatedAt)
 VALUES 

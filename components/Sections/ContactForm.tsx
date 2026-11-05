@@ -3,6 +3,8 @@ import { ArrowRight, CheckCircle2, Loader2, Sparkles, MessageSquare, Mail, Phone
 import { siteConfig } from '../../config/site';
 import ScrollReveal from '../UI/ScrollReveal';
 import ContactEchoScene from '../3D/ContactEchoScene';
+import { createInboundLead } from '../../lib/marketingLeads';
+import { logVisitorAction } from '../../lib/marketingTracker';
 
 const ContactForm: React.FC = () => {
   const nameId = useId();
@@ -35,22 +37,34 @@ const ContactForm: React.FC = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validate() || formState === 'loading') return;
 
     setFormState('loading');
-    setTimeout(() => {
-      setFormState('success');
-      setFormData({
-        name: '',
-        email: '',
-        service: 'Performance Marketing (Meta / Google)',
-        budget: '₹50,000 - ₹2,00,000 / month',
-        message: '',
+    try {
+      await createInboundLead({
+        name: formData.name,
+        location: 'Contact Page Inquiry',
+        email: formData.email,
+        sourcePage: '/contact',
+        interest: `${formData.service} (${formData.budget})`,
+        notes: formData.message,
       });
-      setErrors({});
-    }, 1200);
+      logVisitorAction(`Submitted Contact Form: ${formData.name}`);
+    } catch (err) {
+      console.warn('Contact lead capture notice:', err);
+    }
+
+    setFormState('success');
+    setFormData({
+      name: '',
+      email: '',
+      service: 'Performance Marketing (Meta / Google)',
+      budget: '₹50,000 - ₹2,00,000 / month',
+      message: '',
+    });
+    setErrors({});
   };
 
   if (formState === 'success') {

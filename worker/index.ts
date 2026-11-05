@@ -246,6 +246,16 @@ export default {
         employeeId: canonicalRole === 'employee' ? (agencyUserId || undefined) : undefined,
         clientId: canonicalRole === 'client' ? (agencyClientId || undefined) : undefined,
       };
+    } else if ((resource === 'leads' || resource === 'visitors') && method === 'POST') {
+      user = {
+        uid: 'public_lead_capture',
+        email: 'visitor@digiexplodeai.com',
+        role: 'employee',
+        isProvisioned: true,
+        status: 'active',
+        isAnonymous: true,
+        tokenClaims: {},
+      };
     } else {
       const token = extractBearerToken(request);
       if (!token) {
@@ -1155,6 +1165,137 @@ export default {
               }
               return json({ success: true, updatedAt: now }, 200, cors);
             }
+          }
+          break;
+        }
+
+        // ── INBOUND LEADS (Marketing Command Center) ─────────────────
+        case 'leads': {
+          if (method === 'GET' && !id) {
+            const status = url.searchParams.get('status');
+            let q = 'SELECT * FROM leads WHERE 1=1';
+            const binds: any[] = [];
+            if (status && status !== 'all') {
+              q += ' AND status = ?';
+              binds.push(status);
+            }
+            q += ' ORDER BY createdAt DESC';
+            const { results } = await env.DB.prepare(q).bind(...binds).all();
+            return json(results, 200, cors);
+          }
+
+          if (method === 'GET' && id) {
+            const row: any = await env.DB.prepare('SELECT * FROM leads WHERE id = ?').bind(id).first();
+            if (!row) return notFound('Lead not found', cors);
+            return json(row, 200, cors);
+          }
+
+          if (method === 'POST') {
+            const now = new Date().toISOString();
+            const leadId = body.id || `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            await env.DB.prepare(`
+              INSERT INTO leads (id, name, location, email, contact, sourcePage, interest, status, notes, device, referrer, estimatedValue, createdAt, updatedAt)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(id) DO UPDATE SET
+                name=excluded.name, location=excluded.location, email=excluded.email,
+                contact=excluded.contact, sourcePage=excluded.sourcePage, interest=excluded.interest,
+                status=excluded.status, notes=excluded.notes, device=excluded.device,
+                referrer=excluded.referrer, estimatedValue=excluded.estimatedValue, updatedAt=excluded.updatedAt
+            `).bind(
+              leadId,
+              body.name || '',
+              body.location || '',
+              body.email || '',
+              body.contact || '',
+              body.sourcePage || '/',
+              body.interest || '',
+              body.status || 'new',
+              body.notes || '',
+              body.device || '',
+              body.referrer || '',
+              body.estimatedValue || '',
+              now,
+              now
+            ).run();
+            return json({ id: leadId, ...body, createdAt: now, updatedAt: now }, 201, cors);
+          }
+
+          if (method === 'PUT' && id) {
+            const existing: any = await env.DB.prepare('SELECT * FROM leads WHERE id = ?').bind(id).first();
+            if (!existing) return notFound('Lead not found', cors);
+
+            const now = new Date().toISOString();
+            await env.DB.prepare(`
+              UPDATE leads SET
+                name = ?, location = ?, email = ?, contact = ?, sourcePage = ?,
+                interest = ?, status = ?, notes = ?, device = ?, referrer = ?,
+                estimatedValue = ?, updatedAt = ?
+              WHERE id = ?
+            `).bind(
+              body.name !== undefined ? body.name : existing.name,
+              body.location !== undefined ? body.location : existing.location,
+              body.email !== undefined ? body.email : existing.email,
+              body.contact !== undefined ? body.contact : existing.contact,
+              body.sourcePage !== undefined ? body.sourcePage : existing.sourcePage,
+              body.interest !== undefined ? body.interest : existing.interest,
+              body.status !== undefined ? body.status : existing.status,
+              body.notes !== undefined ? body.notes : existing.notes,
+              body.device !== undefined ? body.device : existing.device,
+              body.referrer !== undefined ? body.referrer : existing.referrer,
+              body.estimatedValue !== undefined ? body.estimatedValue : existing.estimatedValue,
+              now,
+              id
+            ).run();
+            return json({ success: true, id, updatedAt: now }, 200, cors);
+          }
+
+          if (method === 'DELETE' && id) {
+            await env.DB.prepare('DELETE FROM leads WHERE id = ?').bind(id).run();
+            return json({ success: true, id }, 200, cors);
+          }
+          break;
+        }
+
+        // ── VISITOR SESSIONS (Live Website Traffic Telemetry) ─────────
+        case 'visitors': {
+          if (method === 'GET') {
+            const { results } = await env.DB.prepare(`
+              SELECT * FROM visitorSessions
+              ORDER BY lastActiveAt DESC
+              LIMIT 50
+            `).all();
+            return json(results, 200, cors);
+          }
+
+          if (method === 'POST') {
+            const now = new Date().toISOString();
+            const visId = body.id || `vis_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            const actionsStr = Array.isArray(body.actions) ? JSON.stringify(body.actions) : (body.actions || '[]');
+            await env.DB.prepare(`
+              INSERT INTO visitorSessions (id, ipHash, city, country, currentPage, referrer, device, browser, durationSeconds, status, actions, firstSeenAt, lastActiveAt)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT(id) DO UPDATE SET
+                currentPage=excluded.currentPage,
+                durationSeconds=excluded.durationSeconds,
+                status=excluded.status,
+                actions=excluded.actions,
+                lastActiveAt=excluded.lastActiveAt
+            `).bind(
+              visId,
+              body.ipHash || '',
+              body.city || '',
+              body.country || 'India',
+              body.currentPage || '/',
+              body.referrer || '',
+              body.device || 'Desktop',
+              body.browser || 'Chrome',
+              body.durationSeconds || 0,
+              body.status || 'active',
+              actionsStr,
+              body.firstSeenAt || now,
+              now
+            ).run();
+            return json({ success: true, id: visId }, 200, cors);
           }
           break;
         }

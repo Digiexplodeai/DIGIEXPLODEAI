@@ -40,18 +40,20 @@ import {
   updateLeadNotes,
   deleteInboundLead,
   createInboundLead,
-  exportLeadsToCsv
+  exportLeadsToCsv,
+  subscribeToCanonicalLeads
 } from '../../lib/marketingLeads';
 import {
   VisitorSession,
   getVisitorSessions,
+  subscribeToCanonicalVisitors,
   trackPageView
 } from '../../lib/marketingTracker';
 
 export const MarketingDashboardView: React.FC = () => {
   const [activeSubTab, setActiveSubTab] = useState<'leads' | 'visitors' | 'analytics'>('leads');
-  const [leads, setLeads] = useState<InboundLead[]>([]);
-  const [visitors, setVisitors] = useState<VisitorSession[]>([]);
+  const [leads, setLeads] = useState<InboundLead[]>(() => getInboundLeads());
+  const [visitors, setVisitors] = useState<VisitorSession[]>(() => getVisitorSessions());
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [pageFilter, setPageFilter] = useState<string>('all');
@@ -69,14 +71,15 @@ export const MarketingDashboardView: React.FC = () => {
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [noteText, setNoteText] = useState('');
 
-  // Load and subscribe to updates
-  const loadData = () => {
-    setLeads(getInboundLeads());
-    setVisitors(getVisitorSessions());
-  };
-
+  // Real-time subscription to Cloudflare D1
   useEffect(() => {
-    loadData();
+    const unsubLeads = subscribeToCanonicalLeads((updatedLeads) => {
+      setLeads(updatedLeads);
+    });
+
+    const unsubVisitors = subscribeToCanonicalVisitors((updatedVisitors) => {
+      setVisitors(updatedVisitors);
+    });
 
     const handleLeadsUpdate = () => setLeads(getInboundLeads());
     const handleVisitorEvent = () => setVisitors(getVisitorSessions());
@@ -85,18 +88,19 @@ export const MarketingDashboardView: React.FC = () => {
     window.addEventListener('digiexplode_leads_updated', handleLeadsUpdate);
     window.addEventListener('digiexplode_visitor_event', handleVisitorEvent);
 
-    // Live heartbeat: refresh visitor activity every 10 seconds
-    const interval = setInterval(() => {
-      setVisitors(getVisitorSessions());
-    }, 10000);
-
     return () => {
+      unsubLeads();
+      unsubVisitors();
       window.removeEventListener('digiexplode_new_lead', handleLeadsUpdate);
       window.removeEventListener('digiexplode_leads_updated', handleLeadsUpdate);
       window.removeEventListener('digiexplode_visitor_event', handleVisitorEvent);
-      clearInterval(interval);
     };
   }, []);
+
+  const loadData = () => {
+    setLeads(getInboundLeads());
+    setVisitors(getVisitorSessions());
+  };
 
   // Filtered Leads
   const filteredLeads = useMemo(() => {
@@ -116,12 +120,28 @@ export const MarketingDashboardView: React.FC = () => {
     });
   }, [leads, statusFilter, pageFilter, searchQuery]);
 
-  // Key KPI stats
+  // Key KPI stats based on real data
   const totalLeadsCount = leads.length;
   const newLeadsCount = leads.filter(l => l.status === 'new').length;
   const convertedLeadsCount = leads.filter(l => l.status === 'converted').length;
-  const activeVisitorsCount = visitors.filter(v => v.status === 'active').length + 8; // Dynamic floor for realism
-  const conversionRate = totalLeadsCount > 0 ? ((totalLeadsCount / (visitors.length * 4 + 40)) * 100).toFixed(1) : '3.8';
+  const activeVisitorsCount = visitors.filter(v => v.status === 'active').length;
+  const conversionRate = (visitors.length > 0 && totalLeadsCount > 0)
+    ? Math.min(100, (totalLeadsCount / visitors.length) * 100).toFixed(1)
+    : '0.0';
+
+  // Dynamic Pipeline Value calculated from real leads
+  const pipelineValueFormatted = useMemo(() => {
+    let sum = 0;
+    for (const l of leads) {
+      if (l.status === 'lost') continue;
+      const match = (l.estimatedValue || '').replace(/[^\d.]/g, '');
+      const parsed = parseFloat(match);
+      if (!isNaN(parsed) && parsed > 0) sum += parsed;
+    }
+    if (sum === 0) return '₹0';
+    if (sum >= 100000) return `₹${(sum / 100000).toFixed(2)}L`;
+    return `₹${sum.toLocaleString('en-IN')}`;
+  }, [leads]);
 
   const handleCreateManualLead = (e: React.FormEvent) => {
     e.preventDefault();
@@ -269,8 +289,8 @@ export const MarketingDashboardView: React.FC = () => {
             <p className="text-2xl sm:text-3xl font-black text-[#2563FF]">
               {conversionRate}%
             </p>
-            <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-500/10 px-1.5 py-0.5 rounded">
-              +1.8% vs avg
+            <span className="text-[10px] font-bold text-slate-400">
+              {visitors.length} visits
             </span>
           </div>
           <p className="text-[10px] text-slate-400 mt-1">Visitors to Qualified Inquiries</p>
@@ -284,7 +304,7 @@ export const MarketingDashboardView: React.FC = () => {
           </div>
           <div className="flex items-baseline gap-2">
             <p className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">
-              ₹4.95L
+              {pipelineValueFormatted}
             </p>
             <span className="text-[10px] font-bold text-[#EA580C]">
               Active Leads

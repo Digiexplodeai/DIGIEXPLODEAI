@@ -1,7 +1,12 @@
 /**
  * DigiExplodeAI — Website Visitor Telemetry & Traffic Tracker
+ * Database Backend: Cloudflare D1 (via Cloudflare Worker API)
+ *
  * Real-time monitoring of live visitors, page journeys, device analytics, and geo attribution.
+ * All fake/mock sessions removed. Real visitor traffic is tracked and synced to Cloudflare D1.
  */
+
+import { cfGetVisitorSessions, cfTrackVisitorSession } from './cloudflareApi';
 
 export interface VisitorSession {
   id: string;
@@ -20,136 +25,72 @@ export interface VisitorSession {
 }
 
 const VISITOR_ID_KEY = 'digiexplode_visitor_id';
-const VISITOR_SESSIONS_KEY = 'digiexplode_visitor_sessions_v1';
+const VISITOR_SESSIONS_KEY = 'digiexplode_visitor_sessions_v2';
+const LEGACY_SESSIONS_KEY = 'digiexplode_visitor_sessions_v1';
 
-// Seed sessions representing genuine high-value regional traffic
-const SEED_SESSIONS: VisitorSession[] = [
-  {
-    id: 'vis_delhi_801',
-    ipHash: '103.211.204.***',
-    city: 'New Delhi',
-    country: 'India',
-    currentPage: '/doctors',
-    referrer: 'Google Ads ("doctor digital marketing delhi")',
-    device: 'Mobile',
-    browser: 'Safari',
-    firstSeenAt: new Date(Date.now() - 1000 * 60 * 4).toISOString(),
-    lastActiveAt: new Date(Date.now() - 1000 * 15).toISOString(),
-    durationSeconds: 225,
-    status: 'active',
-    actions: ['Arrived on /doctors', 'Viewed Ortho Blueprint', 'Tested ROI Calculator']
-  },
-  {
-    id: 'vis_chd_802',
-    ipHash: '49.36.142.***',
-    city: 'Chandigarh',
-    country: 'India',
-    currentPage: '/',
-    referrer: 'Direct Visit',
-    device: 'Desktop',
-    browser: 'Chrome',
-    firstSeenAt: new Date(Date.now() - 1000 * 60 * 8).toISOString(),
-    lastActiveAt: new Date(Date.now() - 1000 * 45).toISOString(),
-    durationSeconds: 435,
-    status: 'active',
-    actions: ['Landed on Homepage', 'Opened Lead Capture Popup', 'Filled Form']
-  },
-  {
-    id: 'vis_mohali_803',
-    ipHash: '117.247.78.***',
-    city: 'Mohali',
-    country: 'India',
-    currentPage: '/mohali',
-    referrer: 'Google Organic ("best digital marketing company mohali")',
-    device: 'Mobile',
-    browser: 'Chrome',
-    firstSeenAt: new Date(Date.now() - 1000 * 60 * 12).toISOString(),
-    lastActiveAt: new Date(Date.now() - 1000 * 120).toISOString(),
-    durationSeconds: 580,
-    status: 'active',
-    actions: ['Viewed Mohali SEO Page', 'Clicked WhatsApp consultation']
-  },
-  {
-    id: 'vis_gurugram_804',
-    ipHash: '182.73.19.***',
-    city: 'Gurugram',
-    country: 'India',
-    currentPage: '/projects',
-    referrer: 'LinkedIn Organic',
-    device: 'Desktop',
-    browser: 'Edge',
-    firstSeenAt: new Date(Date.now() - 1000 * 60 * 22).toISOString(),
-    lastActiveAt: new Date(Date.now() - 1000 * 60 * 3).toISOString(),
-    durationSeconds: 840,
-    status: 'idle',
-    actions: ['Viewed Case Studies', 'Inspected Tech Stack', 'Viewed Contact Page']
-  },
-  {
-    id: 'vis_ludhiana_805',
-    ipHash: '122.161.49.***',
-    city: 'Ludhiana',
-    country: 'India',
-    currentPage: '/ludhiana',
-    referrer: 'Meta Ads (Instagram)',
-    device: 'Mobile',
-    browser: 'Chrome',
-    firstSeenAt: new Date(Date.now() - 1000 * 60 * 35).toISOString(),
-    lastActiveAt: new Date(Date.now() - 1000 * 60 * 10).toISOString(),
-    durationSeconds: 310,
-    status: 'idle',
-    actions: ['Landed via Instagram', 'Scrolled to Testimonials']
-  },
-  {
-    id: 'vis_mumbai_806',
-    ipHash: '115.112.98.***',
-    city: 'Mumbai',
-    country: 'India',
-    currentPage: '/doctors',
-    referrer: 'Google Search ("clinic patient acquisition")',
-    device: 'Desktop',
-    browser: 'Chrome',
-    firstSeenAt: new Date(Date.now() - 1000 * 60 * 50).toISOString(),
-    lastActiveAt: new Date(Date.now() - 1000 * 60 * 18).toISOString(),
-    durationSeconds: 920,
-    status: 'ended',
-    actions: ['Explored Dermatology Funnel', 'Calculated OPD Growth']
-  },
-  {
-    id: 'vis_bengaluru_807',
-    ipHash: '106.51.72.***',
-    city: 'Bengaluru',
-    country: 'India',
-    currentPage: '/about',
-    referrer: 'Twitter / X',
-    device: 'Desktop',
-    browser: 'Firefox',
-    firstSeenAt: new Date(Date.now() - 1000 * 60 * 65).toISOString(),
-    lastActiveAt: new Date(Date.now() - 1000 * 60 * 32).toISOString(),
-    durationSeconds: 410,
-    status: 'ended',
-    actions: ['Viewed Agency Leadership', 'Explored Tech Infrastructure']
+// Clear out legacy fake sessions (vis_delhi_801, vis_chd_802, etc.)
+if (typeof window !== 'undefined') {
+  try {
+    localStorage.removeItem(LEGACY_SESSIONS_KEY);
+  } catch {}
+}
+
+let memorySessions: VisitorSession[] = [];
+
+export function normalizeSessionModel(raw: any): VisitorSession {
+  let actionsArr: string[] = [];
+  if (Array.isArray(raw.actions)) {
+    actionsArr = raw.actions;
+  } else if (typeof raw.actions === 'string') {
+    try {
+      actionsArr = JSON.parse(raw.actions);
+    } catch {
+      actionsArr = [raw.actions];
+    }
   }
-];
+
+  return {
+    id: raw.id || `vis_${Date.now()}`,
+    ipHash: raw.ipHash || '103.***.***.***',
+    city: raw.city || 'India',
+    country: raw.country || 'India',
+    currentPage: raw.currentPage || '/',
+    referrer: raw.referrer || 'Direct Visit',
+    device: raw.device || 'Desktop',
+    browser: raw.browser || 'Chrome',
+    firstSeenAt: raw.firstSeenAt || new Date().toISOString(),
+    lastActiveAt: raw.lastActiveAt || new Date().toISOString(),
+    durationSeconds: Number(raw.durationSeconds) || 0,
+    status: raw.status || 'active',
+    actions: Array.isArray(actionsArr) ? actionsArr : [],
+  };
+}
 
 export function getVisitorSessions(): VisitorSession[] {
+  if (typeof window === 'undefined') return memorySessions;
   try {
     const raw = localStorage.getItem(VISITOR_SESSIONS_KEY);
-    if (!raw) {
-      localStorage.setItem(VISITOR_SESSIONS_KEY, JSON.stringify(SEED_SESSIONS));
-      return SEED_SESSIONS;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const real = parsed.filter(s => !String(s.id).startsWith('vis_delhi_') && !String(s.id).startsWith('vis_chd_'));
+        return real.map(normalizeSessionModel);
+      }
     }
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : SEED_SESSIONS;
   } catch (e) {
-    return SEED_SESSIONS;
+    console.warn('[marketingTracker] Failed to read sessions:', e);
   }
+  return memorySessions;
 }
 
 export function saveVisitorSessions(sessions: VisitorSession[]): void {
+  const normalized = sessions.map(normalizeSessionModel);
+  memorySessions = [...normalized];
+  if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(VISITOR_SESSIONS_KEY, JSON.stringify(sessions));
+    localStorage.setItem(VISITOR_SESSIONS_KEY, JSON.stringify(normalized));
   } catch (e) {
-    console.warn('[marketingTracker] Error saving sessions:', e);
+    console.warn('[marketingTracker] Failed to save sessions:', e);
   }
 }
 
@@ -181,11 +122,9 @@ export function trackPageView(pathname: string): void {
   else if (userAgent.includes('Firefox')) browser = 'Firefox';
 
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Kolkata';
-  let city = 'Chandigarh';
-  if (tz.includes('Calcutta') || tz.includes('Kolkata')) {
-    const regionalCities = ['Chandigarh', 'New Delhi', 'Mohali', 'Gurugram', 'Panchkula', 'Ludhiana', 'Mumbai'];
-    city = regionalCities[Math.floor(Math.random() * regionalCities.length)];
-  } else if (tz.includes('London')) city = 'London';
+  let city = 'Delhi NCR';
+  if (tz.includes('Calcutta') || tz.includes('Kolkata')) city = 'India';
+  else if (tz.includes('London')) city = 'London';
   else if (tz.includes('New_York')) city = 'New York';
   else if (tz.includes('Dubai')) city = 'Dubai';
 
@@ -193,11 +132,12 @@ export function trackPageView(pathname: string): void {
   const existingIndex = sessions.findIndex(s => s.id === vid);
 
   const actionName = `Navigated to ${pathname}`;
+  let targetSession: VisitorSession;
 
   if (existingIndex >= 0) {
     const existing = sessions[existingIndex];
     const duration = Math.max(10, Math.round((Date.now() - new Date(existing.firstSeenAt).getTime()) / 1000));
-    sessions[existingIndex] = {
+    targetSession = {
       ...existing,
       currentPage: pathname,
       lastActiveAt: new Date().toISOString(),
@@ -205,10 +145,11 @@ export function trackPageView(pathname: string): void {
       status: 'active',
       actions: existing.actions.includes(actionName) ? existing.actions : [...existing.actions, actionName]
     };
+    sessions[existingIndex] = targetSession;
   } else {
-    const newSession: VisitorSession = {
+    targetSession = {
       id: vid,
-      ipHash: `103.${Math.floor(Math.random() * 200 + 50)}.${Math.floor(Math.random() * 200 + 10)}.***`,
+      ipHash: 'Visitor',
       city,
       country: 'India',
       currentPage: pathname,
@@ -221,12 +162,14 @@ export function trackPageView(pathname: string): void {
       status: 'active',
       actions: [`Entered site via ${pathname}`]
     };
-    sessions.unshift(newSession);
+    sessions.unshift(targetSession);
   }
 
-  // Cap sessions at 50 to avoid storage overflow
   const trimmed = sessions.slice(0, 50);
   saveVisitorSessions(trimmed);
+
+  // Sync session heartbeat to Cloudflare D1
+  cfTrackVisitorSession(targetSession).catch(() => {});
 
   window.dispatchEvent(new CustomEvent('digiexplode_visitor_event', { detail: { vid, pathname } }));
 }
@@ -244,13 +187,48 @@ export function logVisitorAction(actionText: string): void {
   if (index >= 0) {
     const s = sessions[index];
     if (!s.actions.includes(actionText)) {
-      sessions[index] = {
+      const updatedSession: VisitorSession = {
         ...s,
         lastActiveAt: new Date().toISOString(),
         actions: [...s.actions, actionText]
       };
+      sessions[index] = updatedSession;
       saveVisitorSessions(sessions);
+      cfTrackVisitorSession(updatedSession).catch(() => {});
       window.dispatchEvent(new CustomEvent('digiexplode_visitor_event'));
     }
   }
+}
+
+/**
+ * Subscribes to canonical visitor sessions from Cloudflare D1
+ */
+export function subscribeToCanonicalVisitors(
+  onUpdate: (sessions: VisitorSession[]) => void
+): () => void {
+  let cancelled = false;
+
+  onUpdate(getVisitorSessions());
+
+  const syncWithD1 = async () => {
+    if (cancelled) return;
+    try {
+      const remoteSessions = await cfGetVisitorSessions();
+      if (!Array.isArray(remoteSessions) || cancelled) return;
+      const normalized = remoteSessions.map(normalizeSessionModel);
+      saveVisitorSessions(normalized);
+      if (!cancelled) onUpdate(normalized);
+    } catch (err) {
+      console.warn('[marketingTracker] D1 visitors sync notice:', err);
+    }
+  };
+
+  syncWithD1();
+
+  const interval = setInterval(syncWithD1, 10000);
+
+  return () => {
+    cancelled = true;
+    clearInterval(interval);
+  };
 }

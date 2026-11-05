@@ -312,6 +312,24 @@ export const cfResetPasswordWithToken = (resetAuthToken: string, newPassword: st
     body: JSON.stringify({ resetAuthToken, newPassword }),
   });
 
+// ── INBOUND LEADS & MARKETING ────────────────────────────────────────────────
+
+export const cfGetLeads = (status?: string) =>
+  apiFetch(`/leads${status && status !== 'all' ? `?status=${encodeURIComponent(status)}` : ''}`);
+export const cfGetLead = (id: string) => apiFetch(`/leads/${id}`);
+export const cfCreateLead = (data: any) =>
+  apiFetch('/leads', { method: 'POST', body: JSON.stringify(data) });
+export const cfUpdateLead = (id: string, data: any) =>
+  apiFetch(`/leads/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+export const cfDeleteLead = (id: string) =>
+  apiFetch(`/leads/${id}`, { method: 'DELETE' });
+
+// ── VISITOR SESSIONS ──────────────────────────────────────────────────────────
+
+export const cfGetVisitorSessions = () => apiFetch('/visitors');
+export const cfTrackVisitorSession = (data: any) =>
+  apiFetch('/visitors', { method: 'POST', body: JSON.stringify(data) });
+
 /**
  * Subscribe-like helper for components using polling instead of Firestore onSnapshot.
  * Returns an unsubscribe function (clears the interval).

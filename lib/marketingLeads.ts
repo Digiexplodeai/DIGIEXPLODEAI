@@ -1,7 +1,17 @@
 /**
  * DigiExplodeAI — Inbound Marketing Leads Service
- * Stores, manages, and syncs inbound prospect leads captured via website modals and forms.
+ * Database Backend: Cloudflare D1 (via Cloudflare Worker API)
+ * Local Cache: localStorage (optimistic layer for 0ms UI updates)
+ *
+ * All fake/mock leads have been removed. Cloudflare D1 is the authoritative source.
  */
+
+import {
+  cfGetLeads,
+  cfCreateLead,
+  cfUpdateLead,
+  cfDeleteLead
+} from './cloudflareApi';
 
 export interface InboundLead {
   id: string;
@@ -17,113 +27,76 @@ export interface InboundLead {
   device?: string;
   referrer?: string;
   estimatedValue?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
-const STORAGE_KEY = 'digiexplode_inbound_leads_v1';
+const STORAGE_KEY = 'digiexplode_inbound_leads_v2';
+const LEGACY_STORAGE_KEY = 'digiexplode_inbound_leads_v1';
 
-// Initial realistic seed data so admin panel is immediately functional & populated
-const INITIAL_LEADS: InboundLead[] = [
-  {
-    id: 'lead_101',
-    name: 'Dr. Ananya Sharma',
-    location: 'Delhi NCR',
-    email: 'dr.ananya.derma@gmail.com',
-    contact: '+91 98112 45890',
-    sourcePage: '/doctors',
-    interest: 'Dermatology & Hair Clinic Growth (OPD Expansion)',
-    status: 'new',
-    timestamp: new Date(Date.now() - 1000 * 60 * 25).toISOString(), // 25 mins ago
-    notes: 'Interested in Google Ads for PRP & Hair Transplant. Clinic in South Extension.',
-    device: 'Mobile (iPhone 15)',
-    referrer: 'Google Search ("doctor marketing agency delhi")',
-    estimatedValue: '₹60,000 / mo'
-  },
-  {
-    id: 'lead_102',
-    name: 'Vikramaditya Rathore',
-    location: 'Chandigarh',
-    email: 'vikram.rathore@rathorelogistics.in',
-    contact: '+91 87250 11928',
-    sourcePage: '/',
-    interest: 'Full Brand Redesign & Custom Web Portal',
-    status: 'contacted',
-    timestamp: new Date(Date.now() - 1000 * 60 * 140).toISOString(), // 2.3 hrs ago
-    notes: 'Spoke on call. Sent corporate portfolio. Follow-up meeting tomorrow at 3 PM.',
-    device: 'Desktop (macOS / Chrome)',
-    referrer: 'Direct Visit',
-    estimatedValue: '₹1,50,000'
-  },
-  {
-    id: 'lead_103',
-    name: 'Dr. Mohit Verma',
-    location: 'Mohali, Punjab',
-    email: 'mohit.verma.ortho@yahoo.com',
-    contact: '+91 98721 34991',
-    sourcePage: '/doctors',
-    interest: 'Joint Replacement Surgical Inquiries & Google Maps Top-3',
-    status: 'in_discussion',
-    timestamp: new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString(), // 5 hrs ago
-    notes: 'Wants to dominate Sector 70 & Kharar radius. Audit report shared over WhatsApp.',
-    device: 'Mobile (Samsung Galaxy S24)',
-    referrer: 'Meta Ads (Instagram Reel)',
-    estimatedValue: '₹75,000 / mo'
-  },
-  {
-    id: 'lead_104',
-    name: 'Simran Kaur Sandhu',
-    location: 'Ludhiana',
-    email: 'simran@zoyafashions.com',
-    contact: '+91 98155 77210',
-    sourcePage: '/projects',
-    interest: 'E-commerce Performance Marketing (ROAS scaling)',
-    status: 'converted',
-    timestamp: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(), // 1 day ago
-    notes: 'Onboarded on Growth Tier. First month retainer paid. Kickoff call scheduled.',
-    device: 'Desktop (Windows / Edge)',
-    referrer: 'LinkedIn Referral',
-    estimatedValue: '₹90,000 / mo'
-  },
-  {
-    id: 'lead_105',
-    name: 'Rajeev Malhotra',
-    location: 'Gurugram',
-    email: '',
-    contact: '+91 99100 23812',
-    sourcePage: '/gurugram',
-    interest: 'Local SEO & PPC for Real Estate Firm',
-    status: 'new',
-    timestamp: new Date(Date.now() - 1000 * 60 * 60 * 30).toISOString(),
-    notes: 'Requested urgent WhatsApp consultation regarding commercial leads.',
-    device: 'Mobile (OnePlus 12)',
-    referrer: 'Google Local Search',
-    estimatedValue: '₹1,20,000 / mo'
-  }
-];
+// Clean out legacy fake seed leads (Dr. Ananya, Vikramaditya, Mohit Verma, etc.)
+if (typeof window !== 'undefined') {
+  try {
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+  } catch {}
+}
+
+let memoryCachedLeads: InboundLead[] = [];
+
+export function normalizeLeadModel(raw: any): InboundLead {
+  const nowIso = new Date().toISOString();
+  return {
+    id: raw.id || `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    name: (raw.name || '').trim(),
+    location: (raw.location || '').trim() || 'Undisclosed Location',
+    email: raw.email ? String(raw.email).trim() : undefined,
+    contact: raw.contact ? String(raw.contact).trim() : undefined,
+    sourcePage: raw.sourcePage || '/',
+    interest: raw.interest || 'General Growth Inquiry',
+    status: raw.status || 'new',
+    timestamp: raw.createdAt || raw.timestamp || nowIso,
+    notes: raw.notes || '',
+    device: raw.device || '',
+    referrer: raw.referrer || '',
+    estimatedValue: raw.estimatedValue || '',
+    createdAt: raw.createdAt || raw.timestamp || nowIso,
+    updatedAt: raw.updatedAt || nowIso,
+  };
+}
 
 export function getInboundLeads(): InboundLead[] {
+  if (typeof window === 'undefined') return memoryCachedLeads;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_LEADS));
-      return INITIAL_LEADS;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        // Filter out any legacy mock leads
+        const real = parsed.filter(l => !String(l.id).startsWith('lead_10'));
+        return real.map(normalizeLeadModel);
+      }
     }
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : INITIAL_LEADS;
   } catch (e) {
     console.warn('[marketingLeads] Failed to read from localStorage:', e);
-    return INITIAL_LEADS;
   }
+  return memoryCachedLeads;
 }
 
 export function saveInboundLeads(leads: InboundLead[]): void {
+  const normalized = leads.map(normalizeLeadModel);
+  memoryCachedLeads = [...normalized];
+  if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(leads));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
   } catch (e) {
     console.warn('[marketingLeads] Failed to save to localStorage:', e);
   }
 }
 
-export function createInboundLead(data: {
+/**
+ * Creates and persists a new lead to Cloudflare D1 and Local Cache
+ */
+export async function createInboundLead(data: {
   name: string;
   location: string;
   email?: string;
@@ -131,11 +104,12 @@ export function createInboundLead(data: {
   sourcePage?: string;
   interest?: string;
   notes?: string;
-}): InboundLead {
+}): Promise<InboundLead> {
   const all = getInboundLeads();
+  const nowIso = new Date().toISOString();
 
-  const newLead: InboundLead = {
-    id: `lead_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+  const newLead: InboundLead = normalizeLeadModel({
+    id: `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
     name: data.name.trim(),
     location: data.location.trim() || 'Undisclosed Location',
     email: data.email?.trim() || undefined,
@@ -143,57 +117,144 @@ export function createInboundLead(data: {
     sourcePage: data.sourcePage || (typeof window !== 'undefined' ? window.location.pathname : '/'),
     interest: data.interest || 'General Digital Growth Inquiry',
     status: 'new',
-    timestamp: new Date().toISOString(),
+    timestamp: nowIso,
+    createdAt: nowIso,
+    updatedAt: nowIso,
     notes: data.notes || 'Inbound lead captured via website pop-up form.',
     device: typeof window !== 'undefined' && window.innerWidth < 768 ? 'Mobile' : 'Desktop',
     referrer: typeof document !== 'undefined' && document.referrer ? document.referrer : 'Direct Visit',
-    estimatedValue: '₹50,000 - ₹1,00,000'
-  };
+    estimatedValue: ''
+  });
 
-  const updated = [newLead, ...all];
+  // 1. Optimistic local cache update
+  const updated = [newLead, ...all.filter(l => l.id !== newLead.id)];
   saveInboundLeads(updated);
 
-  // Dispatch global window event for real-time dashboard reactivity
+  // 2. Persist to Cloudflare D1
+  try {
+    await cfCreateLead(newLead);
+  } catch (err) {
+    console.warn('[marketingLeads] Cloudflare D1 lead persistence notice:', err);
+  }
+
+  // 3. Dispatch global window event for real-time reactivity
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('digiexplode_new_lead', { detail: newLead }));
+    window.dispatchEvent(new CustomEvent('digiexplode_leads_updated'));
   }
 
   return newLead;
 }
 
-export function updateLeadStatus(id: string, status: InboundLead['status']): void {
+export async function updateLeadStatus(id: string, status: InboundLead['status']): Promise<void> {
   const all = getInboundLeads();
-  const updated = all.map(l => (l.id === id ? { ...l, status } : l));
+  const nowIso = new Date().toISOString();
+  const updated = all.map(l => (l.id === id ? { ...l, status, updatedAt: nowIso } : l));
   saveInboundLeads(updated);
+
+  try {
+    await cfUpdateLead(id, { status, updatedAt: nowIso });
+  } catch (err) {
+    console.warn('[marketingLeads] Cloudflare D1 lead status update notice:', err);
+  }
+
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('digiexplode_leads_updated'));
   }
 }
 
-export function updateLeadNotes(id: string, notes: string): void {
+export async function updateLeadNotes(id: string, notes: string): Promise<void> {
   const all = getInboundLeads();
-  const updated = all.map(l => (l.id === id ? { ...l, notes } : l));
+  const nowIso = new Date().toISOString();
+  const updated = all.map(l => (l.id === id ? { ...l, notes, updatedAt: nowIso } : l));
   saveInboundLeads(updated);
+
+  try {
+    await cfUpdateLead(id, { notes, updatedAt: nowIso });
+  } catch (err) {
+    console.warn('[marketingLeads] Cloudflare D1 lead notes update notice:', err);
+  }
+
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('digiexplode_leads_updated'));
   }
 }
 
-export function deleteInboundLead(id: string): void {
+export async function deleteInboundLead(id: string): Promise<void> {
   const all = getInboundLeads();
   const updated = all.filter(l => l.id !== id);
   saveInboundLeads(updated);
+
+  try {
+    await cfDeleteLead(id);
+  } catch (err) {
+    console.warn('[marketingLeads] Cloudflare D1 lead deletion notice:', err);
+  }
+
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('digiexplode_leads_updated'));
   }
+}
+
+/**
+ * Real-time subscription to canonical leads from Cloudflare D1
+ * Polling interval: 5 seconds, with tab focus & visibility instant sync.
+ */
+export function subscribeToCanonicalLeads(
+  onUpdate: (leads: InboundLead[]) => void
+): () => void {
+  let cancelled = false;
+
+  // 1. Initial cached emission (0ms)
+  onUpdate(getInboundLeads());
+
+  // 2. Fetch authoritative list from Cloudflare D1
+  const syncWithD1 = async () => {
+    if (cancelled) return;
+    try {
+      const remoteLeads = await cfGetLeads();
+      if (!Array.isArray(remoteLeads) || cancelled) return;
+
+      const normalized = remoteLeads.map(normalizeLeadModel);
+      saveInboundLeads(normalized);
+      if (!cancelled) onUpdate(normalized);
+    } catch (err) {
+      console.warn('[marketingLeads] D1 leads sync notice:', err);
+    }
+  };
+
+  syncWithD1();
+
+  // 3. Polling every 5 seconds
+  const interval = setInterval(syncWithD1, 5000);
+
+  // 4. Focus/visibility instant sync
+  const handleFocus = () => {
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+    syncWithD1();
+  };
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('visibilitychange', handleFocus);
+  }
+
+  return () => {
+    cancelled = true;
+    clearInterval(interval);
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('visibilitychange', handleFocus);
+    }
+  };
 }
 
 export function exportLeadsToCsv(leads: InboundLead[]): void {
   const headers = ['ID', 'Name', 'Location', 'Email', 'Contact', 'Source Page', 'Interest', 'Status', 'Timestamp', 'Notes'];
   const rows = leads.map(l => [
     `"${l.id}"`,
-    `"${l.name.replace(/"/g, '""')}"`,
-    `"${l.location.replace(/"/g, '""')}"`,
+    `"${(l.name || '').replace(/"/g, '""')}"`,
+    `"${(l.location || '').replace(/"/g, '""')}"`,
     `"${(l.email || '').replace(/"/g, '""')}"`,
     `"${(l.contact || '').replace(/"/g, '""')}"`,
     `"${l.sourcePage}"`,
